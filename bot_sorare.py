@@ -10,20 +10,76 @@ app = Flask(__name__)
 
 # Configurazione API Sorare GraphQL
 SORARE_API_URL = "https://api.sorare.com/graphql"
-# Prende il token dalle variabili d'ambiente di Render
-SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN")
 
-@app.route('/')
-def home():
-    return "La sentinella di San Drino Kulenovic è attiva e vigile!"
+# Credenziali prese dalle variabili d'ambiente di Render
+SORARE_EMAIL = os.getenv("SORARE_EMAIL")
+SORARE_PASSWORD = os.getenv("SORARE_PASSWORD")
 
-# Coda per gestire le offerte in ordine cronologico
-offerta_queue = Queue()
+# Variabile globale per salvare il token in memoria
+jwt_token = None
+
+def ottieni_token_jwt():
+    """Effettua il login automatico su Sorare usando email e password per ottenere il JWT."""
+    global jwt_token
+    if not SORARE_EMAIL or not SORARE_PASSWORD:
+        print("⚠️ ERRORE: SORARE_EMAIL o SORARE_PASSWORD non configurati nelle variabili d'ambiente!")
+        return None
+
+    # Mutazione GraphQL ufficiale di Sorare per il signIn
+    query_signin = """
+        mutation SignIn($input: SignInInput!) {
+            signIn(input: $input) {
+                currentUser {
+                    jwtToken(duration: TWO_WEEKS) {
+                        token
+                        expiredAt
+                    }
+                }
+                errors {
+                    message
+                }
+            }
+        }
+    """
+    
+    variables = {
+        "input": {
+            "email": SORARE_EMAIL,
+            "password": SORARE_PASSWORD
+        }
+    }
+
+    try:
+        print("Tentativo di accesso a Sorare in corso...")
+        response = requests.post(SORARE_API_URL, json={"query": query_signin, "variables": variables}, timeout=10)
+        data = response.json()
+        
+        errors = data.get("data", {}).get("signIn", {}).get("errors", [])
+        if errors:
+            print(f"❌ Errore durante il login su Sorare: {errors}")
+            return None
+            
+        token = data.get("data", {}).get("signIn", {}).get("currentUser", {}).get("jwtToken", {}).get("token")
+        if token:
+            print("✅ Login riuscito! Token JWT ottenuto con successo.")
+            jwt_token = token
+            return token
+        else:
+            print(f"❌ Impossibile estrarre il token dalla risposta: {data}")
+            return None
+    except Exception as e:
+        print(f"❌ Eccezione durante la richiesta di login: {e}")
+        return None
 
 def esegui_query_sorare(query, variables=None):
+    global jwt_token
+    if not jwt_token:
+        # Se per qualche motivo il token non c'è, proviamo a riprenderlo
+        ottieni_token_jwt()
+
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {SORARE_TOKEN}"
+        "Authorization": f"Bearer {jwt_token}"
     }
     payload = {"query": query}
     if variables:
@@ -40,14 +96,19 @@ def esegui_query_sorare(query, variables=None):
         print(f"Eccezione durante la richiesta GraphQL: {e}")
         return None
 
+@app.route('/')
+def home():
+    return "La sentinella di San Drino Kulenovic è attiva e vigile!"
+
+# Coda per gestire le offerte in ordine cronologico
+offerta_queue = Queue()
+
 def processatore_offerte():
     while True:
         offerta = offerta_queue.get()
         try:
             print(f"Elaborazione offerta in corso: {offerta}")
             
-            # Estraiamo l'ID dell'offerta dal payload del webhook
-            # (Adattato sullo standard comune dei webhook di Sorare)
             offerta_id = offerta.get("payload", {}).get("id") or offerta.get("id")
             
             if not offerta_id:
@@ -56,8 +117,6 @@ def processatore_offerte():
 
             print(f"Tentativo di accettare l'offerta ID: {offerta_id}")
 
-            # Mutazione GraphQL di Sorare per accettare un'offerta
-            # (Nota: assicurati che il nome della mutazione corrisponda allo schema attuale di Sorare)
             mutazione_accetta = """
                 mutation AcceptOffer($input: AcceptOfferInput!) {
                     acceptOffer(input: $input) {
@@ -104,5 +163,8 @@ def webhook():
     return jsonify({"status": "error", "message": "Payload vuoto"}), 400
 
 if __name__ == '__main__':
+    # Al primo avvio esegue subito il login per testare le credenziali e prendere il token
+    ottieni_token_jwt()
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
