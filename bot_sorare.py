@@ -25,7 +25,6 @@ def ottieni_token_jwt():
         print("⚠️ ERRORE: SORARE_EMAIL o SORARE_PASSWORD non configurati nelle variabili d'ambiente!")
         return None
 
-    # Mutazione GraphQL ufficiale di Sorare per il signIn
     query_signin = """
         mutation SignIn($input: SignInInput!) {
             signIn(input: $input) {
@@ -71,10 +70,12 @@ def ottieni_token_jwt():
         print(f"❌ Eccezione durante la richiesta di login: {e}")
         return None
 
+# Eseguiamo il login immediatamente all'avvio del modulo (così Gunicorn lo legge subito)
+ottieni_token_jwt()
+
 def esegui_query_sorare(query, variables=None):
     global jwt_token
     if not jwt_token:
-        # Se per qualche motivo il token non c'è, proviamo a riprenderlo
         ottieni_token_jwt()
 
     headers = {
@@ -163,8 +164,5 @@ def webhook():
     return jsonify({"status": "error", "message": "Payload vuoto"}), 400
 
 if __name__ == '__main__':
-    # Al primo avvio esegue subito il login per testare le credenziali e prendere il token
-    ottieni_token_jwt()
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
