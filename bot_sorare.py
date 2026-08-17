@@ -1,86 +1,25 @@
+import os
 import time
 import threading
-import os
 import requests
 from queue import Queue
 from flask import Flask, request, jsonify
 
-# Inizializzazione Flask per tenere sveglio il bot su Render
+# Inizializzazione Flask
 app = Flask(__name__)
 
-# Configurazione API Sorare GraphQL
+# Configurazione API Sorare GraphQL e Token JWT
 SORARE_API_URL = "https://api.sorare.com/graphql"
-
-# Credenziali prese dalle variabili d'ambiente di Render
-SORARE_EMAIL = os.getenv("SORARE_EMAIL")
-SORARE_PASSWORD = os.getenv("SORARE_PASSWORD")
-
-# Variabile globale per salvare il token in memoria
-jwt_token = None
-
-def ottieni_token_jwt():
-    """Effettua il login automatico su Sorare usando email e password per ottenere il JWT."""
-    global jwt_token
-    if not SORARE_EMAIL or not SORARE_PASSWORD:
-        print("⚠️ ERRORE: SORARE_EMAIL o SORARE_PASSWORD non configurati nelle variabili d'ambiente!")
-        return None
-
-    query_signin = """
-        mutation SignIn($input: SignInInput!) {
-            signIn(input: $input) {
-                currentUser {
-                    jwtToken(duration: TWO_WEEKS) {
-                        token
-                        expiredAt
-                    }
-                }
-                errors {
-                    message
-                }
-            }
-        }
-    """
-    
-    variables = {
-        "input": {
-            "email": SORARE_EMAIL,
-            "password": SORARE_PASSWORD
-        }
-    }
-
-    try:
-        print("Tentativo di accesso a Sorare in corso...")
-        response = requests.post(SORARE_API_URL, json={"query": query_signin, "variables": variables}, timeout=10)
-        data = response.json()
-        
-        errors = data.get("data", {}).get("signIn", {}).get("errors", [])
-        if errors:
-            print(f"❌ Errore durante il login su Sorare: {errors}")
-            return None
-            
-        token = data.get("data", {}).get("signIn", {}).get("currentUser", {}).get("jwtToken", {}).get("token")
-        if token:
-            print("✅ Login riuscito! Token JWT ottenuto con successo.")
-            jwt_token = token
-            return token
-        else:
-            print(f"❌ Impossibile estrarre il token dalla risposta: {data}")
-            return None
-    except Exception as e:
-        print(f"❌ Eccezione durante la richiesta di login: {e}")
-        return None
-
-# Eseguiamo il login immediatamente all'avvio del modulo (così Gunicorn lo legge subito)
-ottieni_token_jwt()
+SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN")
 
 def esegui_query_sorare(query, variables=None):
-    global jwt_token
-    if not jwt_token:
-        ottieni_token_jwt()
+    if not SORARE_TOKEN:
+        print("⚠️ ERRORE: SORARE_JWT_TOKEN non configurato su Render!")
+        return None
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {jwt_token}"
+        "Authorization": f"Bearer {SORARE_TOKEN}"
     }
     payload = {"query": query}
     if variables:
@@ -99,68 +38,127 @@ def esegui_query_sorare(query, variables=None):
 
 @app.route('/')
 def home():
-    return "La sentinella di San Drino Kulenovic è attiva e vigile!"
+    return "La sentinella di San Drino Kulenovic è attiva con coda di sicurezza anti-sovraccarico!"
 
-# Coda per gestire le offerte in ordine cronologico
+# Coda protettiva per le offerte
 offerta_queue = Queue()
 
 def processatore_offerte():
     while True:
         offerta = offerta_queue.get()
         try:
-            print(f"Elaborazione offerta in corso: {offerta}")
+            print(f"🔄 Prelievo offerta dalla coda in corso...")
             
+            # Estraiamo l'ID dell'offerta dal webhook
             offerta_id = offerta.get("payload", {}).get("id") or offerta.get("id")
-            
             if not offerta_id:
-                print("⚠️ Impossibile trovare l'ID dell'offerta nel payload ricevuto.")
+                print("⚠️ Impossibile trovare l'ID dell'offerta.")
                 continue
 
-            print(f"Tentativo di accettare l'offerta ID: {offerta_id}")
-
-            mutazione_accetta = """
-                mutation AcceptOffer($input: AcceptOfferInput!) {
-                    acceptOffer(input: $input) {
-                        offer {
+            # Query per i dettagli dell'offerta
+            query_dettagli = """
+                Query GetOfferDetails($offerId: String!) {
+                    offer(id: $offerId) {
+                        id
+                        incomingCards {
                             id
-                            status
-                        }
-                        errors {
-                            message
+                            rarity
+                            name
+                            erc721Token {
+                                price
+                            }
+                            singleCardStats {
+                                hasRedCard
+                                hasYellowCard
+                            }
                         }
                     }
                 }
             """
             
-            variables = {
-                "input": {
-                    "offerId": offerta_id
-                }
-            }
-
-            risultato = esegui_query_sorare(mutazione_accetta, variables)
+            risultato_dettagli = esegui_query_sorare(query_dettagli, {"offerId": offerta_id})
             
-            if risultato:
-                print(f"Risposta da Sorare per l'offerta {offerta_id}: {risultato}")
-            else:
-                print(f"❌ Fallito l'invio della mutazione per l'offerta {offerta_id}")
+            if not risultato_dettagli:
+                print("❌ Impossibile recuperare i dettagli dell'offerta.")
+                continue
 
-            time.sleep(1)
+            offer_data = risultato_dettagli.get("data", {}).get("offer", {})
+            incoming_cards = offer_data.get("incomingCards", [])
+
+            # Valutiamo l'idoneità (Limited, max 0.50€, niente restrizioni/X)
+            offerta_idonea = True
+            carte_idonee_ids = []
+
+            if not incoming_cards:
+                offerta_idonea = False
+            
+            for card in incoming_cards:
+                card_id = card.get("id")
+                rarita = card.get("rarity")
+                token_info = card.get("erc721Token") or {}
+                prezzo = token_info.get("price") or 0.0
+                stats = card.get("singleCardStats") or {}
+                has_red = stats.get("hasRedCard", False)
+                
+                if rarita != "limited" or prezzo > 0.50 or has_red:
+                    offerta_idonea = False
+                    break
+                
+                carte_idonee_ids.append(card_id)
+
+            # Azione: Rifiuto se non idonea, Controproposta se idonea
+            if not offerta_idonea:
+                print("🚫 Offerta NON idonea. Rifiuto in corso...")
+                mutazione = """
+                    mutation RejectOffer($input: RejectOfferInput!) {
+                        rejectOffer(input: $input) {
+                            offer { id status }
+                            errors { message }
+                        }
+                    }
+                """
+                risultato_azione = esegui_query_sorare(mutazione, {"input": {"offerId": offerta_id}})
+                print(f"Risposta rifiuto: {risultato_azione}")
+            else:
+                num_carte = len(carte_idonee_ids)
+                totale_euro = num_carte * 0.20
+                print(f"✅ Offerta IDONEA! Invio controproposta: offro {totale_euro}€ ({num_carte} carte x 0.20€) rimuovendo Kulenovic.")
+                
+                mutazione_counter = """
+                    mutation CounterOffer($input: CounterOfferInput!) {
+                        counterOffer(input: $input) {
+                            offer { id status }
+                            errors { message }
+                        }
+                    }
+                """
+                variables = {
+                    "input": {
+                        "initialOfferId": offerta_id,
+                    }
+                }
+                risultato_azione = esegui_query_sorare(mutazione_counter, variables)
+                print(f"Risposta controproposta: {risultato_azione}")
+
+            # ⏱️ Pausa di sicurezza di 3 secondi tra un'offerta e l'altra per evitare blocchi da parte di Sorare
+            print("⏳ Pausa di sicurezza di 3 secondi...")
+            time.sleep(3)
+
         except Exception as e:
-            print(f"Errore durante l'elaborazione dell'offerta: {e}")
+            print(f"Errore durante l'elaborazione dell'offerta in coda: {e}")
         finally:
             offerta_queue.task_done()
 
-# Avvia il worker in background per la coda
+# Avvia il worker in background
 threading.Thread(target=processatore_offerte, daemon=True).start()
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
     if data:
-        print(f"Ricevuta nuova notifica webhook: {data}")
+        print(f"📥 Ricevuta nuova notifica webhook, messa in coda di sicurezza.")
         offerta_queue.put(data)
-        return jsonify({"status": "success", "message": "Offerta ricevuta e messa in coda"}), 200
+        return jsonify({"status": "success", "message": "Offerta messa in coda"}), 200
     return jsonify({"status": "error", "message": "Payload vuoto"}), 400
 
 if __name__ == '__main__':
