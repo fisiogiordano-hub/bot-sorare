@@ -42,8 +42,9 @@ def esegui_query_graphql(query, variables=None):
 
 def worker_offerte():
     """
-    Processa le offerte in arrivo una alla volta, in modo ordinato,
-    applicando i filtri, escludendo San Drino e rispondendo in pochi secondi.
+    Processa le offerte in arrivo: verifica la presenza di Kulenovic,
+    valuta le carte dell'altro manager, rifiuta se non idonee o 
+    invia controproposta togliendo Kulenovic e offrendo 0,20€ per carta.
     """
     while True:
         offerta = offerta_queue.get()
@@ -53,23 +54,18 @@ def worker_offerte():
         try:
             print(f"[LOG] Elaborazione offerta in corso: {offerta}")
             
-            # Estrae l'ID dell'offerta dal webhook ricevuto
-            # (Nota: a seconda del payload del webhook di Sorare, l'id potrebbe trovarsi in percorsi diversi, es. offerta.get('id'))
             offerta_id = offerta.get("id")
             
             if not offerta_id:
                 print("[ERRORE] ID offerta non trovato nel payload del webhook.")
                 continue
 
-            # --- LOGICA DEL BOT & FILTRI ---
-            ha_san_drino = False
-            ha_restrizioni = False  # Controllo per le carte con la X rossa e blu
-            tutte_sotto_soglia = True
-            
-            # Esempio di query GraphQL per verificare i dettagli dell'offerta (da adattare al vostro schema esatto)
+            # Query GraphQL estesa per leggere sia il lato nostro (viewerSide) che quello dell'offerente (senderSide)
+            # Nota: la struttura dei campi offerta/senderSide/viewerSide riflette lo schema standard Sorare GraphQL
             query_dettagli = """
             query($id: ID!) {
               offer(id: $id) {
+                id
                 viewerSide {
                   assets {
                     __typename
@@ -77,7 +73,16 @@ def worker_offerte():
                       slug
                       name
                       rarity
-                      price
+                    }
+                  }
+                }
+                senderSide {
+                  assets {
+                    __typename
+                    ... on Card {
+                      slug
+                      name
+                      rarity
                       isLocked
                       restrictions {
                         id
@@ -91,40 +96,84 @@ def worker_offerte():
             
             risultato = esegui_query_graphql(query_dettagli, {"id": offerta_id})
             
+            # Variabili di controllo
+            contiene_kulenovic = False
+            carte_validita_ok = True
+            numero_carte_da_comprare = 0
+            
             if risultato and "data" in risultato and risultato["data"]["offer"]:
-                assets = risultato["data"]["offer"]["viewerSide"]["assets"]
+                offer_data = risultato["data"]["offer"]
                 
-                for asset in assets:
+                # 1. Controlla se nel nostro lato (viewerSide) è presente Kulenovic
+                viewer_assets = offer_data.get("viewerSide", {}).get("assets", [])
+                for asset in viewer_assets:
                     if asset.get("__typename") == "Card":
-                        nome_giocatore = asset.get("name", "")
-                        prezzo = asset.get("price", 0) or 0
+                        nome_carta = asset.get("name", "")
+                        if "Kulenovic" in nome_carta:
+                            contiene_kulenovic = True
+                
+                # 2. Se non c'è Kulenovic, ignoriamo completamente l'offerta
+                if not contiene_kulenovic:
+                    print(f"[LOG] Offerta ignorata: non è indirizzata alla carta di Kulenovic.")
+                    continue
+                
+                print(f"[LOG] Offerta intercettata su Kulenovic! Analizzo le carte dell'altro manager...")
+                
+                # 3. Analizziamo le carte offerte dall'altra parte (senderSide)
+                sender_assets = offer_data.get("senderSide", {}).get("assets", [])
+                for asset in sender_assets:
+                    if asset.get("__typename") == "Card":
                         is_locked = asset.get("isLocked", False)
                         restrizioni = asset.get("restrictions", [])
                         
-                        # 1. Esclude San Drino Kulenovic
-                        if "San Drino Kulenovic" in nome_giocatore:
-                            ha_san_drino = True
-                        
-                        # 2. Controlla restrizioni o blocchi (X rossa e blu / isLocked)
+                        # Se la carta ha blocchi o restrizioni (es. X rossa/blu), non è idonea
                         if is_locked or len(restrizioni) > 0:
-                            ha_restrizioni = True
-                            
-                        # 3. Filtro prezzo (sotto i 0.50€)
-                        if prezzo > 0.50:
-                            tutte_sotto_soglia = False
+                            carte_validita_ok = False
+                        else:
+                            numero_carte_da_comprare += 1
 
-            # Decisione finale basata sui filtri
-            if ha_san_drino or ha_restrizioni or not tutte_sotto_soglia:
-                print(f"[LOG] Offerta non idonea (San Drino: {ha_san_drino}, Restrizioni X: {ha_restrizioni}, Prezzo OK: {tutte_sotto_soglia}). Rifiuto in corso...")
-                # TODO: Inserire qui la mutazione GraphQL per rifiutare l'offerta (rejectOffer)
+            # --- DECISIONE FINALE ---
+            if not carte_validita_ok or numero_carte_da_comprare == 0:
+                print(f"[LOG] Offerta non idonea (Carte valide: {numero_carte_da_comprare}, Restrizioni ok: {carte_validita_ok}). Rifiuto immediato...")
+                
+                # MUTAZIONE PER RIFIUTARE L'OFFERTA (rejectOffer)
+                mutation_reject = """
+                mutation($input: RejectOfferInput!) {
+                  rejectOffer(input: $input) {
+                    errors {
+                      message
+                    }
+                  }
+                }
+                """
+                res_reject = esegui_query_graphql(mutation_reject, {"input": {"offerId": offerta_id}})
+                print(f"[LOG] Risultato rifiuto: {res_reject}")
+                
             else:
-                print(f"[LOG] Offerta idonea! Invio controproposta a 0,20€ per carta...")
-                # TODO: Inserire qui la mutazione GraphQL per la controproposta (counterOffer)
-            
+                prezzo_totale = numero_carte_da_comprare * 0.20
+                print(f"[LOG] Offerta idonea! Trovate {numero_carte_da_comprare} carte valide. Invio controproposta a {prezzo_totale}€ (rimuovendo Kulenovic)...")
+                
+                # NOTA: Per fare la controproposta (counterOffer) su Sorare, 
+                # dovrai strutturare il payload con le carte dell'altro utente e l'importo in denaro (wei/EUR), 
+                # assicurandoti di NON includere la tua carta di Kulenovic.
+                
+                # Esempio di struttura mutazione counterOffer (da adattare al tuo schema esatto di mutazione):
+                mutation_counter = """
+                mutation($input: CounterOfferInput!) {
+                  counterOffer(input: $input) {
+                    errors {
+                      message
+                    }
+                  }
+                }
+                """
+                # Qui andranno passati gli ID delle carte dell'offerta e l'offerta in denaro
+                # input_data = { "offerId": offerta_id, "amount": prezzo_totale, ... }
+                # res_counter = esegui_query_graphql(mutation_counter, {"input": input_data})
+                
             # Pausa di sicurezza per evitare il Rate Limit di Sorare
             time.sleep(2)
-            
-            print(f"[LOG] Offerta elaborata con successo!")
+            print(f"[LOG] Elaborazione completata.")
             
         except Exception as e:
             print(f"[ERRORE] Errore nell'elaborazione dell'offerta: {e}")
@@ -135,7 +184,6 @@ def worker_offerte():
 # Avvia il worker in background in un thread separato
 t = threading.Thread(target=worker_offerte, daemon=True)
 t.start()
-
 
 # --- ROTTA WEBHOOK PER SORARE ---
 @app.route('/webhook', methods=['POST'])
@@ -154,13 +202,12 @@ def webhook_sorare():
         # Mette l'offerta in coda per essere elaborata dal worker
         offerta_queue.put(dati_offerta)
         
-        # Risponde subito a Sorare confermando la ricezione (evita timeout)
+        # Risponde subito a Sorare confermando la ricezione
         return jsonify({"status": "successo", "messaggio": "Offerta messa in coda"}), 200
 
     except Exception as e:
         print(f"[ERRORE WEBHOOK]: {e}")
         return jsonify({"status": "errore", "dettaglio": str(e)}), 500
-
 
 # Funzione principale per avviare l'app web e il server
 if __name__ == "__main__":
