@@ -33,6 +33,11 @@ def esegui_query_sorare(query, variables=None):
         print(f"❌ Eccezione durante la richiesta HTTP a Sorare: {e}")
         return None
 
+# Rotta di base aggiunta per evitare l'errore 404 su UptimeRobot
+@app.route('/', methods=['GET'])
+def home():
+    return "Bot Sorare è attivo e operativo!", 200
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
