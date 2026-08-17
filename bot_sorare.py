@@ -54,3 +54,15 @@ def processatore_offerte():
 
 # Avvia il worker in background per la coda
 threading.Thread(target=processatore_offerte, daemon=True).start()
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.json
+    if data:
+        print(f"Ricevuta nuova notifica webhook: {data}")
+        offerta_queue.put(data)
+        return jsonify({"status": "success", "message": "Offerta ricevuta e messa in coda"}), 200
+    return jsonify({"status": "error", "message": "Payload vuoto"}), 400
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
