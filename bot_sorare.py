@@ -20,7 +20,6 @@ def home():
 # Coda per gestire le offerte in ordine cronologico
 offerta_queue = Queue()
 
-# Qui sotto andranno le funzioni di controllo e gestione delle offerte
 def esegui_query_sorare(query, variables=None):
     headers = {
         "Content-Type": "application/json",
@@ -40,12 +39,52 @@ def esegui_query_sorare(query, variables=None):
     except Exception as e:
         print(f"Eccezione durante la richiesta GraphQL: {e}")
         return None
+
 def processatore_offerte():
     while True:
         offerta = offerta_queue.get()
         try:
             print(f"Elaborazione offerta in corso: {offerta}")
-            # Qui inseriremo la logica di accettazione/rifiuto tramite GraphQL
+            
+            # Estraiamo l'ID dell'offerta dal payload del webhook
+            # (Adattato sullo standard comune dei webhook di Sorare)
+            offerta_id = offerta.get("payload", {}).get("id") or offerta.get("id")
+            
+            if not offerta_id:
+                print("⚠️ Impossibile trovare l'ID dell'offerta nel payload ricevuto.")
+                continue
+
+            print(f"Tentativo di accettare l'offerta ID: {offerta_id}")
+
+            # Mutazione GraphQL di Sorare per accettare un'offerta
+            # (Nota: assicurati che il nome della mutazione corrisponda allo schema attuale di Sorare)
+            mutazione_accetta = """
+                mutation AcceptOffer($input: AcceptOfferInput!) {
+                    acceptOffer(input: $input) {
+                        offer {
+                            id
+                            status
+                        }
+                        errors {
+                            message
+                        }
+                    }
+                }
+            """
+            
+            variables = {
+                "input": {
+                    "offerId": offerta_id
+                }
+            }
+
+            risultato = esegui_query_sorare(mutazione_accetta, variables)
+            
+            if risultato:
+                print(f"Risposta da Sorare per l'offerta {offerta_id}: {risultato}")
+            else:
+                print(f"❌ Fallito l'invio della mutazione per l'offerta {offerta_id}")
+
             time.sleep(1)
         except Exception as e:
             print(f"Errore durante l'elaborazione dell'offerta: {e}")
@@ -54,6 +93,7 @@ def processatore_offerte():
 
 # Avvia il worker in background per la coda
 threading.Thread(target=processatore_offerte, daemon=True).start()
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
