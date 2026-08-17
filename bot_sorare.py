@@ -21,3 +21,22 @@ def home():
 offerta_queue = Queue()
 
 # Qui sotto andranno le funzioni di controllo e gestione delle offerte
+def esegui_query_sorare(query, variables=None):
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {SORARE_TOKEN}"
+    }
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    
+    try:
+        response = requests.post(SORARE_API_URL, json=payload, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Errore API Sorare: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"Eccezione durante la richiesta GraphQL: {e}")
+        return None
