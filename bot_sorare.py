@@ -1,7 +1,7 @@
 import time
 import threading
 from queue import Queue
-from flask import Flask
+from flask import Flask, request, jsonify
 
 # Inizializzazione Flask per tenere sveglio il bot su Render
 app = Flask(__name__)
@@ -24,13 +24,15 @@ def worker_offerte():
             break
         
         try:
-            print(f"[LOG] Elaborazione offerta in corso...")
+            print(f"[LOG] Elaborazione offerta in corso: {offerta}")
             
             # --- LOGICA DEL BOT ---
             # 1. Esclude SEMPRE la carta di San Drino Kulenovic dalla controproposta.
             # 2. Filtra le carte idonee (Limited, sotto i 0.50€, senza restrizioni).
             # 3. Se ci sono carte idonee, prepara la controproposta offrendo 0,20€ per ciascuna.
             # 4. Se l'offerta non è valida, rifiuta in blocco.
+            
+            # (Qui inseriremo le chiamate alle API GraphQL di Sorare per accettare/rifiutare)
             
             # Esempio di pausa di sicurezza per evitare il Rate Limit di Sorare
             time.sleep(2)
@@ -41,6 +43,7 @@ def worker_offerte():
             print(f"[ERRORE] Errore nell'elaborazione dell'offerta: {e}")
             
         finally:
+        
             offerta_queue.task_done()
 
 # Avvia il worker in background in un thread separato
@@ -48,9 +51,34 @@ t = threading.Thread(target=worker_offerte, daemon=True)
 t.start()
 
 
+# --- NUOVA ROTTA: WEBHOOK PER SORARE ---
+@app.route('/webhook', methods=['POST'])
+def webhook_sorare():
+    """
+    Riceve il segnale in tempo reale da Sorare quando arriva un'offerta.
+    """
+    try:
+        # Cattura i dati inviati da Sorare sotto forma di JSON
+        dati_offerta = request.json
+        
+        if not dati_offerta:
+            return jsonify({"status": "errore", "messaggio": "Nessun dato ricevuto"}), 400
+        
+        print(f"[WEBHOOK] Ricevuta nuova offerta in tempo reale!")
+        
+        # Mette l'offerta in coda per essere elaborata dal worker
+        offerta_queue.put(dati_offerta)
+        
+        # Risponde subito a Sorare confermando la ricezione (evita timeout)
+        return jsonify({"status": "successo", "messaggio": "Offerta messa in coda"}), 200
+
+    except Exception as e:
+        print(f"[ERRORE WEBHOOK]: {e}")
+        return jsonify({"status": "errore", "dettaglio": str(e)}), 500
+
+
 # Funzione principale per avviare l'app web e il server
 if __name__ == "__main__":
-    # Render assegna una porta automatica tramite variabile d'ambiente, altrimenti usa la 5000
     import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
