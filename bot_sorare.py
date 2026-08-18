@@ -31,7 +31,6 @@ def esegui_query_sorare(query, variables=None):
 def elabora_offerta_specifica(offerta_id, kul_id):
     print(f"⚡ Elaborazione istantanea offerta {offerta_id} per la carta ID: {kul_id}")
     
-    # Query per analizzare i dettagli dell'offerta specifica
     query_dettaglio = """
         Query GetOfferDetails($id: ID!) {
             offer(id: $id) {
@@ -107,7 +106,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     else:
         num_carte = len(carte_idonee_ids)
         totale_euro = num_carte * 0.20
-        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta immediata: tolgo Kulenovic e invio {totale_euro}€.")
+        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta immediata.")
         
         mutazione_counter = """
             mutation CounterOffer($input: CounterOfferInput!) {
@@ -141,13 +140,11 @@ def webhook_offerta():
         return jsonify({"status": "error", "message": "KULENOVIC_ID non configurato"}), 500
         
     dati = request.get_json(silent=True) or {}
-    print(ricevuto := f"📥 Webhook ricevuto: {dati}")
+    print(f"📥 Webhook ricevuto: {dati}")
     
-    # Estrae l'ID dell'offerta dal payload del webhook (supportando vari formati standard)
     offerta_id = dati.get("offerId") or dati.get("id") or dati.get("data", {}).get("offerId")
     
     if offerta_id:
-        # Esegue immediatamente l'elaborazione senza attese
         elabora_offerta_specifica(offerta_id, KULENOVIC_ID)
         return jsonify({"status": "success", "message": "Offerta elaborata istantaneamente"}), 200
     else:
