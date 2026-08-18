@@ -1,9 +1,17 @@
 import os
 import time
+import threading
 import requests
+from flask import Flask
+
+app = Flask(__name__)
 
 SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
+
+@app.route('/')
+def home():
+    return "Bot Sorare operativo e in ascolto!"
 
 def esegui_query_sorare(query, variables=None):
     headers = {
@@ -22,7 +30,7 @@ def esegui_query_sorare(query, variables=None):
             print(f"❌ Errore API Sorare ({response.status_code}): {response.text}")
             return None
     except Exception as e:
-        print(f"❌ Eccezione durante la richiesta HTTP a Sorare: {e}")
+        print(f"❌ Eccezione durante la richiesta HTTP: {e}")
         return None
 
 def trova_id_kulenovic():
@@ -43,7 +51,6 @@ def trova_id_kulenovic():
     """
     risultato = esegui_query_sorare(query_inventario)
     if not risultato:
-        print("❌ Impossibile leggere l'inventario.")
         return None
     
     cards = risultato.get("data", {}).get("viewer", {}).get("cards", {}).get("nodes", [])
@@ -55,7 +62,7 @@ def trova_id_kulenovic():
             print(f"✅ Trovata carta di Kulenovic! ID ufficiale: {kulu_id}")
             return kulu_id
             
-    print("⚠️ Attenzione: Nessuna carta di Kulenovic trovata nel tuo inventario attivo.")
+    print("⚠️ Attenzione: Nessuna carta di Kulenovic trovata nel tuo inventario.")
     return None
 
 def controlla_offerte(kul_id):
@@ -102,12 +109,11 @@ def controlla_offerte(kul_id):
         offerta_id = offerta.get("id")
         outgoing_cards = offerta.get("outgoingCards", [])
         
-        # Verifica se l'offerta richiede la carta di Kulenovic
         kulu_richiesto = any(card.get("id") == kul_id for card in outgoing_cards)
         if not kulu_richiesto:
             continue
 
-        print(f"🎯 Segnale Kulenovic rilevato nell'offerta {offerta_id}! Analizzo...")
+        print(f"🎯 Segnale Kulenovic rilevato nell'offerta {offerta_id}!")
 
         incoming_cards = offerta.get("incomingCards", [])
         carte_idonee_ids = []
@@ -121,7 +127,6 @@ def controlla_offerte(kul_id):
             player_info = card.get("player") or {}
             active_club = player_info.get("activeClub") or {}
             competitions = active_club.get("activeCompetitions") or []
-            
             campionato_coperto = any(comp.get("supported", False) for comp in competitions) if competitions else False
             
             if rarita == "limited" and prezzo <= 0.50 and campionato_coperto:
@@ -166,25 +171,26 @@ def controlla_offerte(kul_id):
             }
             esegui_query_sorare(mutazione_counter, variables)
 
-def avvia_bot():
-    print("🤖 Bot Sorare avviato in modalità polling autonomo.")
+def loop_background():
     kul_id = None
-    
-    # Cerca l'ID finché non lo trova
     while not kul_id:
         kul_id = trova_id_kulenovic()
         if not kul_id:
-            print("⏳ Riprovo a cercare la carta tra 10 secondi...")
-            time.sleep(10)
+            time.sleep(15)
 
-    # Loop principale di ascolto offerte
     while True:
         try:
             controlla_offerte(kul_id)
         except Exception as e:
-            print(f"❌ Errore nel ciclo di controllo: {e}")
-        
-        time.sleep(30) # Controlla ogni 30 secondi
+            print(f"❌ Errore nel ciclo: {e}")
+        time.sleep(30)
 
 if __name__ == '__main__':
-    avvia_bot()
+    # Avvia il controllo in background
+    t = threading.Thread(target=loop_background)
+    t.daemon = True
+    t.start()
+    
+    # Avvia Flask per mantenere aperta la porta su Render
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
