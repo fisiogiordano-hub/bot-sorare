@@ -89,12 +89,14 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         player_info = card.get("player") or {}
         active_club = player_info.get("activeClub") or {}
         competitions = active_club.get("activeCompetitions") or []
-        campionato_coperto = any(comp.get("supported", False) for comp in competitions) if competitions else False
+        
+        # Condizione aggiornata: TUTTE le competizioni attive devono essere supportate
+        campionato_coperto = all(comp.get("supported", False) for comp in competitions) if competitions else False
         
         if rarita == "limited" and prezzo <= 0.50 and campionato_coperto:
             carte_idonee_ids.append(card_id)
         else:
-            print(f"⚠️ Carta scartata (Rarità: {rarita}, Prezzo: {prezzo}€, Campionato coperto: {campionato_coperto})")
+            print(f"⚠️ Carta scartata (Rarità: {rarita}, Prezzo: {prezzo}€, Tutte le competizioni coperte: {campionato_coperto})")
 
     if not carte_idonee_ids:
         print("🚫 Nessuna carta idonea. Rifiuto offerta...")
@@ -110,7 +112,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     else:
         num_carte = len(carte_idonee_ids)
         totale_euro = num_carte * 0.20
-        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta.")
+        print(f"✅ Trovate {num_carte} carte idonee con competizioni interamente coperte! Invio controproposta.")
         
         mutazione_counter = """
             mutation CounterOffer($input: CounterOfferInput!) {
@@ -167,7 +169,7 @@ def monitor_offerte():
         
         time.sleep(15)
 
-# Avvio automatico del thread di monitoraggio indipendente da Gunicorn o Flask
+# Avvio automatico del thread di monitoraggio indipendente
 t = threading.Thread(target=monitor_offerte, daemon=True)
 t.start()
 
