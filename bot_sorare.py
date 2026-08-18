@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 import requests
 from flask import Flask, request, jsonify
 
@@ -130,6 +132,38 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         risposta_counter = esegui_query_sorare(mutazione_counter, variables)
         print(f"Risposta controproposta: {risposta_counter}")
 
+def controlla_offerte_periodicamente():
+    """Controlla automaticamente le offerte pendenti su Sorare ogni 120 secondi."""
+    time.sleep(15) # Aspetta che il server si avvii del tutto
+    print("🔄 Avvio del sistema di monitoraggio automatico offerte in background...")
+    
+    query_offerte = """
+        Query GetPendingOffers {
+            viewer {
+                receivedOffers(status: pending) {
+                    nodes {
+                        id
+                    }
+                }
+            }
+        }
+    """
+    
+    while True:
+        try:
+            risultato = esegui_query_sorare(query_offerte)
+            if risultato:
+                offerte = risultato.get("data", {}).get("viewer", {}).get("receivedOffers", {}).get("nodes", [])
+                for offerta in offerte:
+                    offerta_id = offerta.get("id")
+                    if offerta_id:
+                        print(f"🔎 Trovata offerta pendente: {offerta_id}")
+                        elabora_offerta_specifica(offerta_id, KULENOVIC_ID)
+        except Exception as e:
+            print(f"⚠️ Errore nel controllo periodico: {e}")
+        
+        time.sleep(120) # Attende 2 minuti prima del prossimo controllo
+
 @app.route('/', methods=['GET'])
 def home():
     return "Bot Sorare Webhook operativo e in ascolto!"
@@ -151,5 +185,9 @@ def webhook_offerta():
         return jsonify({"status": "ignored", "message": "Nessun offerId valido nel payload"}), 200
 
 if __name__ == '__main__':
+    # Avvia il controllo automatico in background
+    t = threading.Thread(target=controlla_offerte_periodicamente, daemon=True)
+    t.start()
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
