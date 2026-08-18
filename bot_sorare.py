@@ -7,9 +7,9 @@ from flask import Flask
 app = Flask(__name__)
 
 SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
+KULENOVIC_ID = os.getenv("KULENOVIC_ID", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
-# Variabile globale per evitare duplicazioni di thread con Gunicorn
 bot_avviato = False
 
 def esegui_query_sorare(query, variables=None):
@@ -32,57 +32,8 @@ def esegui_query_sorare(query, variables=None):
         print(f"❌ Eccezione durante la richiesta HTTP: {e}")
         return None
 
-def trova_id_kulenovic():
-    print("🔍 Scansiono l'intero inventario (fino a 10.000 carte) per trovare Kulenovic...")
-    cursor = None
-    carte_esaminate = 0
-    
-    while carte_esaminate < 10000:
-        query_inventario = """
-            Query GetMyCards($after: String) {
-                viewer {
-                    cards(first: 100, after: $after) {
-                        pageInfo {
-                            hasNextPage
-                            endCursor
-                        }
-                        nodes {
-                            id
-                            player {
-                                displayName
-                            }
-                        }
-                    }
-                }
-            }
-        """
-        variables = {"after": cursor}
-        risultato = esegui_query_sorare(query_inventario, variables)
-        if not risultato:
-            break
-        
-        cards_data = risultato.get("data", {}).get("viewer", {}).get("cards", {})
-        cards = cards_data.get("nodes", [])
-        page_info = cards_data.get("pageInfo", {})
-        
-        for card in cards:
-            carte_esaminate += 1
-            player = card.get("player") or {}
-            name = player.get("displayName", "")
-            if "Kulenović" in name or "Kulenovic" in name:
-                kulu_id = card.get("id")
-                print(f"✅ Trovata carta di Kulenovic dopo aver scansionato {carte_esaminate} carte! ID ufficiale: {kulu_id}")
-                return kulu_id
-        
-        if not page_info.get("hasNextPage"):
-            break
-        cursor = page_info.get("endCursor")
-            
-    print("⚠️ Attenzione: Nessuna carta di Kulenovic trovata nell'inventario.")
-    return None
-
 def controlla_offerte(kul_id):
-    print("🔄 Controllo offerte in arrivo...")
+    print(f"🔄 Controllo offerte in arrivo per la carta ID: {kul_id}...")
     query_offerte = """
         Query GetReceivedOffers {
             viewer {
@@ -188,15 +139,14 @@ def controlla_offerte(kul_id):
             esegui_query_sorare(mutazione_counter, variables)
 
 def loop_background():
-    kul_id = None
-    while not kul_id:
-        kul_id = trova_id_kulenovic()
-        if not kul_id:
-            time.sleep(30)
-
+    if not KULENOVIC_ID:
+        print("❌ Errore critico: Variabile KULENOVIC_ID non impostata su Render!")
+        return
+    
+    print(f"✅ ID Kulenovic caricato correttamente: {KULENOVIC_ID}")
     while True:
         try:
-            controlla_offerte(kul_id)
+            controlla_offerte(KULENOVIC_ID)
         except Exception as e:
             print(f"❌ Errore nel ciclo: {e}")
         time.sleep(30)
