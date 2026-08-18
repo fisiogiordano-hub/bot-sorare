@@ -33,7 +33,8 @@ def esegui_query_sorare(query, variables=None):
         return None
 
 def elabora_offerta_specifica(offerta_id, kul_id):
-    print(f"⚡ Elaborazione offerta {offerta_id} per la carta ID: {kul_id}")
+    print(f"⚡ [INIZIO] Elaborazione offerta {offerta_id}")
+    print(f"🔑 [DEBUG] ID Kulenovic usato dal bot in questo momento: '{kul_id}'")
     
     query_dettaglio = """
         Query GetOfferDetails($id: ID!) {
@@ -73,9 +74,11 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     print(f"📄 Stato offerta corrente: {offerta.get('status')}")
     
     outgoing_cards = offerta.get("outgoingCards", [])
+    print(f"📤 Carte in uscita dall'offerta: {[c.get('id') for c in outgoing_cards]}")
+    
     kulu_richiesto = any(card.get("id") == kul_id for card in outgoing_cards)
     if not kulu_richiesto:
-        print(f"⚠️ La carta di Kulenovic non è inclusa nell'offerta {offerta_id}. (ID cercato: {kul_id})")
+        print(f"⚠️ ATTENZIONE: La carta di Kulenovic ({kul_id}) NON corrisponde a nessuna delle carte in uscita di questa offerta!")
         return
 
     print(f"🎯 Segnale Kulenovic confermato nell'offerta {offerta_id}!")
@@ -141,10 +144,8 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         print(f"Risposta controproposta: {risposta_counter}")
 
 def monitor_offerte():
-    """Controlla le offerte pendenti regolarmente con log di debug."""
     time.sleep(5)
     print("🔄 [DEBUG] Avvio ciclo di monitoraggio offerte Sorare...")
-    
     query_offerte = """
         Query GetPendingOffers {
             viewer {
@@ -156,7 +157,6 @@ def monitor_offerte():
             }
         }
     """
-    
     while True:
         try:
             risultato = esegui_query_sorare(query_offerte)
@@ -172,10 +172,8 @@ def monitor_offerte():
                             threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
         except Exception as e:
             print(f"⚠️ Errore critico nel ciclo di monitoraggio: {e}")
-        
         time.sleep(15)
 
-# Avvio del thread di monitoraggio
 t = threading.Thread(target=monitor_offerte, daemon=True)
 t.start()
 
@@ -183,12 +181,11 @@ t.start()
 def home():
     return "Bot Sorare operativo e in esecuzione!"
 
-# NUOVA ROTTA DI TEST MANUALE: ti permette di testare un'offerta al volo senza aspettare
 @app.route('/test/<offerta_id>', methods=['GET'])
 def test_offerta(offerta_id):
     print(f"🧪 Test manuale avviato via web per l'offerta: {offerta_id}")
     threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
-    return jsonify({"status": "Test avviato", "offerta_id": offerta_id})
+    return jsonify({"status": "Test avviato", "offerta_id": offerta_id, "kul_id_usato": KULENOVIC_ID})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
