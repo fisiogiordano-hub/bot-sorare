@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 import requests
 from flask import Flask, request, jsonify
 
@@ -7,6 +9,9 @@ app = Flask(__name__)
 SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
+
+# Memoria per evitare di elaborare la stessa offerta più volte
+offerte_gia_gestite = set()
 
 def esegui_query_sorare(query, variables=None):
     headers = {
@@ -130,26 +135,57 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         risposta_counter = esegui_query_sorare(mutazione_counter, variables)
         print(f"Risposta controproposta: {risposta_counter}")
 
+def monitor_offerte_live():
+    """Controlla le offerte ogni 3 secondi per una risposta praticamente istantanea."""
+    time.sleep(10)
+    print("🚀 Monitoraggio live Sorare avviato (controllo ogni 3 secondi)...")
+    
+    query_offerte = """
+        Query GetPendingOffers {
+            viewer {
+                receivedOffers(status: pending) {
+                    nodes {
+                        id
+                    }
+                }
+            }
+        }
+    """
+    
+    while True:
+        try:
+            risultato = esegui_query_sorare(query_offerte)
+            if risultato:
+                offerte = risultato.get("data", {}).get("viewer", {}).get("receivedOffers", {}).get("nodes", [])
+                for offerta in offerte:
+                    offerta_id = offerta.get("id")
+                    if offerta_id and offerta_id not in offerte_gia_gestite:
+                        print(f"⚡ Nuova offerta rilevata in tempo reale: {offerta_id}")
+                        offerte_gia_gestite.add(offerta_id)
+                        # Esegue l'elaborazione in un thread separato per non bloccare il ciclo
+                        threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
+        except Exception as e:
+            print(f"⚠️ Errore nel monitoraggio live: {e}")
+        
+        time.sleep(3)
+
 @app.route('/', methods=['GET'])
 def home():
-    return "Bot Sorare Webhook operativo e in ascolto!"
+    return "Bot Sorare Live operativo e in ascolto!"
 
 @app.route('/webhook', methods=['POST'])
 def webhook_offerta():
-    if not KULENOVIC_ID:
-        return jsonify({"status": "error", "message": "KULENOVIC_ID non configurato"}), 500
-        
     dati = request.get_json(silent=True) or {}
-    print(f"📥 Webhook ricevuto: {dati}")
-    
     offerta_id = dati.get("offerId") or dati.get("id") or dati.get("data", {}).get("offerId")
-    
     if offerta_id:
-        elabora_offerta_specifica(offerta_id, KULENOVIC_ID)
-        return jsonify({"status": "success", "message": "Offerta elaborata istantaneamente"}), 200
-    else:
-        return jsonify({"status": "ignored", "message": "Nessun offerId valido nel payload"}), 200
+        threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
+        return jsonify({"status": "success"}), 200
+    return jsonify({"status": "ignored"}), 200
 
 if __name__ == '__main__':
+    # Avvia il monitoraggio live in background
+    t = threading.Thread(target=monitor_offerte_live, daemon=True)
+    t.start()
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
