@@ -9,9 +9,8 @@ app = Flask(__name__)
 SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
-@app.route('/')
-def home():
-    return "Bot Sorare operativo e in ascolto!"
+# Variabile globale per evitare di far partire 50 thread in parallelo se Gunicorn duplica i processi
+bot_avviato = False
 
 def esegui_query_sorare(query, variables=None):
     headers = {
@@ -185,12 +184,17 @@ def loop_background():
             print(f"❌ Errore nel ciclo: {e}")
         time.sleep(30)
 
+@app.route('/')
+def home():
+    global bot_avviato
+    if not bot_avviato:
+        bot_avviato = True
+        print("🚀 Avvio thread del bot Sorare in background...")
+        t = threading.Thread(target=loop_background)
+        t.daemon = True
+        t.start()
+    return "Bot Sorare operativo e in ascolto!"
+
 if __name__ == '__main__':
-    # Avvia il controllo in background
-    t = threading.Thread(target=loop_background)
-    t.daemon = True
-    t.start()
-    
-    # Avvia Flask per mantenere aperta la porta su Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
