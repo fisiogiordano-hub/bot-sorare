@@ -66,14 +66,16 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         return
 
     offerta = risultato.get("data", {}).get("offer")
-    if not offerta or offerta.get("status") != "pending":
-        print(f"⚠️ L'offerta {offerta_id} non è più pendente o non è valida.")
+    if not offerta:
+        print(f"⚠️ L'offerta {offerta_id} non esiste o non è stata trovata.")
         return
         
+    print(f"📄 Stato offerta corrente: {offerta.get('status')}")
+    
     outgoing_cards = offerta.get("outgoingCards", [])
     kulu_richiesto = any(card.get("id") == kul_id for card in outgoing_cards)
     if not kulu_richiesto:
-        print(f"⚠️ La carta di Kulenovic non è inclusa nell'offerta {offerta_id}.")
+        print(f"⚠️ La carta di Kulenovic non è inclusa nell'offerta {offerta_id}. (ID cercato: {kul_id})")
         return
 
     print(f"🎯 Segnale Kulenovic confermato nell'offerta {offerta_id}!")
@@ -95,8 +97,9 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         
         if rarita == "limited" and prezzo <= 0.50 and campionato_coperto:
             carte_idonee_ids.append(card_id)
+            print(f"✅ Carta idonea trovata: {card_id} (Prezzo: {prezzo}€)")
         else:
-            print(f"⚠️ Carta scartata (Rarità: {rarita}, Prezzo: {prezzo}€, Tutte le competizioni coperte: {campionato_coperto})")
+            print(f"⚠️ Carta scartata (ID: {card_id}, Rarità: {rarita}, Prezzo: {prezzo}€, Tutte le competizioni coperte: {campionato_coperto})")
 
     if not carte_idonee_ids:
         print(f"🚫 Nessuna carta idonea nell'offerta {offerta_id}. Rifiuto offerta...")
@@ -108,7 +111,8 @@ def elabora_offerta_specifica(offerta_id, kul_id):
                 }
             }
         """
-        esegui_query_sorare(mutazione_reject, {"input": {"offerId": offerta_id}})
+        res_rej = esegui_query_sorare(mutazione_reject, {"input": {"offerId": offerta_id}})
+        print(f"Risposta rifiuto: {res_rej}")
     else:
         num_carte = len(carte_idonee_ids)
         totale_euro = num_carte * 0.20
@@ -126,9 +130,9 @@ def elabora_offerta_specifica(offerta_id, kul_id):
             "input": {
                 "initialOfferId": offerta_id,
                 "recvCardIds": carte_idonee_ids,
-                "sendCardIds": [],  # <-- VUOTO: Rimuove completamente Kulenovic dalle tue uscite!
+                "sendCardIds": [],
                 "sendAmount": {
-                    "amount": str(totale_euro),  # <-- I soldi che mandi tu in cambio delle loro carte
+                    "amount": str(totale_euro),
                     "currency": "EUR"
                 }
             }
@@ -171,13 +175,20 @@ def monitor_offerte():
         
         time.sleep(15)
 
-# Avvio del thread
+# Avvio del thread di monitoraggio
 t = threading.Thread(target=monitor_offerte, daemon=True)
 t.start()
 
 @app.route('/', methods=['GET'])
 def home():
     return "Bot Sorare operativo e in esecuzione!"
+
+# NUOVA ROTTA DI TEST MANUALE: ti permette di testare un'offerta al volo senza aspettare
+@app.route('/test/<offerta_id>', methods=['GET'])
+def test_offerta(offerta_id):
+    print(f"🧪 Test manuale avviato via web per l'offerta: {offerta_id}")
+    threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
+    return jsonify({"status": "Test avviato", "offerta_id": offerta_id})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
