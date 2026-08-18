@@ -62,17 +62,18 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     """
     risultato = esegui_query_sorare(query_dettaglio, {"id": offerta_id})
     if not risultato:
+        print(f"⚠️ Impossibile ottenere i dettagli per l'offerta {offerta_id}")
         return
 
     offerta = risultato.get("data", {}).get("offer")
     if not offerta or offerta.get("status") != "pending":
-        print("⚠️ L'offerta non è più pendente o non è valida.")
+        print(f"⚠️ L'offerta {offerta_id} non è più pendente o non è valida.")
         return
         
     outgoing_cards = offerta.get("outgoingCards", [])
     kulu_richiesto = any(card.get("id") == kul_id for card in outgoing_cards)
     if not kulu_richiesto:
-        print("⚠️ La carta di Kulenovic non è inclusa in questa offerta.")
+        print(f"⚠️ La carta di Kulenovic non è inclusa nell'offerta {offerta_id}.")
         return
 
     print(f"🎯 Segnale Kulenovic confermato nell'offerta {offerta_id}!")
@@ -90,7 +91,6 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         active_club = player_info.get("activeClub") or {}
         competitions = active_club.get("activeCompetitions") or []
         
-        # Condizione aggiornata: TUTTE le competizioni attive devono essere supportate
         campionato_coperto = all(comp.get("supported", False) for comp in competitions) if competitions else False
         
         if rarita == "limited" and prezzo <= 0.50 and campionato_coperto:
@@ -99,7 +99,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
             print(f"⚠️ Carta scartata (Rarità: {rarita}, Prezzo: {prezzo}€, Tutte le competizioni coperte: {campionato_coperto})")
 
     if not carte_idonee_ids:
-        print("🚫 Nessuna carta idonea. Rifiuto offerta...")
+        print(f"🚫 Nessuna carta idonea nell'offerta {offerta_id}. Rifiuto offerta...")
         mutazione_reject = """
             mutation RejectOffer($input: RejectOfferInput!) {
                 rejectOffer(input: $input) {
@@ -112,7 +112,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     else:
         num_carte = len(carte_idonee_ids)
         totale_euro = num_carte * 0.20
-        print(f"✅ Trovate {num_carte} carte idonee con competizioni interamente coperte! Invio controproposta.")
+        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta rimuovendo Kulenovic e offrendo {totale_euro}€.")
         
         mutazione_counter = """
             mutation CounterOffer($input: CounterOfferInput!) {
@@ -126,9 +126,9 @@ def elabora_offerta_specifica(offerta_id, kul_id):
             "input": {
                 "initialOfferId": offerta_id,
                 "recvCardIds": carte_idonee_ids,
-                "sendCardIds": [],
+                "sendCardIds": [],  # <-- VUOTO: Rimuove completamente Kulenovic dalle tue uscite!
                 "sendAmount": {
-                    "amount": str(totale_euro),
+                    "amount": str(totale_euro),  # <-- I soldi che mandi tu in cambio delle loro carte
                     "currency": "EUR"
                 }
             }
@@ -137,9 +137,9 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         print(f"Risposta controproposta: {risposta_counter}")
 
 def monitor_offerte():
-    """Controlla le offerte pendenti regolarmente."""
-    time.sleep(10)
-    print("🔄 Monitoraggio offerte Sorare avviato correttamente...")
+    """Controlla le offerte pendenti regolarmente con log di debug."""
+    time.sleep(5)
+    print("🔄 [DEBUG] Avvio ciclo di monitoraggio offerte Sorare...")
     
     query_offerte = """
         Query GetPendingOffers {
@@ -157,19 +157,21 @@ def monitor_offerte():
         try:
             risultato = esegui_query_sorare(query_offerte)
             if risultato:
-                offerte = risultato.get("data", {}).get("viewer", {}).get("receivedOffers", {}).get("nodes", [])
-                for offerta in offerte:
-                    offerta_id = offerta.get("id")
-                    if offerta_id and offerta_id not in offerte_gia_gestite:
-                        print(f"🔎 Nuova offerta rilevata: {offerta_id}")
-                        offerte_gia_gestite.add(offerta_id)
-                        threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
+                viewer = risultato.get("data", {}).get("viewer")
+                if viewer:
+                    offerte = viewer.get("receivedOffers", {}).get("nodes", [])
+                    for offerta in offerte:
+                        offerta_id = offerta.get("id")
+                        if offerta_id and offerta_id not in offerte_gia_gestite:
+                            print(f"🔎 Nuova offerta rilevata: {offerta_id}")
+                            offerte_gia_gestite.add(offerta_id)
+                            threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
         except Exception as e:
-            print(f"⚠️ Errore nel ciclo di controllo: {e}")
+            print(f"⚠️ Errore critico nel ciclo di monitoraggio: {e}")
         
         time.sleep(15)
 
-# Avvio automatico del thread di monitoraggio indipendente
+# Avvio del thread
 t = threading.Thread(target=monitor_offerte, daemon=True)
 t.start()
 
