@@ -9,7 +9,7 @@ app = Flask(__name__)
 SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
-# Variabile globale per evitare di far partire 50 thread in parallelo se Gunicorn duplica i processi
+# Variabile globale per evitare duplicazioni di thread con Gunicorn
 bot_avviato = False
 
 def esegui_query_sorare(query, variables=None):
@@ -22,7 +22,7 @@ def esegui_query_sorare(query, variables=None):
         "variables": variables or {}
     }
     try:
-        response = requests.post(SORARE_API_URL, json=payload, headers=headers, timeout=15)
+        response = requests.post(SORARE_API_URL, json=payload, headers=headers, timeout=25)
         if response.status_code == 200:
             return response.json()
         else:
@@ -33,35 +33,52 @@ def esegui_query_sorare(query, variables=None):
         return None
 
 def trova_id_kulenovic():
-    print("🔍 Cerco la carta di Kulenovic nel tuo inventario...")
-    query_inventario = """
-        Query GetMyCards {
-            viewer {
-                cards(first: 50) {
-                    nodes {
-                        id
-                        player {
-                            displayName
+    print("🔍 Scansiono l'intero inventario (fino a 10.000 carte) per trovare Kulenovic...")
+    cursor = None
+    carte_esaminate = 0
+    
+    while carte_esaminate < 10000:
+        query_inventario = """
+            Query GetMyCards($after: String) {
+                viewer {
+                    cards(first: 100, after: $after) {
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                        nodes {
+                            id
+                            player {
+                                displayName
+                            }
                         }
                     }
                 }
             }
-        }
-    """
-    risultato = esegui_query_sorare(query_inventario)
-    if not risultato:
-        return None
-    
-    cards = risultato.get("data", {}).get("viewer", {}).get("cards", {}).get("nodes", [])
-    for card in cards:
-        player = card.get("player") or {}
-        name = player.get("displayName", "")
-        if "Kulenović" in name or "Kulenovic" in name:
-            kulu_id = card.get("id")
-            print(f"✅ Trovata carta di Kulenovic! ID ufficiale: {kulu_id}")
-            return kulu_id
+        """
+        variables = {"after": cursor}
+        risultato = esegui_query_sorare(query_inventario, variables)
+        if not risultato:
+            break
+        
+        cards_data = risultato.get("data", {}).get("viewer", {}).get("cards", {})
+        cards = cards_data.get("nodes", [])
+        page_info = cards_data.get("pageInfo", {})
+        
+        for card in cards:
+            carte_esaminate += 1
+            player = card.get("player") or {}
+            name = player.get("displayName", "")
+            if "Kulenović" in name or "Kulenovic" in name:
+                kulu_id = card.get("id")
+                print(f"✅ Trovata carta di Kulenovic dopo aver scansionato {carte_esaminate} carte! ID ufficiale: {kulu_id}")
+                return kulu_id
+        
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
             
-    print("⚠️ Attenzione: Nessuna carta di Kulenovic trovata nel tuo inventario.")
+    print("⚠️ Attenzione: Nessuna carta di Kulenovic trovata nell'inventario.")
     return None
 
 def controlla_offerte(kul_id):
@@ -175,7 +192,7 @@ def loop_background():
     while not kul_id:
         kul_id = trova_id_kulenovic()
         if not kul_id:
-            time.sleep(15)
+            time.sleep(30)
 
     while True:
         try:
