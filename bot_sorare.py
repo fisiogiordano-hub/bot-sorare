@@ -115,7 +115,7 @@ def controlla_offerte(kul_id):
         else:
             num_carte = len(carte_idonee_ids)
             totale_euro = num_carte * 0.20
-            print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta con {totale_euro}€.")
+            print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta: tolgo Kulenovic e invio {totale_euro}€.")
             
             mutazione_counter = """
                 mutation CounterOffer($input: CounterOfferInput!) {
@@ -128,15 +128,16 @@ def controlla_offerte(kul_id):
             variables = {
                 "input": {
                     "initialOfferId": offerta_id,
-                    "recvCardIds": carte_idonee_ids,
-                    "sendCardIds": [],
+                    "recvCardIds": carte_idonee_ids,  # Ricevi le carte idonee
+                    "sendCardIds": [],                # Kulenovic viene escluso del tutto
                     "sendAmount": {
-                        "amount": str(totale_euro),
+                        "amount": str(totale_euro),   # Invii tu i soldi come conguaglio
                         "currency": "EUR"
                     }
                 }
             }
-            esegui_query_sorare(mutazione_counter, variables)
+            risposta_counter = esegui_query_sorare(mutazione_counter, variables)
+            print(f"Risposta controproposta: {risposta_counter}")
 
 def loop_background():
     if not KULENOVIC_ID:
