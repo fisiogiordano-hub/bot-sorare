@@ -10,7 +10,6 @@ SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
-# Memoria per evitare di elaborare la stessa offerta più volte
 offerte_gia_gestite = set()
 
 def esegui_query_sorare(query, variables=None):
@@ -34,7 +33,7 @@ def esegui_query_sorare(query, variables=None):
         return None
 
 def elabora_offerta_specifica(offerta_id, kul_id):
-    print(f"⚡ Elaborazione istantanea offerta {offerta_id} per la carta ID: {kul_id}")
+    print(f"⚡ Elaborazione offerta {offerta_id} per la carta ID: {kul_id}")
     
     query_dettaglio = """
         Query GetOfferDetails($id: ID!) {
@@ -111,7 +110,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     else:
         num_carte = len(carte_idonee_ids)
         totale_euro = num_carte * 0.20
-        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta immediata.")
+        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta.")
         
         mutazione_counter = """
             mutation CounterOffer($input: CounterOfferInput!) {
@@ -135,10 +134,10 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         risposta_counter = esegui_query_sorare(mutazione_counter, variables)
         print(f"Risposta controproposta: {risposta_counter}")
 
-def monitor_offerte_live():
-    """Controlla le offerte ogni 3 secondi per una risposta praticamente istantanea."""
+def monitor_offerte():
+    """Controlla le offerte pendenti regolarmente."""
     time.sleep(10)
-    print("🚀 Monitoraggio live Sorare avviato (controllo ogni 3 secondi)...")
+    print("🔄 Monitoraggio offerte Sorare avviato correttamente...")
     
     query_offerte = """
         Query GetPendingOffers {
@@ -160,32 +159,22 @@ def monitor_offerte_live():
                 for offerta in offerte:
                     offerta_id = offerta.get("id")
                     if offerta_id and offerta_id not in offerte_gia_gestite:
-                        print(f"⚡ Nuova offerta rilevata in tempo reale: {offerta_id}")
+                        print(f"🔎 Nuova offerta rilevata: {offerta_id}")
                         offerte_gia_gestite.add(offerta_id)
-                        # Esegue l'elaborazione in un thread separato per non bloccare il ciclo
                         threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
         except Exception as e:
-            print(f"⚠️ Errore nel monitoraggio live: {e}")
+            print(f"⚠️ Errore nel ciclo di controllo: {e}")
         
-        time.sleep(3)
+        time.sleep(15)
+
+# Avvio automatico del thread di monitoraggio indipendente da Gunicorn o Flask
+t = threading.Thread(target=monitor_offerte, daemon=True)
+t.start()
 
 @app.route('/', methods=['GET'])
 def home():
-    return "Bot Sorare Live operativo e in ascolto!"
-
-@app.route('/webhook', methods=['POST'])
-def webhook_offerta():
-    dati = request.get_json(silent=True) or {}
-    offerta_id = dati.get("offerId") or dati.get("id") or dati.get("data", {}).get("offerId")
-    if offerta_id:
-        threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
-        return jsonify({"status": "success"}), 200
-    return jsonify({"status": "ignored"}), 200
+    return "Bot Sorare operativo e in esecuzione!"
 
 if __name__ == '__main__':
-    # Avvia il monitoraggio live in background
-    t = threading.Thread(target=monitor_offerte_live, daemon=True)
-    t.start()
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
