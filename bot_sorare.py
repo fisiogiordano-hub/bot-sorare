@@ -3,8 +3,6 @@ import time
 import threading
 import requests
 import hashlib
-import unicodedata
-import re
 
 from decimal import Decimal
 from flask import Flask
@@ -27,14 +25,11 @@ SORARE_JWT_AUD = os.getenv(
     ""
 ).strip()
 
-# Può essere asset ID, slug oppure vuota.
 KULENOVIC_ID = os.getenv(
     "KULENOVIC_ID",
     ""
 ).strip()
 
-# Chiave privata Stark.
-# NON viene mai stampata nei log.
 SORARE_STARK_PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
     ""
@@ -50,6 +45,7 @@ SORARE_STARK_PRIVATE_KEY = os.getenv(
 # Nessun rifiuto.
 # Nessuna controproposta.
 # Nessuna transazione reale.
+
 DRY_RUN = True
 
 
@@ -62,6 +58,169 @@ PREZZO_MINIMO_CENTESIMI = 30
 PREZZO_MASSIMO_CENTESIMI = 80
 
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
+
+
+# ============================================================
+# CAMPIONATI COPERTI
+# ============================================================
+#
+# IMPORTANTE:
+#
+# Una carta NON è idonea solamente perché Sorare restituisce
+# una competizione nella scheda del giocatore.
+#
+# Prima deve esistere una SQUADRA ATTIVA.
+#
+# Solo dopo controlliamo le competizioni della squadra.
+#
+# ============================================================
+
+CAMPIONATI_COPERTI = {
+
+    # Inghilterra
+    "english-league",
+    "premier-league-eng",
+    "championship-eng",
+    "second-division-eng",
+    "league-one-eng",
+    "league-two-eng",
+
+    # Francia
+    "ligue-1-fr",
+    "ligue-2-fr",
+
+    # Spagna
+    "laliga-es",
+    "laliga-2-es",
+    "laliga-hypermotion",
+
+    # Germania
+    "bundesliga-de",
+    "2-bundesliga-de",
+
+    # Portogallo
+    "liga-portugal",
+
+    # Olanda
+    "eredivisie-nl",
+
+    # Belgio
+    "jupiler-pro-league-be",
+
+    # Scozia
+    "scottish-premiership-sco",
+
+    # Giappone
+    "jleague-jp",
+    "j1-league-jp",
+
+    # Austria
+    "austrian-bundesliga-at",
+
+    # Croazia
+    "croatian-first-league-hr",
+    "croatian-hnl-hr",
+
+    # MLS
+    "major-league-soccer-us",
+    "mls-us",
+
+    # Corea
+    "k-league-1-kr",
+
+    # Turchia
+    "super-lig-tr",
+
+    # Danimarca
+    "superliga-dk",
+
+    # Italia
+    "serie-a-it",
+    "serie-b-it",
+
+    # Brasile
+    "brasileirao-serie-a-br",
+
+    # Russia
+    "premier-liga-ru",
+    "russian-premier-league",
+
+    # Perù
+    "liga-1-peru",
+    "liga-1-pe",
+
+    # Colombia
+    "primera-a-colombia",
+    "liga-betplay-col",
+
+    # Messico
+    "liga-mx",
+
+}
+
+
+# ============================================================
+# NOMI DEI CAMPIONATI
+# ============================================================
+
+CAMPIONATI_NOMI = {
+
+    "english-league": "English League",
+    "premier-league-eng": "English League",
+    "championship-eng": "Seconda divisione inglese",
+    "second-division-eng": "Seconda divisione inglese",
+
+    "ligue-1-fr": "Ligue 1",
+    "ligue-2-fr": "Ligue 2",
+
+    "laliga-es": "LALIGA EA SPORTS",
+    "laliga-2-es": "LALIGA 2",
+    "laliga-hypermotion": "LALIGA 2",
+
+    "bundesliga-de": "Bundesliga",
+    "2-bundesliga-de": "2. Bundesliga",
+
+    "liga-portugal": "Liga Portugal",
+
+    "eredivisie-nl": "Eredivisie",
+
+    "jupiler-pro-league-be": "Jupiler Pro League",
+
+    "scottish-premiership-sco": "Scottish Premiership",
+
+    "jleague-jp": "J.League",
+    "j1-league-jp": "J.League",
+
+    "austrian-bundesliga-at": "Austrian Bundesliga",
+
+    "croatian-first-league-hr": "Croatian HNL",
+    "croatian-hnl-hr": "Croatian HNL",
+
+    "major-league-soccer-us": "MLS",
+    "mls-us": "MLS",
+
+    "k-league-1-kr": "K League",
+
+    "super-lig-tr": "Turchia",
+
+    "superliga-dk": "Danimarca",
+
+    "serie-a-it": "Serie A",
+    "serie-b-it": "Serie B",
+
+    "brasileirao-serie-a-br": "Brasile",
+
+    "premier-liga-ru": "Russia",
+    "russian-premier-league": "Russia",
+
+    "liga-1-peru": "Perù",
+    "liga-1-pe": "Perù",
+
+    "primera-a-colombia": "Colombia",
+    "liga-betplay-col": "Colombia",
+
+    "liga-mx": "Messico",
+}
 
 
 # ============================================================
@@ -88,267 +247,6 @@ KULENOVIC_ASSET_ID = (
 
 
 # ============================================================
-# CAMPIONATI COPERTI
-# ============================================================
-
-# Lista confermata dall'utente.
-#
-# IMPORTANTE:
-# Sorare normalmente restituisce lo slug della competizione.
-# Per questo ogni campionato ha uno o più alias/slug possibili.
-#
-# Il controllo viene fatto sullo slug restituito dall'API.
-#
-# Non viene più utilizzato:
-#
-#     len(competizioni) > 0
-#
-# perché avere una competizione attiva NON significa
-# automaticamente che sia un campionato coperto.
-# ============================================================
-
-CAMPIONATI_COPERTI = {
-
-    "English League": [
-        "premier-league",
-        "english-premier-league",
-        "premier-league-players",
-        "english-league",
-    ],
-
-    "Ligue 1": [
-        "ligue-1",
-        "ligue-1-uber-eats",
-        "ligue-1-mcdonalds",
-    ],
-
-    "LALIGA EA SPORTS": [
-        "laliga-ea-sports",
-        "laliga",
-        "la-liga",
-        "laliga-santander",
-    ],
-
-    "Bundesliga": [
-        "bundesliga",
-        "bundesliga-players",
-    ],
-
-    "Liga Portugal": [
-        "liga-portugal",
-        "primeira-liga",
-        "portuguese-primeira-liga",
-    ],
-
-    "Eredivisie": [
-        "eredivisie",
-        "eredivisie-players",
-    ],
-
-    "Jupiler Pro League": [
-        "jupiler-pro-league",
-        "belgian-pro-league",
-        "pro-league",
-    ],
-
-    "Scottish Premiership": [
-        "scottish-premiership",
-        "scottish-premiership-players",
-    ],
-
-    "J.League": [
-        "j-league",
-        "j1-league",
-        "j-league-1",
-        "j1",
-    ],
-
-    "Seconda divisione inglese": [
-        "championship",
-        "english-championship",
-        "efl-championship",
-        "english-second-division",
-        "second-division",
-    ],
-
-    "Austrian Bundesliga": [
-        "austrian-bundesliga",
-        "bundesliga-austria",
-        "austria-bundesliga",
-    ],
-
-    "Croatian HNL": [
-        "croatian-hnl",
-        "hnl",
-        "1-hnl",
-        "croatian-first-football-league",
-    ],
-
-    "2. Bundesliga": [
-        "2-bundesliga",
-        "2.-bundesliga",
-        "bundesliga-2",
-        "german-2-bundesliga",
-    ],
-
-    "Ligue 2": [
-        "ligue-2",
-        "ligue-2-bkt",
-        "ligue-2-bkt-players",
-    ],
-
-    "MLS": [
-        "major-league-soccer",
-        "mls",
-        "major-league-soccer-players",
-    ],
-
-    "K League": [
-        "k-league",
-        "k-league-1",
-        "k-league-1-players",
-        "kleague-1",
-    ],
-
-    "Turchia": [
-        "super-lig",
-        "turkish-super-lig",
-        "turkey-super-lig",
-        "super-lig-players",
-    ],
-
-    "Danimarca": [
-        "superliga",
-        "danish-superliga",
-        "denmark-superliga",
-        "superligaen",
-    ],
-
-    "Serie A": [
-        "serie-a",
-        "serie-a-players",
-        "italian-serie-a",
-    ],
-
-    "Brasile": [
-        "brasileirao-serie-a",
-        "brasileirao",
-        "brazilian-serie-a",
-        "brazil-serie-a",
-        "serie-a-brazil",
-    ],
-
-    "Russia": [
-        "russian-premier-league",
-        "russia-premier-league",
-        "premier-liga",
-        "russian-premier-liga",
-    ],
-
-    "Serie B": [
-        "serie-b",
-        "serie-b-players",
-        "italian-serie-b",
-    ],
-
-    "Perù": [
-        "liga-1",
-        "liga-1-peru",
-        "peruvian-liga-1",
-        "peru-liga-1",
-    ],
-
-    "Colombia": [
-        "primera-a",
-        "primera-a-colombia",
-        "colombian-primera-a",
-        "liga-betplay",
-    ],
-
-    "Messico": [
-        "liga-mx",
-        "mexican-liga-mx",
-        "liga-mx-players",
-    ],
-
-    "LALIGA 2": [
-        "laliga-2",
-        "la-liga-2",
-        "segunda-division",
-        "segunda-division-players",
-        "laliga-hypermotion",
-    ],
-}
-
-
-# ============================================================
-# COSTRUZIONE INDICE CAMPIONATI
-# ============================================================
-
-def normalizza_testo(valore):
-
-    if valore is None:
-
-        return ""
-
-    testo = str(
-        valore
-    ).strip().lower()
-
-    testo = unicodedata.normalize(
-        "NFKD",
-        testo
-    )
-
-    testo = "".join(
-        carattere
-        for carattere in testo
-        if not unicodedata.combining(carattere)
-    )
-
-    testo = testo.replace(
-        "’",
-        "'"
-    )
-
-    testo = testo.replace(
-        "_",
-        "-"
-    )
-
-    testo = re.sub(
-        r"[^a-z0-9]+",
-        "-",
-        testo
-    )
-
-    testo = re.sub(
-        r"-+",
-        "-",
-        testo
-    )
-
-    return testo.strip("-")
-
-
-CAMPIONATI_COPERTI_NORMALIZZATI = {}
-
-for nome_campionato, alias in CAMPIONATI_COPERTI.items():
-
-    for valore in alias:
-
-        valore_normalizzato = normalizza_testo(
-            valore
-        )
-
-        if valore_normalizzato:
-
-            CAMPIONATI_COPERTI_NORMALIZZATI[
-                valore_normalizzato
-            ] = nome_campionato
-
-
-# ============================================================
 # STATO
 # ============================================================
 
@@ -360,54 +258,24 @@ lock_avvio = threading.Lock()
 
 
 # ============================================================
-# CONTROLLO CAMPIONATO
+# STAMPA CAMPIONATI
 # ============================================================
 
-def trova_campionato_coperto(competizioni):
+def stampa_campionati_coperti():
 
-    """
-    Riceve le competizioni attive restituite da Sorare.
+    print(
+        "🏆 REGOLA CAMPIONATI:"
+    )
 
-    Restituisce il nome del campionato coperto trovato
-    oppure None.
+    print(
+        f"   {len(CAMPIONATI_NOMI)} campionati coperti."
+    )
 
-    Il confronto viene effettuato sullo slug.
-    """
+    for nome in CAMPIONATI_NOMI.values():
 
-    if not competizioni:
-
-        return None
-
-    for competizione in competizioni:
-
-        if not competizione:
-
-            continue
-
-        slug = str(
-            competizione.get("slug")
-            or ""
-        ).strip()
-
-        slug_normalizzato = normalizza_testo(
-            slug
+        print(
+            f"   • {nome}"
         )
-
-        if not slug_normalizzato:
-
-            continue
-
-        campionato = (
-            CAMPIONATI_COPERTI_NORMALIZZATI.get(
-                slug_normalizzato
-            )
-        )
-
-        if campionato:
-
-            return campionato
-
-    return None
 
 
 # ============================================================
@@ -421,18 +289,10 @@ def test_firma_stark():
     print("🔐 TEST LOCALE FIRMA STARK")
     print("========================================")
 
-    # --------------------------------------------------------
-    # Controllo variabile ambiente
-    # --------------------------------------------------------
-
     if not SORARE_STARK_PRIVATE_KEY:
 
         print(
             "❌ SORARE_STARK_PRIVATE_KEY non configurata."
-        )
-
-        print(
-            "========================================"
         )
 
         return False
@@ -441,13 +301,7 @@ def test_firma_stark():
         "✅ SORARE_STARK_PRIVATE_KEY presente."
     )
 
-    # --------------------------------------------------------
-    # Normalizzazione chiave
-    # --------------------------------------------------------
-
-    chiave = (
-        SORARE_STARK_PRIVATE_KEY.strip()
-    )
+    chiave = SORARE_STARK_PRIVATE_KEY.strip()
 
     if chiave.lower().startswith("0x"):
 
@@ -464,10 +318,6 @@ def test_firma_stark():
         )
 
         return False
-
-    # --------------------------------------------------------
-    # Controllo esadecimale
-    # --------------------------------------------------------
 
     try:
 
@@ -497,7 +347,7 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Import Starknet
+    # Import compatibile starknet-py
     # --------------------------------------------------------
 
     try:
@@ -511,21 +361,33 @@ def test_firma_stark():
             "✅ API Starknet importate correttamente."
         )
 
-    except Exception as e:
+    except Exception:
 
-        print(
-            "❌ Impossibile importare starknet-py."
-        )
+        try:
 
-        print(
-            f"   Dettaglio: {e}"
-        )
+            from starknet_py.net.signer.stark_curve import (
+                PrivateKey,
+            )
 
-        return False
+            from starknet_py.net.signer.stark_curve import (
+                message_signature,
+            )
 
-    # --------------------------------------------------------
-    # Inizializzazione private key
-    # --------------------------------------------------------
+            print(
+                "✅ API Starknet importate correttamente."
+            )
+
+        except Exception as e:
+
+            print(
+                "❌ Impossibile importare starknet-py."
+            )
+
+            print(
+                f"   Dettaglio: {e}"
+            )
+
+            return False
 
     try:
 
@@ -549,10 +411,6 @@ def test_firma_stark():
         "✅ Private key Stark inizializzata."
     )
 
-    # --------------------------------------------------------
-    # Derivazione public key
-    # --------------------------------------------------------
-
     try:
 
         public_key = private_key.public_key
@@ -573,17 +431,9 @@ def test_firma_stark():
         "✅ Public key Stark derivata."
     )
 
-    # --------------------------------------------------------
-    # Messaggio di test
-    # --------------------------------------------------------
-
     messaggio_testo = (
         "SORARE_LOCAL_SIGNATURE_TEST"
     )
-
-    # --------------------------------------------------------
-    # Hash SHA-256
-    # --------------------------------------------------------
 
     try:
 
@@ -608,10 +458,6 @@ def test_firma_stark():
 
         return False
 
-    # --------------------------------------------------------
-    # Campo primo Stark
-    # --------------------------------------------------------
-
     STARK_FIELD_PRIME = (
         (2 ** 251)
         + (17 * (2 ** 192))
@@ -623,10 +469,6 @@ def test_firma_stark():
     print(
         "✅ Hash di test Stark preparato."
     )
-
-    # --------------------------------------------------------
-    # Generazione firma
-    # --------------------------------------------------------
 
     try:
 
@@ -659,10 +501,6 @@ def test_firma_stark():
         "✅ Firma Stark generata."
     )
 
-    # --------------------------------------------------------
-    # Controllo struttura firma
-    # --------------------------------------------------------
-
     try:
 
         r = firma[0]
@@ -692,10 +530,6 @@ def test_firma_stark():
         "✅ Firma contiene r e s."
     )
 
-    # --------------------------------------------------------
-    # Verifica firma
-    # --------------------------------------------------------
-
     try:
 
         verificata = public_key.verify(
@@ -721,15 +555,7 @@ def test_firma_stark():
             "❌ VERIFICA FIRMA FALLITA."
         )
 
-        print(
-            "========================================"
-        )
-
         return False
-
-    # --------------------------------------------------------
-    # RISULTATO POSITIVO
-    # --------------------------------------------------------
 
     print(
         "✅ FIRMA VERIFICATA LOCALMENTE."
@@ -916,9 +742,7 @@ def verifica_account():
     }
     """
 
-    risultato = esegui_query(
-        query
-    )
+    risultato = esegui_query(query)
 
     if not risultato:
 
@@ -1015,9 +839,7 @@ def recupera_offerte():
     }
     """
 
-    risultato = esegui_query(
-        query
-    )
+    risultato = esegui_query(query)
 
     if not risultato:
 
@@ -1202,9 +1024,7 @@ def leggi_eur_cents(amounts):
 
     try:
 
-        valore = int(
-            valore
-        )
+        valore = int(valore)
 
     except (
         ValueError,
@@ -1443,89 +1263,160 @@ def recupera_prezzo_floor(carta):
 
 
 # ============================================================
-# COMPETIZIONI CARTA
+# CONTROLLO CAMPIONATO
 # ============================================================
 
-def recupera_competizioni_carta(carta):
-
-    competizioni = []
+def controlla_squadra_e_campionato(carta):
 
     player = (
         carta.get("anyPlayer")
         or {}
     )
 
-    club = (
+    active_club = (
         player.get("activeClub")
-        or {}
     )
 
-    competizioni_player = (
-        club.get("activeCompetitions")
+    # --------------------------------------------------------
+    # REGOLA FONDAMENTALE
+    #
+    # Nessuna squadra attiva = carta NON IDONEA.
+    #
+    # NON guardiamo activeCompetitions del giocatore
+    # se activeClub non esiste.
+    # --------------------------------------------------------
+
+    if not active_club:
+
+        print(
+            "      🏟️ Squadra attiva: NESSUNA"
+        )
+
+        print(
+            "      🔴 GIOCATORE SENZA SQUADRA"
+        )
+
+        print(
+            "      🔴 CAMPIONATO NON VALIDO"
+        )
+
+        return False
+
+    club_name = str(
+        active_club.get("name")
+        or active_club.get("slug")
+        or ""
+    ).strip()
+
+    club_slug = str(
+        active_club.get("slug")
+        or ""
+    ).strip()
+
+    print(
+        f"      🏟️ Squadra attiva: "
+        f"{club_name or 'N/D'}"
+    )
+
+    if club_slug:
+
+        print(
+            f"      🏷️ Squadra slug: "
+            f"{club_slug}"
+        )
+
+    else:
+
+        print(
+            "      ⚠️ Slug squadra assente."
+        )
+
+    competizioni = (
+        active_club.get(
+            "activeCompetitions"
+        )
         or []
     )
 
-    for competizione in competizioni_player:
+    if not competizioni:
 
-        if competizione:
+        print(
+            "      🔴 Nessuna competizione "
+            "attiva sulla squadra."
+        )
 
-            competizioni.append(
-                competizione
-            )
+        print(
+            "      🔴 CAMPIONATO NON COPERTO"
+        )
 
-    team = (
-        carta.get("anyTeam")
-        or {}
+        return False
+
+    print(
+        "      🏆 COMPETIZIONI ATTIVE DELLA SQUADRA:"
     )
 
-    competizioni_team = (
-        team.get("activeCompetitions")
-        or []
-    )
-
-    for competizione in competizioni_team:
-
-        if competizione:
-
-            competizioni.append(
-                competizione
-            )
-
-    # Rimuove duplicati per slug.
-    risultati = []
-
-    slug_visti = set()
+    slug_validi = []
 
     for competizione in competizioni:
+
+        if not isinstance(
+            competizione,
+            dict,
+        ):
+
+            continue
 
         slug = str(
             competizione.get("slug")
             or ""
-        ).strip()
+        ).strip().lower()
 
-        slug_norm = normalizza_testo(
-            slug
-        )
-
-        if not slug_norm:
+        if not slug:
 
             continue
 
-        if slug_norm in slug_visti:
-
-            continue
-
-        slug_visti.add(
-            slug_norm
+        print(
+            f"         • {slug}"
         )
 
-        risultati.append(
-            {
-                "slug": slug
-            }
+        if slug in CAMPIONATI_COPERTI:
+
+            slug_validi.append(
+                slug
+            )
+
+    if slug_validi:
+
+        print(
+            "      🟢 CAMPIONATO COPERTO"
         )
 
-    return risultati
+        for slug in slug_validi:
+
+            nome = (
+                CAMPIONATI_NOMI.get(
+                    slug,
+                    slug,
+                )
+            )
+
+            print(
+                f"         🟢 {nome}"
+            )
+
+        return True
+
+    print(
+        "      🔴 CAMPIONATO NON COPERTO"
+    )
+
+    print(
+        "      🔎 Nessuna delle competizioni "
+        "della squadra è presente nella lista "
+        "dei campionati coperti."
+    )
+
+    return False
 
 
 # ============================================================
@@ -1553,14 +1444,6 @@ def analizza_carta(carta):
         carta.get("rarityTyped")
         or ""
     ).upper()
-
-    # --------------------------------------------------------
-    # COMPETIZIONI
-    # --------------------------------------------------------
-
-    competizioni = recupera_competizioni_carta(
-        carta
-    )
 
     # --------------------------------------------------------
     # PREZZO
@@ -1595,21 +1478,21 @@ def analizza_carta(carta):
     )
 
     # --------------------------------------------------------
-    # CAMPIONATO COPERTO
-    # --------------------------------------------------------
-
-    campionato_coperto = (
-        trova_campionato_coperto(
-            competizioni
-        )
-    )
-
-    # --------------------------------------------------------
     # RARITÀ
     # --------------------------------------------------------
 
     rarita_ok = (
         rarita == "LIMITED"
+    )
+
+    # --------------------------------------------------------
+    # SQUADRA + CAMPIONATO
+    # --------------------------------------------------------
+
+    campionato_coperto = (
+        controlla_squadra_e_campionato(
+            carta
+        )
     )
 
     # --------------------------------------------------------
@@ -1619,12 +1502,8 @@ def analizza_carta(carta):
     idonea = (
         rarita_ok
         and prezzo_ok
-        and campionato_coperto is not None
+        and campionato_coperto
     )
-
-    # ========================================================
-    # LOG
-    # ========================================================
 
     print("")
 
@@ -1643,10 +1522,6 @@ def analizza_carta(carta):
     print(
         f"      Rarità: {rarita or 'N/D'}"
     )
-
-    # --------------------------------------------------------
-    # PREZZO
-    # --------------------------------------------------------
 
     if prezzo is not None:
 
@@ -1685,59 +1560,6 @@ def analizza_carta(carta):
             "      🔴 Prezzo NON verificabile"
         )
 
-    # --------------------------------------------------------
-    # COMPETIZIONI
-    # --------------------------------------------------------
-
-    print("")
-
-    print(
-        "      🏆 COMPETIZIONI ATTIVE:"
-    )
-
-    if not competizioni:
-
-        print(
-            "         Nessuna competizione attiva."
-        )
-
-    else:
-
-        for competizione in competizioni:
-
-            slug_competizione = str(
-                competizione.get("slug")
-                or ""
-            ).strip()
-
-            print(
-                f"         • {slug_competizione}"
-            )
-
-    if campionato_coperto:
-
-        print(
-            f"      🟢 CAMPIONATO COPERTO: "
-            f"{campionato_coperto}"
-        )
-
-    else:
-
-        print(
-            "      🔴 CAMPIONATO NON COPERTO"
-        )
-
-        if competizioni:
-
-            print(
-                "      🔎 Nessuno degli slug trovati "
-                "è presente nella lista dei campionati coperti."
-            )
-
-    # --------------------------------------------------------
-    # RARITÀ
-    # --------------------------------------------------------
-
     if rarita_ok:
 
         print(
@@ -1750,37 +1572,25 @@ def analizza_carta(carta):
             "      🔴 Rarità NON valida"
         )
 
-    # --------------------------------------------------------
-    # RISULTATO FINALE
-    # --------------------------------------------------------
+    print(
+        "      =================================="
+    )
 
     if idonea:
 
         print(
-            "      =================================="
-        )
-
-        print(
-            "      ✅ CARTA IDONEA"
-        )
-
-        print(
-            "      =================================="
+            "      🟢 CARTA IDONEA"
         )
 
     else:
 
         print(
-            "      =================================="
-        )
-
-        print(
             "      ❌ CARTA NON IDONEA"
         )
 
-        print(
-            "      =================================="
-        )
+    print(
+        "      =================================="
+    )
 
     return idonea
 
@@ -2090,10 +1900,6 @@ def elabora_offerta(offerta):
 
         return
 
-    # ========================================================
-    # PAGAMENTO
-    # ========================================================
-
     pagamento_centesimi = (
         numero_idonee
         * PAGAMENTO_PER_CARTA_CENTESIMI
@@ -2255,27 +2061,9 @@ def monitor_offerte():
         "€0,20 per ogni carta idonea"
     )
 
-    print("")
-
-    print(
-        "🏆 REGOLA CAMPIONATI:"
-    )
-
-    print(
-        f"   {len(CAMPIONATI_COPERTI)} campionati coperti."
-    )
-
-    for nome_campionato in CAMPIONATI_COPERTI:
-
-        print(
-            f"   • {nome_campionato}"
-        )
+    stampa_campionati_coperti()
 
     print("")
-
-    # ========================================================
-    # TEST LOCALE FIRMA
-    # ========================================================
 
     firma_ok = test_firma_stark()
 
@@ -2339,10 +2127,6 @@ def monitor_offerte():
             print(
                 f"⚠️ Errore nel ciclo: {e}"
             )
-
-        # ====================================================
-        # CONTROLLO OGNI 10 SECONDI
-        # ====================================================
 
         time.sleep(10)
 
