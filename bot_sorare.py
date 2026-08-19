@@ -148,7 +148,7 @@ def monitor_offerte():
     query_offerte = """
         query GetAllOffers {
             currentUser {
-                receivedOffers {
+                recentActiveBids {
                     nodes {
                         id
                         status
@@ -165,7 +165,7 @@ def monitor_offerte():
             if risultato:
                 user = risultato.get("data", {}).get("currentUser")
                 if user:
-                    offerte = user.get("receivedOffers", {}).get("nodes", [])
+                    offerte = user.get("recentActiveBids", {}).get("nodes", [])
                     print(f"🔎 [DEBUG] Numero offerte trovate: {len(offerte)}")
                     for offerta in offerte:
                         offerta_id = offerta.get("id")
