@@ -19,7 +19,7 @@ KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
 # ============================================================
 
 # IMPORTANTISSIMO:
-# Per ora non eseguiamo nessuna mutazione reale.
+# Per ora il bot NON esegue nessuna mutazione reale.
 DRY_RUN = True
 
 # ============================================================
@@ -281,6 +281,13 @@ def recupera_dettagli_carte(asset_ids):
             name
             rarityTyped
 
+            liveSingleSaleOffer {
+
+                price {
+                    eur
+                }
+            }
+
             anyPlayer {
 
                 displayName
@@ -301,16 +308,6 @@ def recupera_dettagli_carte(asset_ids):
 
                 activeCompetitions {
                     slug
-                }
-            }
-
-            liveSingleSaleOffer {
-
-                receiverSide {
-
-                    amounts {
-                        eur
-                    }
                 }
             }
         }
@@ -338,38 +335,6 @@ def recupera_dettagli_carte(asset_ids):
 
 
 # ============================================================
-# ESTRAZIONE PREZZO EUR
-# ============================================================
-
-def estrai_prezzo_euro(carta):
-
-    offerta = (
-        carta.get("liveSingleSaleOffer")
-        or {}
-    )
-
-    receiver_side = (
-        offerta.get("receiverSide")
-        or {}
-    )
-
-    amounts = (
-        receiver_side.get("amounts")
-        or {}
-    )
-
-    prezzo = amounts.get("eur")
-
-    if prezzo is None:
-        return None
-
-    try:
-        return float(prezzo)
-    except (ValueError, TypeError):
-        return None
-
-
-# ============================================================
 # CONTROLLO CARTA
 # ============================================================
 
@@ -392,12 +357,42 @@ def analizza_carta(carta):
     ).upper()
 
     # ========================================================
-    # PREZZO
+    # RECUPERO PREZZO
     # ========================================================
 
-    prezzo_euro = estrai_prezzo_euro(
-        carta
+    prezzo_euro = None
+
+    offerta_vendita = (
+        carta.get("liveSingleSaleOffer")
+        or {}
     )
+
+    prezzo = (
+        offerta_vendita.get("price")
+        or {}
+    )
+
+    valore_eur = prezzo.get("eur")
+
+    if valore_eur is not None:
+
+        try:
+
+            prezzo_euro = float(
+                valore_eur
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            prezzo_euro = None
+
+    # Convertiamo il prezzo in centesimi
+    # solamente dopo aver ottenuto EUR.
+
+    prezzo_centesimi = None
 
     if prezzo_euro is not None:
 
@@ -405,12 +400,8 @@ def analizza_carta(carta):
             prezzo_euro * 100
         )
 
-    else:
-
-        prezzo_centesimi = None
-
     # ========================================================
-    # COMPETIZIONI
+    # CONTROLLO CAMPIONATO
     # ========================================================
 
     player = (
@@ -433,7 +424,7 @@ def analizza_carta(carta):
     )
 
     # ========================================================
-    # REGOLE
+    # REGOLE IDONEITÀ
     # ========================================================
 
     rarita_ok = (
@@ -485,7 +476,7 @@ def analizza_carta(carta):
 
         print(
             "      Prezzo: N/D "
-            "(non verificabile)"
+            "(nessuna offerta di vendita attiva)"
         )
 
     print(
@@ -493,29 +484,17 @@ def analizza_carta(carta):
         f"{len(competizioni)}"
     )
 
-    if competizioni:
-
-        print(
-            "      🟢 Campionato coperto"
-        )
-
-    else:
-
-        print(
-            "      🔴 Campionato NON coperto"
-        )
-
     # ========================================================
-    # MOTIVI DI ESCLUSIONE
+    # MOTIVO NON IDONEITÀ
     # ========================================================
 
     if not rarita_ok:
 
         print(
-            "      ❌ Rarità diversa da LIMITED"
+            "      ❌ Rarità non Limited"
         )
 
-    if not prezzo_verificabile:
+    elif not prezzo_verificabile:
 
         print(
             "      ❌ Prezzo non verificabile"
@@ -524,25 +503,30 @@ def analizza_carta(carta):
     elif not prezzo_ok:
 
         print(
-            "      ❌ Prezzo superiore a €0,50"
+            f"      ❌ Prezzo superiore a "
+            f"€{PREZZO_MASSIMO_CENTESIMI / 100:.2f}"
         )
 
-    if not campionato_coperto:
+    elif not campionato_coperto:
 
         print(
-            "      ❌ Nessun campionato coperto"
-        )
-
-    if idonea:
-
-        print(
-            "      ✅ CARTA IDONEA"
+            "      🔴 Campionato NON coperto"
         )
 
     else:
 
         print(
-            "      ❌ CARTA NON IDONEA"
+            "      🟢 Campionato coperto"
+        )
+
+        print(
+            "      ✅ CARTA IDONEA"
+        )
+
+    if campionato_coperto and not idonea:
+
+        print(
+            "      🟢 Campionato coperto"
         )
 
     return idonea
@@ -656,6 +640,7 @@ def elabora_offerta(offerta):
         or {}
     )
 
+    # Carte che il manager ci offre
     carte_offerte = (
         sender_side.get(
             "anyCards"
@@ -663,6 +648,7 @@ def elabora_offerta(offerta):
         or []
     )
 
+    # Carte che il manager ci chiede
     carte_che_diamo = (
         receiver_side.get(
             "anyCards"
@@ -731,7 +717,8 @@ def elabora_offerta(offerta):
         )
 
         print(
-            "🟡 DRY RUN: nessuna operazione eseguita."
+            "🟡 DRY RUN: "
+            "nessuna operazione eseguita."
         )
 
         print("----------------------------------------")
@@ -804,7 +791,7 @@ def elabora_offerta(offerta):
     )
 
     # ========================================================
-    # NESSUNA IDONEA
+    # NESSUNA CARTA IDONEA
     # ========================================================
 
     if numero_idonee == 0:
@@ -847,6 +834,10 @@ def elabora_offerta(offerta):
         "🟢 DECISIONE: CONTROPROPOSTA"
     )
 
+    # --------------------------------------------------------
+    # KULENOVIC VIENE RIMOSSO
+    # --------------------------------------------------------
+
     print("")
     print(
         "📤 DALLA PROPOSTA VIENE RIMOSSA:"
@@ -855,6 +846,10 @@ def elabora_offerta(offerta):
     print(
         "   ❌ Kulenovic"
     )
+
+    # --------------------------------------------------------
+    # CARTE NON IDONEE
+    # --------------------------------------------------------
 
     print("")
     print(
@@ -874,6 +869,10 @@ def elabora_offerta(offerta):
             f"   ❌ {numero_non_idonee} carta/e"
         )
 
+    # --------------------------------------------------------
+    # CARTE IDONEE
+    # --------------------------------------------------------
+
     print("")
     print(
         "📥 RIMANGONO SOLO LE CARTE IDONEE:"
@@ -886,6 +885,10 @@ def elabora_offerta(offerta):
             f"{carta.get('name') or carta.get('slug')}"
         )
 
+    # --------------------------------------------------------
+    # PAGAMENTO
+    # --------------------------------------------------------
+
     print("")
     print(
         f"💰 PAGAMENTO AL MANAGER: "
@@ -895,6 +898,10 @@ def elabora_offerta(offerta):
     print(
         f"   {numero_idonee} × €0,20"
     )
+
+    # --------------------------------------------------------
+    # RIEPILOGO CONTROPROPOSTA
+    # --------------------------------------------------------
 
     print("")
     print(
