@@ -24,20 +24,16 @@ SORARE_JWT_AUD = os.getenv(
     ""
 ).strip()
 
-# Chiave privata Stark.
-#
-# IMPORTANTE:
-# - deve essere configurata nelle Environment Variables di Render
-# - NON viene mai stampata nei log
-# - NON viene usata per eseguire operazioni reali in questo test
-SORARE_STARK_PRIVATE_KEY = os.getenv(
-    "SORARE_STARK_PRIVATE_KEY",
-    ""
-).strip()
-
 # Può essere asset ID, slug oppure vuota.
 KULENOVIC_ID = os.getenv(
     "KULENOVIC_ID",
+    ""
+).strip()
+
+# Chiave privata Stark.
+# NON viene mai stampata nei log.
+SORARE_STARK_PRIVATE_KEY = os.getenv(
+    "SORARE_STARK_PRIVATE_KEY",
     ""
 ).strip()
 
@@ -59,6 +55,7 @@ DRY_RUN = True
 # ============================================================
 
 PREZZO_MINIMO_CENTESIMI = 30
+
 PREZZO_MASSIMO_CENTESIMI = 80
 
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
@@ -99,87 +96,78 @@ lock_avvio = threading.Lock()
 
 
 # ============================================================
-# TEST CHIAVE STARK
+# TEST LOCALE FIRMA STARK
 # ============================================================
 
-def verifica_chiave_stark():
+def test_firma_stark():
 
     print("")
     print("========================================")
-    print("🔐 TEST CHIAVE STARK")
+    print("🔐 TEST LOCALE FIRMA STARK")
+    print("========================================")
+
+    # --------------------------------------------------------
+    # Controllo variabile
+    # --------------------------------------------------------
 
     if not SORARE_STARK_PRIVATE_KEY:
 
         print(
-            "❌ SORARE_STARK_PRIVATE_KEY NON CONFIGURATA."
+            "❌ SORARE_STARK_PRIVATE_KEY non configurata."
         )
 
         print(
-            "   Controlla Render → Environment."
+            "========================================"
         )
 
-        print("========================================")
-        print("")
-
         return False
-
-    # --------------------------------------------------------
-    # NON stampiamo MAI la chiave.
-    # --------------------------------------------------------
 
     print(
         "✅ SORARE_STARK_PRIVATE_KEY presente."
     )
 
     # --------------------------------------------------------
-    # Controlli preliminari sul valore.
-    #
-    # Non mostriamo mai il contenuto della chiave.
+    # Controllo formato esadecimale
     # --------------------------------------------------------
 
-    valore = SORARE_STARK_PRIVATE_KEY
+    chiave = SORARE_STARK_PRIVATE_KEY
 
-    if len(valore) < 10:
+    if chiave.lower().startswith("0x"):
+
+        chiave_hex = chiave[2:]
+
+    else:
+
+        chiave_hex = chiave
+
+    if not chiave_hex:
 
         print(
-            "❌ La chiave configurata è troppo corta."
+            "❌ Chiave Stark vuota."
         )
-
-        print("========================================")
-        print("")
 
         return False
 
-    # --------------------------------------------------------
-    # Prova a interpretare la chiave come valore esadecimale.
-    #
-    # Questo NON firma nulla.
-    # NON invia nulla.
-    # NON modifica Sorare.
-    # --------------------------------------------------------
-
-    valore_hex = valore
-
-    if valore_hex.lower().startswith("0x"):
-
-        valore_hex = valore_hex[2:]
-
     try:
 
-        int(
-            valore_hex,
-            16,
+        private_key_int = int(
+            chiave_hex,
+            16
         )
 
     except ValueError:
 
         print(
-            "❌ La chiave non sembra essere "
-            "un valore esadecimale valido."
+            "❌ La chiave non è un valore esadecimale valido."
         )
 
-        print("========================================")
-        print("")
+        return False
+
+    if private_key_int <= 0:
+
+        print(
+            "❌ La chiave privata non è valida."
+        )
 
         return False
 
@@ -187,8 +175,158 @@ def verifica_chiave_stark():
         "✅ Formato esadecimale verificato."
     )
 
+    # --------------------------------------------------------
+    # Import libreria Starknet
+    # --------------------------------------------------------
+
+    try:
+
+        from starknet_py.net.signer.stark_curve import (
+            PrivateKey,
+            message_signature,
+        )
+
+    except Exception as e:
+
+        print(
+            "❌ Impossibile importare starknet-py:"
+        )
+
+        print(
+            str(e)
+        )
+
+        return False
+
+    # --------------------------------------------------------
+    # Firma locale
+    # --------------------------------------------------------
+
+    try:
+
+        private_key = PrivateKey(
+            private_key_int
+        )
+
+    except Exception as e:
+
+        print(
+            "❌ Impossibile inizializzare la chiave Stark:"
+        )
+
+        print(
+            str(e)
+        )
+
+        return False
+
+    # Messaggio di test fisso.
+    #
+    # NON è una richiesta Sorare.
+    # NON è una transazione.
+    # NON viene inviato a Sorare.
+    messaggio_testo = (
+        "SORARE_LOCAL_SIGNATURE_TEST"
+    )
+
+    # Hash numerico del messaggio.
+    #
+    # Utilizziamo un valore deterministico
+    # esclusivamente per il test locale.
+    messaggio_hash = int.from_bytes(
+        messaggio_testo.encode("utf-8"),
+        byteorder="big"
+    )
+
+    # --------------------------------------------------------
+    # Generazione firma
+    # --------------------------------------------------------
+
+    try:
+
+        firma = message_signature(
+            private_key,
+            messaggio_hash
+        )
+
+    except Exception as e:
+
+        print(
+            "❌ Generazione firma fallita:"
+        )
+
+        print(
+            str(e)
+        )
+
+        return False
+
+    if not firma:
+
+        print(
+            "❌ Firma non generata."
+        )
+
+        return False
+
     print(
-        "🟡 Nessuna firma reale eseguita."
+        "✅ Firma locale generata."
+    )
+
+    # --------------------------------------------------------
+    # Verifica firma
+    # --------------------------------------------------------
+
+    try:
+
+        public_key = private_key.public_key
+
+        verificata = public_key.verify(
+            messaggio_hash,
+            firma
+        )
+
+    except Exception as e:
+
+        print(
+            "⚠️ Firma generata ma verifica locale "
+            "non disponibile con questa versione "
+            "di starknet-py."
+        )
+
+        print(
+            f"   Dettaglio: {e}"
+        )
+
+        print(
+            "🟡 Nessuna operazione Sorare eseguita."
+        )
+
+        return False
+
+    if not verificata:
+
+        print(
+            "❌ VERIFICA FIRMA FALLITA."
+        )
+
+        print(
+            "========================================"
+        )
+
+        return False
+
+    print(
+        "✅ FIRMA VERIFICATA LOCALMENTE."
+    )
+
+    print(
+        "🟢 Chiave Stark caricata e utilizzabile "
+        "per una firma locale."
+    )
+
+    print(
+        "🟡 Nessuna mutation Sorare eseguita."
     )
 
     print(
@@ -196,10 +334,12 @@ def verifica_chiave_stark():
     )
 
     print(
-        "🟡 Nessuna mutation Sorare eseguita."
+        "🟡 Nessuna offerta modificata."
     )
 
-    print("========================================")
+    print(
+        "========================================"
+    )
     print("")
 
     return True
@@ -1519,14 +1659,36 @@ def monitor_offerte():
     print("")
 
     # ========================================================
-    # TEST CHIAVE
+    # TEST LOCALE FIRMA
     # ========================================================
 
-    verifica_chiave_stark()
+    firma_ok = test_firma_stark()
 
-    # ========================================================
-    # AUTENTICAZIONE SORARE
-    # ========================================================
+    if not firma_ok:
+
+        print(
+            "⚠️ TEST FIRMA STARK NON SUPERATO."
+        )
+
+        print(
+            "⚠️ Il bot continua in DRY RUN."
+        )
+
+        print(
+            "⚠️ Nessuna operazione reale verrà eseguita."
+        )
+
+    else:
+
+        print(
+            "🟢 TEST FIRMA STARK SUPERATO."
+        )
+
+        print(
+            "🟡 Il bot rimane comunque in DRY RUN."
+        )
+
+    print("")
 
     if not verifica_account():
 
@@ -1563,7 +1725,9 @@ def monitor_offerte():
                 f"⚠️ Errore nel ciclo: {e}"
             )
 
-        # Controllo ogni 10 secondi.
+        # ====================================================
+        # CONTROLLO OGNI 10 SECONDI
+        # ====================================================
 
         time.sleep(10)
 
