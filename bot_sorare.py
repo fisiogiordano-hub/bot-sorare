@@ -6,7 +6,6 @@ from flask import Flask
 
 app = Flask(__name__)
 
-
 # ============================================================
 # CONFIGURAZIONE
 # ============================================================
@@ -15,34 +14,29 @@ SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 SORARE_JWT_AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
 
+SORARE_API_URL = "https://api.sorare.com/graphql"
+
 # ============================================================
 # SICUREZZA
 # ============================================================
 
 # IMPORTANTISSIMO:
-# Il bot NON esegue ancora nessuna mutazione reale.
+# Per ora NON eseguiamo nessuna mutazione reale.
 DRY_RUN = True
-
 
 # ============================================================
 # REGOLE DEL BOT
 # ============================================================
 
 PREZZO_MASSIMO_CENTESIMI = 50
-
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
-
-SORARE_API_URL = "https://api.sorare.com/graphql"
-
 
 # ============================================================
 # STATO
 # ============================================================
 
 offerte_gia_analizzate = set()
-
 monitoraggio_avviato = False
-
 lock_avvio = threading.Lock()
 
 
@@ -53,7 +47,6 @@ lock_avvio = threading.Lock()
 def crea_headers():
 
     if not SORARE_TOKEN:
-
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato."
         )
@@ -61,7 +54,6 @@ def crea_headers():
     token = SORARE_TOKEN
 
     if not token.lower().startswith("bearer "):
-
         token = f"Bearer {token}"
 
     headers = {
@@ -71,18 +63,20 @@ def crea_headers():
     }
 
     if SORARE_JWT_AUD:
-
         headers["JWT-AUD"] = SORARE_JWT_AUD
 
     return headers
 
 
-def esegui_query(query, variables=None):
+def esegui_query(query, variables=None, operation_name=None):
 
     payload = {
         "query": query,
         "variables": variables or {},
     }
+
+    if operation_name:
+        payload["operationName"] = operation_name
 
     try:
 
@@ -145,19 +139,19 @@ def verifica_account():
 
     query = """
     query CurrentUserTest {
-
         currentUser {
-
             slug
             nickname
         }
     }
     """
 
-    risultato = esegui_query(query)
+    risultato = esegui_query(
+        query,
+        operation_name="CurrentUserTest"
+    )
 
     if not risultato:
-
         return False
 
     user = (
@@ -177,17 +171,14 @@ def verifica_account():
     print("")
     print("========================================")
     print("✅ AUTENTICAZIONE SORARE RIUSCITA")
-
     print(
         f"👤 Manager: "
         f"{user.get('nickname')}"
     )
-
     print(
         f"🔗 Slug: "
         f"{user.get('slug')}"
     )
-
     print("========================================")
     print("")
 
@@ -215,9 +206,7 @@ def recupera_offerte():
                     status
 
                     sender {
-
                         ... on User {
-
                             slug
                             nickname
                         }
@@ -226,7 +215,6 @@ def recupera_offerte():
                     senderSide {
 
                         anyCards {
-
                             assetId
                             slug
                             collection
@@ -236,7 +224,6 @@ def recupera_offerte():
                     receiverSide {
 
                         anyCards {
-
                             assetId
                             slug
                             collection
@@ -248,10 +235,12 @@ def recupera_offerte():
     }
     """
 
-    risultato = esegui_query(query)
+    risultato = esegui_query(
+        query,
+        operation_name="PendingOffers"
+    )
 
     if not risultato:
-
         return []
 
     user = (
@@ -282,13 +271,42 @@ def recupera_offerte():
 
 
 # ============================================================
-# RECUPERO DETTAGLI CARTE
+# RECUPERO DETTAGLI CARTE + PREZZO
+# ============================================================
+#
+# IMPORTANTE:
+#
+# NON utilizziamo:
+#   publicMinPrices
+#   price
+#   priceInFiat
+#   eur su TokenOffer
+#
+# Per il prezzo utilizziamo:
+#
+# latestEnglishAuction {
+#     bestBid {
+#         amount
+#         amountInFiat {
+#             eur
+#         }
+#     }
+# }
+#
+# e, se disponibile:
+#
+# liveSingleSaleOffer {
+#     price
+#     priceInFiat {
+#         eur
+#     }
+# }
+#
 # ============================================================
 
 def recupera_dettagli_carte(asset_ids):
 
     if not asset_ids:
-
         return []
 
     query = """
@@ -305,6 +323,27 @@ def recupera_dettagli_carte(asset_ids):
             name
             rarityTyped
 
+            latestEnglishAuction {
+
+                bestBid {
+
+                    amount
+
+                    amountInFiat {
+                        eur
+                    }
+                }
+            }
+
+            liveSingleSaleOffer {
+
+                price
+
+                priceInFiat {
+                    eur
+                }
+            }
+
             anyPlayer {
 
                 displayName
@@ -314,7 +353,6 @@ def recupera_dettagli_carte(asset_ids):
                     slug
 
                     activeCompetitions {
-
                         slug
                     }
                 }
@@ -325,21 +363,7 @@ def recupera_dettagli_carte(asset_ids):
                 name
 
                 activeCompetitions {
-
                     slug
-                }
-            }
-
-            liveSingleSaleOffer {
-
-                id
-
-                receiverSide {
-
-                    amounts {
-
-                        eur
-                    }
                 }
             }
         }
@@ -350,11 +374,11 @@ def recupera_dettagli_carte(asset_ids):
         query,
         {
             "assetIds": asset_ids
-        }
+        },
+        operation_name="CardDetails"
     )
 
     if not risultato:
-
         return []
 
     carte = (
@@ -368,85 +392,100 @@ def recupera_dettagli_carte(asset_ids):
 
 
 # ============================================================
-# RECUPERO PREZZO
+# PREZZO CARTA
 # ============================================================
 
-def recupera_prezzo_centesimi(carta):
+def recupera_prezzo_euro_centesimi(carta):
 
-    """
-    Recupera il prezzo dalla liveSingleSaleOffer.
+    # --------------------------------------------------------
+    # 1. PREZZO DA LIVE SINGLE SALE OFFER
+    # --------------------------------------------------------
 
-    Struttura utilizzata:
-
-        liveSingleSaleOffer
-            receiverSide
-                amounts
-                    eur
-
-    NON utilizziamo:
-
-        publicMinPrices
-        price
-        priceInFiat
-        eurCents
-    """
-
-    offerta = (
-        carta.get(
-            "liveSingleSaleOffer"
-        )
+    offerta_vendita = (
+        carta.get("liveSingleSaleOffer")
         or {}
     )
 
-    if not offerta:
-
-        return None
-
-    receiver_side = (
-        offerta.get(
-            "receiverSide"
-        )
+    price_in_fiat = (
+        offerta_vendita.get("priceInFiat")
         or {}
     )
 
-    amounts = (
-        receiver_side.get(
-            "amounts"
-        )
+    eur = price_in_fiat.get("eur")
+
+    if eur is not None:
+
+        try:
+
+            valore = float(eur)
+
+            centesimi = round(
+                valore * 100
+            )
+
+            print(
+                "      💰 Fonte prezzo: "
+                "liveSingleSaleOffer"
+            )
+
+            return centesimi
+
+        except (ValueError, TypeError):
+
+            pass
+
+    # --------------------------------------------------------
+    # 2. PREZZO DA LATEST ENGLISH AUCTION
+    # --------------------------------------------------------
+
+    asta = (
+        carta.get("latestEnglishAuction")
         or {}
     )
 
-    valore_eur = amounts.get(
-        "eur"
+    best_bid = (
+        asta.get("bestBid")
+        or {}
     )
 
-    if valore_eur is None:
+    amount_in_fiat = (
+        best_bid.get("amountInFiat")
+        or {}
+    )
 
-        return None
+    eur = amount_in_fiat.get("eur")
 
-    try:
+    if eur is not None:
 
-        # Gestione di valori numerici
-        # e stringhe.
+        try:
 
-        valore = float(
-            valore_eur
-        )
+            valore = float(eur)
 
-        centesimi = round(
-            valore * 100
-        )
+            centesimi = round(
+                valore * 100
+            )
 
-        return centesimi
+            print(
+                "      💰 Fonte prezzo: "
+                "latestEnglishAuction.bestBid"
+            )
 
-    except Exception as e:
+            return centesimi
 
-        print(
-            f"⚠️ Impossibile convertire "
-            f"il prezzo EUR: {e}"
-        )
+        except (ValueError, TypeError):
 
-        return None
+            pass
+
+    # --------------------------------------------------------
+    # 3. NESSUN PREZZO
+    # --------------------------------------------------------
+
+    print(
+        "      ⚠️ Prezzo non disponibile "
+        "tramite le fonti attuali."
+    )
+
+    return None
 
 
 # ============================================================
@@ -471,20 +510,6 @@ def analizza_carta(carta):
         or ""
     ).upper()
 
-    # ========================================================
-    # PREZZO
-    # ========================================================
-
-    prezzo_centesimi = (
-        recupera_prezzo_centesimi(
-            carta
-        )
-    )
-
-    # ========================================================
-    # GIOCATORE / CLUB
-    # ========================================================
-
     player = (
         carta.get("anyPlayer")
         or {}
@@ -496,22 +521,18 @@ def analizza_carta(carta):
     )
 
     competizioni = (
-        club.get(
-            "activeCompetitions"
-        )
+        club.get("activeCompetitions")
         or []
     )
 
-    campionato_coperto = (
-        len(competizioni) > 0
-    )
+    # --------------------------------------------------------
+    # PREZZO
+    # --------------------------------------------------------
 
-    # ========================================================
-    # REGOLE
-    # ========================================================
-
-    rarita_ok = (
-        rarita == "LIMITED"
+    prezzo_centesimi = (
+        recupera_prezzo_euro_centesimi(
+            carta
+        )
     )
 
     prezzo_verificabile = (
@@ -520,9 +541,31 @@ def analizza_carta(carta):
 
     prezzo_ok = (
         prezzo_verificabile
-        and prezzo_centesimi
+        and preco_entero(
+            prezzo_centesimi
+        )
         <= PREZZO_MASSIMO_CENTESIMI
     )
+
+    # --------------------------------------------------------
+    # CAMPIONATO
+    # --------------------------------------------------------
+
+    campionato_coperto = (
+        len(competizioni) > 0
+    )
+
+    # --------------------------------------------------------
+    # RARITÀ
+    # --------------------------------------------------------
+
+    rarita_ok = (
+        rarita == "LIMITED"
+    )
+
+    # --------------------------------------------------------
+    # IDONEITÀ
+    # --------------------------------------------------------
 
     idonea = (
         rarita_ok
@@ -530,19 +573,17 @@ def analizza_carta(carta):
         and campionato_coperto
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # LOG
-    # ========================================================
+    # --------------------------------------------------------
 
     print("")
-
     print(
         f"   📄 {nome}"
     )
 
     print(
-        f"      Asset ID: "
-        f"{asset_id}"
+        f"      Asset ID: {asset_id}"
     )
 
     print(
@@ -557,15 +598,29 @@ def analizza_carta(carta):
         )
 
         print(
-            f"      💰 Prezzo: "
+            f"      Prezzo: "
             f"€{prezzo_euro:.2f}"
         )
+
+        if prezzo_ok:
+
+            print(
+                f"      🟢 Prezzo <= "
+                f"€{PREZZO_MASSIMO_CENTESIMI / 100:.2f}"
+            )
+
+        else:
+
+            print(
+                f"      🔴 Prezzo > "
+                f"€{PREZZO_MASSIMO_CENTESIMI / 100:.2f}"
+            )
 
     else:
 
         print(
-            "      💰 Prezzo: "
-            "N/D (non verificabile)"
+            "      Prezzo: N/D "
+            "(non verificabile)"
         )
 
     print(
@@ -585,33 +640,16 @@ def analizza_carta(carta):
             "      🔴 Campionato NON coperto"
         )
 
-    # ========================================================
-    # ESITO
-    # ========================================================
-
     if not rarita_ok:
 
         print(
-            "      ❌ Rarità diversa da LIMITED"
+            "      🔴 Rarità non valida"
         )
 
-    if not prezzo_verificabile:
+    else:
 
         print(
-            "      ❌ Prezzo non verificabile"
-        )
-
-    elif not prezzo_ok:
-
-        print(
-            f"      ❌ Prezzo superiore "
-            f"a €{PREZZO_MASSIMO_CENTESIMI / 100:.2f}"
-        )
-
-    if not campionato_coperto:
-
-        print(
-            "      ❌ Nessun campionato coperto"
+            "      🟢 Rarità LIMITED"
         )
 
     if idonea:
@@ -629,19 +667,23 @@ def analizza_carta(carta):
     return idonea
 
 
+def preco_entero(valore):
+
+    try:
+        return int(valore)
+    except (ValueError, TypeError):
+        return 999999999
+
+
 # ============================================================
 # CONTROLLO KULENOVIC
 # ============================================================
 
-def controlla_kulenovic(
-    carte_richieste
-):
+def controlla_kulenovic(carte_richieste):
 
     print("")
-
     print(
-        "🔎 CARTA/E RICHIESTA/E "
-        "DAL MANAGER:"
+        "🔎 CARTA/E RICHIESTA/E DAL MANAGER:"
     )
 
     kulenovic_presente = False
@@ -661,18 +703,15 @@ def controlla_kulenovic(
         )
 
         print(
-            f"   Asset ID: "
-            f"{asset_id}"
+            f"   Asset ID: {asset_id}"
         )
 
         print(
-            f"   Slug: "
-            f"{slug}"
+            f"   Slug: {slug}"
         )
 
         print(
-            f"   Collection: "
-            f"{collection}"
+            f"   Collection: {collection}"
         )
 
         if (
@@ -699,14 +738,12 @@ def elabora_offerta(offerta):
     )
 
     if not offerta_id:
-
         return
 
     if (
         offerta_id
         in offerte_gia_analizzate
     ):
-
         return
 
     offerte_gia_analizzate.add(
@@ -718,8 +755,7 @@ def elabora_offerta(offerta):
     print("📨 NUOVA OFFERTA")
 
     print(
-        f"🆔 ID: "
-        f"{offerta_id}"
+        f"🆔 ID: {offerta_id}"
     )
 
     print(
@@ -748,7 +784,6 @@ def elabora_offerta(offerta):
     )
 
     # Carte offerte dal manager.
-
     carte_offerte = (
         sender_side.get(
             "anyCards"
@@ -756,8 +791,7 @@ def elabora_offerta(offerta):
         or []
     )
 
-    # Carte richieste dal manager.
-
+    # Carte richieste al bot.
     carte_che_diamo = (
         receiver_side.get(
             "anyCards"
@@ -798,46 +832,38 @@ def elabora_offerta(offerta):
             "nell'offerta."
         )
 
-        if DRY_RUN:
-
-            print(
-                "ℹ️ L'offerta viene comunque "
-                "analizzata in DRY RUN."
-            )
+        print(
+            "ℹ️ L'offerta viene comunque "
+            "analizzata in DRY RUN."
+        )
 
     # ========================================================
     # CARTE OFFERTE
     # ========================================================
 
     asset_ids = [
-
         carta.get("assetId")
-
         for carta in carte_offerte
-
         if carta.get("assetId")
     ]
 
     if not asset_ids:
 
         print("")
-
         print(
             "🔴 DECISIONE: RIFIUTARE"
         )
 
         print(
-            "   Motivo: "
-            "nessuna carta ricevuta."
+            "   Motivo: nessuna carta ricevuta."
         )
 
         print(
             "🟡 DRY RUN: "
-            "nessun rifiuto eseguito."
+            "nessuna operazione eseguita."
         )
 
         print("----------------------------------------")
-
         return
 
     # ========================================================
@@ -852,15 +878,12 @@ def elabora_offerta(offerta):
 
     if not dettagli:
 
-        print("")
-
         print(
             "⚠️ Impossibile recuperare "
             "i dettagli delle carte."
         )
 
         print("----------------------------------------")
-
         return
 
     # ========================================================
@@ -870,7 +893,6 @@ def elabora_offerta(offerta):
     carte_idonee = []
 
     print("")
-
     print(
         "🔎 ANALISI DELLE CARTE RICEVUTE:"
     )
@@ -897,7 +919,6 @@ def elabora_offerta(offerta):
     )
 
     print("")
-
     print("----------------------------------------")
 
     print(
@@ -922,10 +943,8 @@ def elabora_offerta(offerta):
     if numero_idonee == 0:
 
         print("")
-
         print(
-            "🔴 DECISIONE: "
-            "RIFIUTARE L'OFFERTA"
+            "🔴 DECISIONE: RIFIUTARE L'OFFERTA"
         )
 
         print(
@@ -934,14 +953,12 @@ def elabora_offerta(offerta):
         )
 
         print("")
-
         print(
             "🟡 DRY RUN: "
             "nessun rifiuto eseguito."
         )
 
         print("----------------------------------------")
-
         return
 
     # ========================================================
@@ -959,14 +976,11 @@ def elabora_offerta(offerta):
     )
 
     print("")
-
     print(
-        "🟢 DECISIONE: "
-        "CONTROPROPOSTA"
+        "🟢 DECISIONE: CONTROPROPOSTA"
     )
 
     print("")
-
     print(
         "📤 DALLA PROPOSTA VIENE RIMOSSA:"
     )
@@ -976,7 +990,6 @@ def elabora_offerta(offerta):
     )
 
     print("")
-
     print(
         "🗑️ VENGONO ELIMINATE "
         "LE CARTE NON IDONEE:"
@@ -991,15 +1004,12 @@ def elabora_offerta(offerta):
     else:
 
         print(
-            f"   ❌ "
-            f"{numero_non_idonee} carta/e"
+            f"   ❌ {numero_non_idonee} carta/e"
         )
 
     print("")
-
     print(
-        "📥 RIMANGONO SOLO "
-        "LE CARTE IDONEE:"
+        "📥 RIMANGONO SOLO LE CARTE IDONEE:"
     )
 
     for carta in carte_idonee:
@@ -1010,7 +1020,6 @@ def elabora_offerta(offerta):
         )
 
     print("")
-
     print(
         f"💰 PAGAMENTO AL MANAGER: "
         f"€{pagamento_euro:.2f}"
@@ -1021,7 +1030,6 @@ def elabora_offerta(offerta):
     )
 
     print("")
-
     print(
         "📋 CONTROPROPOSTA PREVISTA:"
     )
@@ -1083,8 +1091,7 @@ def monitor_offerte():
     if not verifica_account():
 
         print(
-            "❌ Impossibile autenticarsi "
-            "a Sorare."
+            "❌ Impossibile autenticarsi a Sorare."
         )
 
         return
@@ -1113,8 +1120,7 @@ def monitor_offerte():
         except Exception as e:
 
             print(
-                f"⚠️ Errore nel ciclo: "
-                f"{e}"
+                f"⚠️ Errore nel ciclo: {e}"
             )
 
         time.sleep(60)
