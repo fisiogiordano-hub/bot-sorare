@@ -148,15 +148,18 @@ def monitor_offerte():
     while True:
         try:
             risultato = esegui_query_sorare(query_offerte)
+            print(f"🔎 [DEBUG] Risposta grezza API Sorare: {risultato}")
+            
             if risultato:
                 viewer = risultato.get("data", {}).get("viewer")
                 if viewer:
                     offerte = viewer.get("receivedOffers", {}).get("nodes", [])
+                    print(f"🔎 [DEBUG] Numero offerte trovate: {len(offerte)}")
                     for offerta in offerte:
                         offerta_id = offerta.get("id")
                         stato_offerta = offerta.get("status")
+                        print(f"🔎 Offerta analizzata -> ID: {offerta_id} | Stato: {stato_offerta}")
                         if offerta_id and offerta_id not in offerte_gia_gestite:
-                            print(f"🔎 Offerta trovata: {offerta_id} (Stato: {stato_offerta})")
                             offerte_gia_gestite.add(offerta_id)
                             if stato_offerta == "pending":
                                 threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
