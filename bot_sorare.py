@@ -15,9 +15,13 @@ monitoraggio_avviato = False
 lock_avvio = threading.Lock()
 
 def esegui_query_sorare(query, variables=None):
+    auth_value = SORARE_JWT_TOKEN.strip()
+    if not auth_value.lower().startswith("bearer "):
+        auth_value = f"Bearer {auth_value}"
+        
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {SORARE_JWT_TOKEN}"
+        "Authorization": auth_value
     }
     payload = {
         "query": query,
