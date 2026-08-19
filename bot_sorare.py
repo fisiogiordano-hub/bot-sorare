@@ -50,7 +50,7 @@ DRY_RUN = True
 # Una carta è idonea solamente se il suo floor è:
 #
 # MINIMO €0,30
-# MASSIMO €0,50
+# MASSIMO €0,80
 #
 # Quindi:
 #
@@ -58,10 +58,12 @@ DRY_RUN = True
 # €0,30 -> IDONEA
 # €0,37 -> IDONEA
 # €0,50 -> IDONEA
-# €0,51 -> NON IDONEA
+# €0,79 -> IDONEA
+# €0,80 -> IDONEA
+# €0,81 -> NON IDONEA
 
 PREZZO_MINIMO_CENTESIMI = 30
-PREZZO_MASSIMO_CENTESIMI = 50
+PREZZO_MASSIMO_CENTESIMI = 80
 
 
 # Pagamento previsto:
