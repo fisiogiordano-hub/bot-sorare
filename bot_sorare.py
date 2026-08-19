@@ -281,11 +281,6 @@ def recupera_dettagli_carte(asset_ids):
             name
             rarityTyped
 
-            publicMinPrices {
-                referenceCurrency
-                eurCents
-            }
-
             anyPlayer {
 
                 displayName
@@ -306,6 +301,16 @@ def recupera_dettagli_carte(asset_ids):
 
                 activeCompetitions {
                     slug
+                }
+            }
+
+            liveSingleSaleOffer {
+
+                receiverSide {
+
+                    amounts {
+                        eur
+                    }
                 }
             }
         }
@@ -333,6 +338,38 @@ def recupera_dettagli_carte(asset_ids):
 
 
 # ============================================================
+# ESTRAZIONE PREZZO EUR
+# ============================================================
+
+def estrai_prezzo_euro(carta):
+
+    offerta = (
+        carta.get("liveSingleSaleOffer")
+        or {}
+    )
+
+    receiver_side = (
+        offerta.get("receiverSide")
+        or {}
+    )
+
+    amounts = (
+        receiver_side.get("amounts")
+        or {}
+    )
+
+    prezzo = amounts.get("eur")
+
+    if prezzo is None:
+        return None
+
+    try:
+        return float(prezzo)
+    except (ValueError, TypeError):
+        return None
+
+
+# ============================================================
 # CONTROLLO CARTA
 # ============================================================
 
@@ -354,14 +391,27 @@ def analizza_carta(carta):
         or ""
     ).upper()
 
-    prezzi = (
-        carta.get("publicMinPrices")
-        or {}
+    # ========================================================
+    # PREZZO
+    # ========================================================
+
+    prezzo_euro = estrai_prezzo_euro(
+        carta
     )
 
-    prezzo_centesimi = (
-        prezzi.get("eurCents")
-    )
+    if prezzo_euro is not None:
+
+        prezzo_centesimi = round(
+            prezzo_euro * 100
+        )
+
+    else:
+
+        prezzo_centesimi = None
+
+    # ========================================================
+    # COMPETIZIONI
+    # ========================================================
 
     player = (
         carta.get("anyPlayer")
@@ -378,12 +428,13 @@ def analizza_carta(carta):
         or []
     )
 
-    # Una competizione attiva significa
-    # che il giocatore appartiene a un
-    # campionato coperto.
     campionato_coperto = (
         len(competizioni) > 0
     )
+
+    # ========================================================
+    # REGOLE
+    # ========================================================
 
     rarita_ok = (
         rarita == "LIMITED"
@@ -395,7 +446,7 @@ def analizza_carta(carta):
 
     prezzo_ok = (
         prezzo_verificabile
-        and int(prezzo_centesimi)
+        and prezzo_centesimi
         <= PREZZO_MASSIMO_CENTESIMI
     )
 
@@ -404,6 +455,10 @@ def analizza_carta(carta):
         and prezzo_ok
         and campionato_coperto
     )
+
+    # ========================================================
+    # LOG
+    # ========================================================
 
     print("")
     print(
@@ -415,28 +470,16 @@ def analizza_carta(carta):
     )
 
     print(
-        f"      Rarità: {rarita or 'N/D'}"
+        f"      Rarità: "
+        f"{rarita or 'N/D'}"
     )
 
-    if prezzo_centesimi is not None:
+    if prezzo_euro is not None:
 
-        try:
-
-            prezzo_euro = (
-                int(prezzo_centesimi)
-                / 100
-            )
-
-            print(
-                f"      Prezzo: "
-                f"€{prezzo_euro:.2f}"
-            )
-
-        except Exception:
-
-            print(
-                "      Prezzo: N/D"
-            )
+        print(
+            f"      Prezzo: "
+            f"€{prezzo_euro:.2f}"
+        )
 
     else:
 
@@ -460,6 +503,34 @@ def analizza_carta(carta):
 
         print(
             "      🔴 Campionato NON coperto"
+        )
+
+    # ========================================================
+    # MOTIVI DI ESCLUSIONE
+    # ========================================================
+
+    if not rarita_ok:
+
+        print(
+            "      ❌ Rarità diversa da LIMITED"
+        )
+
+    if not prezzo_verificabile:
+
+        print(
+            "      ❌ Prezzo non verificabile"
+        )
+
+    elif not prezzo_ok:
+
+        print(
+            "      ❌ Prezzo superiore a €0,50"
+        )
+
+    if not campionato_coperto:
+
+        print(
+            "      ❌ Nessun campionato coperto"
         )
 
     if idonea:
@@ -515,7 +586,6 @@ def controlla_kulenovic(carte_richieste):
             f"{carta.get('collection')}"
         )
 
-        # Controlliamo sia assetId che slug.
         if (
             KULENOVIC_ID
             and (
@@ -586,7 +656,6 @@ def elabora_offerta(offerta):
         or {}
     )
 
-    # Carte che il manager ci offre.
     carte_offerte = (
         sender_side.get(
             "anyCards"
@@ -594,7 +663,6 @@ def elabora_offerta(offerta):
         or []
     )
 
-    # Carte che il manager vuole.
     carte_che_diamo = (
         receiver_side.get(
             "anyCards"
