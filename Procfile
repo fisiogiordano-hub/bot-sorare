@@ -1,1 +1,1 @@
-web: python bot_sorare.py
+web: gunicorn wsgi:app
