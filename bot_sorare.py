@@ -2,177 +2,77 @@ import os
 import time
 import threading
 import requests
-
 from decimal import Decimal
 from flask import Flask, jsonify
 
-
-# ============================================================
-# FLASK
-# ============================================================
-
 app = Flask(__name__)
 
-
 # ============================================================
-# CONFIGURAZIONE
+# CONFIG
 # ============================================================
 
 SORARE_API_URL = "https://api.sorare.com/graphql"
+SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
+SORARE_JWT_AUD = os.getenv("SORARE_JWT_AUD", "").strip()
+KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
+SORARE_STARK_PRIVATE_KEY = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
-SORARE_TOKEN = os.getenv(
-    "SORARE_JWT_TOKEN",
-    ""
-).strip()
-
-SORARE_JWT_AUD = os.getenv(
-    "SORARE_JWT_AUD",
-    ""
-).strip()
-
-KULENOVIC_ID = os.getenv(
-    "KULENOVIC_ID",
-    ""
-).strip()
-
-SORARE_STARK_PRIVATE_KEY = os.getenv(
-    "SORARE_STARK_PRIVATE_KEY",
-    ""
-).strip()
-
-
-# ============================================================
-# SICUREZZA
-# ============================================================
-
-# IMPORTANTE:
-#
-# NON MODIFICARE.
-#
-# Il bot analizza le offerte ma NON:
-#
-# - rifiuta offerte
-# - invia controproposte
-# - modifica offerte
-# - esegue transazioni
-#
-# DRY RUN è forzato a True.
-
+# SICUREZZA: NON MODIFICARE
 DRY_RUN = True
-
-
-# ============================================================
-# REGOLE BOT
-# ============================================================
 
 PREZZO_MINIMO_CENTESIMI = 30
 PREZZO_MASSIMO_CENTESIMI = 80
-
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
-
 INTERVALLO_CONTROLLO = 10
-
 TIMEOUT_HTTP = 30
 
-
-# ============================================================
-# KULENOVIC
-# ============================================================
-
-KULENOVIC_SLUG = (
-    "sandro-kulenovic-2025-limited-385"
-)
-
+KULENOVIC_SLUG = "sandro-kulenovic-2025-limited-385"
 KULENOVIC_ASSET_ID = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
     "6796b6c0ed10ba0a6"
 )
 
-
 # ============================================================
-# CAMPIONATI COPERTI
+# CAMPIONATI
 # ============================================================
 
 CAMPIONATI_COPERTI = {
-
     "english-league": {
         "nome": "English League",
-        "alias": {
-            "english-league",
-            "premier-league-eng",
-            "premier-league",
-        },
+        "alias": {"english-league", "premier-league-eng", "premier-league"},
     },
-
     "ligue-1-fr": {
         "nome": "Ligue 1",
-        "alias": {
-            "ligue-1-fr",
-            "ligue-1",
-        },
+        "alias": {"ligue-1-fr", "ligue-1"},
     },
-
     "laliga-es": {
         "nome": "LALIGA EA SPORTS",
-        "alias": {
-            "laliga-es",
-            "laliga",
-            "la-liga",
-            "laliga-ea-sports",
-        },
+        "alias": {"laliga-es", "laliga", "la-liga", "laliga-ea-sports"},
     },
-
     "bundesliga-de": {
         "nome": "Bundesliga",
-        "alias": {
-            "bundesliga-de",
-            "bundesliga",
-        },
+        "alias": {"bundesliga-de", "bundesliga"},
     },
-
     "liga-portugal": {
         "nome": "Liga Portugal",
-        "alias": {
-            "liga-portugal",
-            "primeira-liga-pt",
-            "liga-portugal-pt",
-        },
+        "alias": {"liga-portugal", "primeira-liga-pt", "liga-portugal-pt"},
     },
-
     "eredivisie-nl": {
         "nome": "Eredivisie",
-        "alias": {
-            "eredivisie-nl",
-            "eredivisie",
-        },
+        "alias": {"eredivisie-nl", "eredivisie"},
     },
-
     "jupiler-pro-league-be": {
         "nome": "Jupiler Pro League",
-        "alias": {
-            "jupiler-pro-league-be",
-            "jupiler-pro-league",
-        },
+        "alias": {"jupiler-pro-league-be", "jupiler-pro-league"},
     },
-
     "scottish-premiership-sco": {
         "nome": "Scottish Premiership",
-        "alias": {
-            "scottish-premiership-sco",
-            "scottish-premiership",
-        },
+        "alias": {"scottish-premiership-sco", "scottish-premiership"},
     },
-
     "jleague-jp": {
         "nome": "J.League",
-        "alias": {
-            "jleague-jp",
-            "j1-league-jp",
-            "j-league",
-            "j1-league",
-        },
+        "alias": {"jleague-jp", "j1-league-jp", "j-league", "j1-league"},
     },
-
     "second-division-eng": {
         "nome": "Seconda divisione inglese",
         "alias": {
@@ -182,7 +82,6 @@ CAMPIONATI_COPERTI = {
             "championship",
         },
     },
-
     "austrian-bundesliga-at": {
         "nome": "Austrian Bundesliga",
         "alias": {
@@ -191,7 +90,6 @@ CAMPIONATI_COPERTI = {
             "bundesliga-at",
         },
     },
-
     "croatian-hnl-hr": {
         "nome": "Croatian HNL",
         "alias": {
@@ -202,23 +100,14 @@ CAMPIONATI_COPERTI = {
             "supersport-hnl",
         },
     },
-
     "2-bundesliga-de": {
         "nome": "2. Bundesliga",
-        "alias": {
-            "2-bundesliga-de",
-            "2-bundesliga",
-        },
+        "alias": {"2-bundesliga-de", "2-bundesliga"},
     },
-
     "ligue-2-fr": {
         "nome": "Ligue 2",
-        "alias": {
-            "ligue-2-fr",
-            "ligue-2",
-        },
+        "alias": {"ligue-2-fr", "ligue-2"},
     },
-
     "mls-us": {
         "nome": "MLS",
         "alias": {
@@ -228,42 +117,22 @@ CAMPIONATI_COPERTI = {
             "mls",
         },
     },
-
     "k-league-1-kr": {
         "nome": "K League",
-        "alias": {
-            "k-league-1-kr",
-            "k-league-1",
-            "k-league",
-        },
+        "alias": {"k-league-1-kr", "k-league-1", "k-league"},
     },
-
     "super-lig-tr": {
         "nome": "Turchia",
-        "alias": {
-            "super-lig-tr",
-            "super-lig",
-            "turkish-super-lig",
-        },
+        "alias": {"super-lig-tr", "super-lig", "turkish-super-lig"},
     },
-
     "superliga-dk": {
         "nome": "Danimarca",
-        "alias": {
-            "superliga-dk",
-            "superliga",
-            "danish-superliga",
-        },
+        "alias": {"superliga-dk", "superliga", "danish-superliga"},
     },
-
     "serie-a-it": {
         "nome": "Serie A",
-        "alias": {
-            "serie-a-it",
-            "serie-a",
-        },
+        "alias": {"serie-a-it", "serie-a"},
     },
-
     "brasileirao-serie-a-br": {
         "nome": "Brasile",
         "alias": {
@@ -273,7 +142,6 @@ CAMPIONATI_COPERTI = {
             "serie-a-br",
         },
     },
-
     "premier-liga-ru": {
         "nome": "Russia",
         "alias": {
@@ -283,15 +151,10 @@ CAMPIONATI_COPERTI = {
             "russia-premier-league",
         },
     },
-
     "serie-b-it": {
         "nome": "Serie B",
-        "alias": {
-            "serie-b-it",
-            "serie-b",
-        },
+        "alias": {"serie-b-it", "serie-b"},
     },
-
     "liga-1-peru": {
         "nome": "Perù",
         "alias": {
@@ -300,7 +163,6 @@ CAMPIONATI_COPERTI = {
             "peruvian-primera-division",
         },
     },
-
     "primera-a-colombia": {
         "nome": "Colombia",
         "alias": {
@@ -310,14 +172,10 @@ CAMPIONATI_COPERTI = {
             "liga-betplay",
         },
     },
-
     "liga-mx": {
         "nome": "Messico",
-        "alias": {
-            "liga-mx",
-        },
+        "alias": {"liga-mx"},
     },
-
     "laliga-2-es": {
         "nome": "LALIGA 2",
         "alias": {
@@ -329,101 +187,46 @@ CAMPIONATI_COPERTI = {
     },
 }
 
+NUMERO_CAMPIONATI = len(CAMPIONATI_COPERTI)
 
-NUMERO_CAMPIONATI = len(
-    CAMPIONATI_COPERTI
-)
+# Precalcoliamo gli alias una sola volta
+ALIAS_CAMPIONATI = {}
 
+for dati in CAMPIONATI_COPERTI.values():
+    for alias in dati["alias"]:
+        ALIAS_CAMPIONATI[
+            alias.strip().lower().replace("_", "-").replace(" ", "-")
+        ] = dati["nome"]
 
 # ============================================================
 # STATO
 # ============================================================
 
-# Offerte completate correttamente.
 offerte_gia_analizzate = set()
-
-# Offerte attualmente in elaborazione.
 offerte_in_elaborazione = set()
-
 stato_lock = threading.Lock()
-
 monitoraggio_avviato = False
-
 monitor_thread = None
 
-
 # ============================================================
-# NORMALIZZAZIONE
+# UTILITY
 # ============================================================
 
-def normalizza_slug(valore):
-
-    if valor_non_valido(valore):
+def normalizza(valore):
+    if valore is None:
         return ""
-
-    return (
-        str(valore)
-        .strip()
-        .lower()
-        .replace("_", "-")
-        .replace(" ", "-")
-    )
+    return str(valore).strip().lower().replace("_", "-").replace(" ", "-")
 
 
-def valor_non_valido(valore):
-
-    return (
-        valore is None
-        or str(valore).strip() == ""
-    )
+def trova_campionato(slug):
+    return ALIAS_CAMPIONATI.get(normalizza(slug))
 
 
-# ============================================================
-# CAMPIONATO
-# ============================================================
-
-def trova_campionato_coperto(slug):
-
-    slug_normalizzato = normalizza_slug(
-        slug
-    )
-
-    if not slug_normalizzato:
-        return None
-
+def stampa_campionati():
+    print("🏆 REGOLA CAMPIONATI:")
+    print(f"   {NUMERO_CAMPIONATI} campionati coperti.")
     for dati in CAMPIONATI_COPERTI.values():
-
-        alias = dati.get(
-            "alias",
-            set()
-        )
-
-        alias_normalizzati = {
-            normalizza_slug(x)
-            for x in alias
-        }
-
-        if slug_normalizzato in alias_normalizzati:
-            return dati.get("nome")
-
-    return None
-
-
-def stampa_campionati_coperti():
-
-    print(
-        "🏆 REGOLA CAMPIONATI:"
-    )
-
-    print(
-        f"   {NUMERO_CAMPIONATI} campionati coperti."
-    )
-
-    for dati in CAMPIONATI_COPERTI.values():
-
-        print(
-            f"   • {dati['nome']}"
-        )
+        print(f"   • {dati['nome']}")
 
 
 # ============================================================
@@ -431,212 +234,92 @@ def stampa_campionati_coperti():
 # ============================================================
 
 def verifica_configurazione():
-
-    print("")
-    print("========================================")
+    print("\n========================================")
     print("🔧 VERIFICA CONFIGURAZIONE")
     print("========================================")
 
-    configurazioni = [
-        (
-            "SORARE_JWT_TOKEN",
-            SORARE_TOKEN,
-        ),
-        (
-            "SORARE_JWT_AUD",
-            SORARE_JWT_AUD,
-        ),
-        (
-            "KULENOVIC_ID",
-            KULENOVIC_ID,
-        ),
-        (
-            "SORARE_STARK_PRIVATE_KEY",
-            SORARE_STARK_PRIVATE_KEY,
-        ),
-    ]
+    configurazioni = {
+        "SORARE_JWT_TOKEN": SORARE_TOKEN,
+        "SORARE_JWT_AUD": SORARE_JWT_AUD,
+        "KULENOVIC_ID": KULENOVIC_ID,
+        "SORARE_STARK_PRIVATE_KEY": SORARE_STARK_PRIVATE_KEY,
+    }
 
     tutto_ok = True
 
-    for nome, valore in configurazioni:
-
+    for nome, valore in configurazioni.items():
         if valore:
-
-            print(
-                f"✅ {nome} presente."
-            )
-
+            print(f"✅ {nome} presente.")
         else:
-
-            print(
-                f"❌ {nome} NON presente."
-            )
-
+            print(f"❌ {nome} NON presente.")
             tutto_ok = False
 
-    print(
-        f"🟡 DRY_RUN = {DRY_RUN}"
-    )
-
-    print(
-        "========================================"
-    )
-
+    print(f"🟡 DRY_RUN = {DRY_RUN}")
+    print("========================================")
     return tutto_ok
 
 
-# ============================================================
-# TEST CHIAVE STARK
-# ============================================================
-
 def test_firma_stark():
-
-    print("")
-    print("========================================")
+    print("\n========================================")
     print("🔐 VERIFICA CHIAVE STARK")
     print("========================================")
 
     if not SORARE_STARK_PRIVATE_KEY:
-
-        print(
-            "❌ SORARE_STARK_PRIVATE_KEY non configurata."
-        )
-
+        print("❌ SORARE_STARK_PRIVATE_KEY non configurata.")
         return False
 
-    chiave = (
-        SORARE_STARK_PRIVATE_KEY.strip()
-    )
-
-    print(
-        "✅ SORARE_STARK_PRIVATE_KEY presente."
-    )
-
-    if chiave.lower().startswith("0x"):
-
-        chiave_hex = chiave[2:]
-
-    else:
-
-        chiave_hex = chiave
-
-    if not chiave_hex:
-
-        print(
-            "❌ Chiave Stark vuota."
-        )
-
-        return False
+    chiave = SORARE_STARK_PRIVATE_KEY.strip()
+    chiave_hex = chiave[2:] if chiave.lower().startswith("0x") else chiave
 
     try:
-
-        private_key_int = int(
-            chiave_hex,
-            16
-        )
-
+        valore = int(chiave_hex, 16)
+        if valore <= 0:
+            raise ValueError
     except ValueError:
-
-        print(
-            "❌ La chiave Stark NON è "
-            "un valore esadecimale valido."
-        )
-
+        print("❌ Chiave Stark NON valida.")
         return False
 
-    if private_key_int <= 0:
-
-        print(
-            "❌ La chiave Stark non è valida."
-        )
-
-        return False
-
-    print(
-        "✅ Formato esadecimale verificato."
-    )
-
-    print(
-        "🟡 Test crittografico locale saltato."
-    )
-
-    print(
-        "🟡 Nessun modulo starknet-py interno "
-        "viene importato."
-    )
-
-    print(
-        "🟢 Il controllo della chiave non "
-        "blocca il monitoraggio."
-    )
-
-    print(
-        "🟡 DRY RUN: nessuna operazione reale."
-    )
-
-    print(
-        "========================================"
-    )
-
+    print("✅ SORARE_STARK_PRIVATE_KEY presente.")
+    print("✅ Formato esadecimale verificato.")
+    print("🟡 Test crittografico locale saltato.")
+    print("🟡 Nessun modulo starknet-py interno viene importato.")
+    print("🟢 Il controllo della chiave non blocca il monitoraggio.")
+    print("🟡 DRY RUN: nessuna operazione reale.")
+    print("========================================")
     return True
 
 
 # ============================================================
-# HEADERS
+# HTTP / GRAPHQL
 # ============================================================
 
 def crea_headers():
-
     if not SORARE_TOKEN:
-
-        raise RuntimeError(
-            "SORARE_JWT_TOKEN non configurato."
-        )
+        raise RuntimeError("SORARE_JWT_TOKEN non configurato.")
 
     token = SORARE_TOKEN
-
     if not token.lower().startswith("bearer "):
-
         token = f"Bearer {token}"
 
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Authorization": token,
-        "User-Agent": "Sorare-DryRun-Bot/1.1",
+        "User-Agent": "Sorare-DryRun-Bot/1.0",
     }
 
     if SORARE_JWT_AUD:
-
         headers["JWT-AUD"] = SORARE_JWT_AUD
 
     return headers
 
 
-# ============================================================
-# GRAPHQL
-# ============================================================
-
-def esegui_query(
-    query,
-    variables=None,
-    tentativi=3,
-):
-
-    payload = {
-        "query": query,
-        "variables": variables or {},
-    }
-
+def esegui_query(query, variables=None, tentativi=3):
+    payload = {"query": query, "variables": variables or {}}
     ultimo_errore = None
 
-    for tentativo in range(
-        1,
-        tentativi + 1
-    ):
-
+    for tentativo in range(1, tentativi + 1):
         try:
-
             response = requests.post(
                 SORARE_API_URL,
                 json=payload,
@@ -644,150 +327,57 @@ def esegui_query(
                 timeout=TIMEOUT_HTTP,
             )
 
-            print(
-                f"🌐 Sorare HTTP: "
-                f"{response.status_code}"
-            )
-
-            # ------------------------------------------------
-            # RATE LIMIT
-            # ------------------------------------------------
+            print(f"🌐 Sorare HTTP: {response.status_code}")
 
             if response.status_code == 429:
-
-                print(
-                    "⚠️ Rate limit Sorare."
-                )
-
+                print("⚠️ Rate limit Sorare.")
                 if tentativo < tentativi:
-
-                    time.sleep(
-                        tentativo * 3
-                    )
-
+                    time.sleep(tentativo * 3)
                     continue
-
                 return None
-
-            # ------------------------------------------------
-            # HTTP ERROR
-            # ------------------------------------------------
 
             if response.status_code != 200:
-
-                print(
-                    "❌ Risposta HTTP non valida:"
-                )
-
-                print(
-                    response.text[:2000]
-                )
-
-                ultimo_errore = (
-                    f"HTTP {response.status_code}"
-                )
+                print("❌ Risposta HTTP non valida:")
+                print(response.text[:1000])
+                ultimo_errore = f"HTTP {response.status_code}"
 
                 if tentativo < tentativi:
-
-                    time.sleep(
-                        tentativo
-                    )
-
+                    time.sleep(tentativo)
                     continue
-
                 return None
-
-            # ------------------------------------------------
-            # JSON
-            # ------------------------------------------------
 
             try:
-
                 risultato = response.json()
-
             except ValueError:
-
-                print(
-                    "❌ Risposta Sorare non JSON."
-                )
-
-                print(
-                    response.text[:2000]
-                )
-
+                print("❌ Risposta Sorare non JSON.")
                 return None
 
-            # ------------------------------------------------
-            # GRAPHQL ERRORS
-            # ------------------------------------------------
-
-            errori = risultato.get(
-                "errors"
-            )
-
+            errori = risultato.get("errors")
             if errori:
-
-                print(
-                    "❌ Errori GraphQL:"
-                )
-
+                print("❌ Errori GraphQL:")
                 for errore in errori:
-
-                    if isinstance(
-                        errore,
-                        dict
-                    ):
-
-                        print(
-                            "- "
-                            + str(
-                                errore.get(
-                                    "message",
-                                    "Errore sconosciuto",
-                                )
-                            )
-                        )
-
+                    if isinstance(errore, dict):
+                        print(f"- {errore.get('message', 'Errore sconosciuto')}")
                     else:
-
-                        print(
-                            "- "
-                            + str(errore)
-                        )
-
+                        print(f"- {errore}")
                 return None
 
             return risultato
 
         except requests.RequestException as e:
-
             ultimo_errore = e
-
             print(
                 f"⚠️ Errore HTTP "
-                f"(tentativo {tentativo}/"
-                f"{tentativi}): {e}"
+                f"(tentativo {tentativo}/{tentativi}): {e}"
             )
-
             if tentativo < tentativi:
-
-                time.sleep(
-                    tentativo
-                )
+                time.sleep(tentativo)
 
         except Exception as e:
-
-            print(
-                f"❌ Errore richiesta Sorare: {e}"
-            )
-
+            print(f"❌ Errore richiesta Sorare: {e}")
             return None
 
-    print(
-        f"❌ Richiesta fallita: "
-        f"{ultimo_errore}"
-    )
-
+    print(f"❌ Richiesta fallita: {ultimo_errore}")
     return None
 
 
@@ -796,7 +386,6 @@ def esegui_query(
 # ============================================================
 
 def verifica_account():
-
     query = """
     query CurrentUserTest {
         currentUser {
@@ -806,71 +395,42 @@ def verifica_account():
     }
     """
 
-    risultato = esegui_query(
-        query
-    )
-
+    risultato = esegui_query(query)
     if not risultato:
         return False
 
-    user = (
-        risultato
-        .get("data", {})
-        .get("currentUser")
-    )
+    user = risultato.get("data", {}).get("currentUser")
 
     if not user:
-
-        print(
-            "❌ Sorare non ha restituito "
-            "currentUser."
-        )
-
+        print("❌ Sorare non ha restituito currentUser.")
         return False
 
-    print("")
-    print("========================================")
+    print("\n========================================")
     print("✅ AUTENTICAZIONE SORARE RIUSCITA")
-
-    print(
-        f"👤 Manager: "
-        f"{user.get('nickname') or 'N/D'}"
-    )
-
-    print(
-        f"🔗 Slug: "
-        f"{user.get('slug') or 'N/D'}"
-    )
-
-    print("========================================")
-    print("")
-
+    print(f"👤 Manager: {user.get('nickname') or 'N/D'}")
+    print(f"🔗 Slug: {user.get('slug') or 'N/D'}")
+    print("========================================\n")
     return True
 
 
 # ============================================================
-# OFFERTE PENDING
+# OFFERTE
 # ============================================================
 
 def recupera_offerte():
-
     query = """
     query PendingOffers {
         currentUser {
-            pendingTokenOffersReceived(
-                first: 50
-            ) {
+            pendingTokenOffersReceived(first: 50) {
                 nodes {
                     id
                     status
-
                     sender {
                         ... on User {
                             slug
                             nickname
                         }
                     }
-
                     senderSide {
                         anyCards {
                             assetId
@@ -878,7 +438,6 @@ def recupera_offerte():
                             collection
                         }
                     }
-
                     receiverSide {
                         anyCards {
                             assetId
@@ -892,85 +451,40 @@ def recupera_offerte():
     }
     """
 
-    risultato = esegui_query(
-        query
-    )
-
+    risultato = esegui_query(query)
     if not risultato:
         return None
 
-    user = (
-        risultato
-        .get("data", {})
-        .get("currentUser")
-    )
-
+    user = risultato.get("data", {}).get("currentUser")
     if not user:
-
-        print(
-            "❌ currentUser assente."
-        )
-
+        print("❌ currentUser assente.")
         return None
 
-    connessione = (
-        user.get(
-            "pendingTokenOffersReceived"
-        )
-        or {}
-    )
-
-    nodes = connessione.get(
-        "nodes"
-    )
+    nodes = (
+        user.get("pendingTokenOffersReceived") or {}
+    ).get("nodes")
 
     if nodes is None:
         return []
 
-    if not isinstance(
-        nodes,
-        list
-    ):
-
-        print(
-            "❌ Formato pending offers inatteso."
-        )
-
-        return None
-
-    return nodes
+    return nodes if isinstance(nodes, list) else None
 
 
 # ============================================================
 # DETTAGLI CARTE
 # ============================================================
 
-def recupera_dettagli_carte(
-    asset_ids
-):
-
-    asset_ids = [
-        str(x).strip()
-        for x in asset_ids
-        if x
-    ]
-
-    asset_ids = list(
-        dict.fromkeys(
-            asset_ids
-        )
-    )
+def recupera_dettagli_carte(asset_ids):
+    asset_ids = list(dict.fromkeys(
+        str(x).strip() for x in asset_ids if x
+    ))
 
     if not asset_ids:
         return None
 
     query = """
-    query CardDetails(
-        $assetIds: [String!]
-    ) {
-        anyCards(
-            assetIds: $assetIds
-        ) {
+    query CardDetails($assetIds: [String!]) {
+        anyCards(assetIds: $assetIds) {
             assetId
             slug
             name
@@ -980,11 +494,9 @@ def recupera_dettagli_carte(
             anyPlayer {
                 displayName
                 slug
-
                 activeClub {
                     slug
                     name
-
                     activeCompetitions {
                         slug
                     }
@@ -993,7 +505,6 @@ def recupera_dettagli_carte(
 
             anyTeam {
                 name
-
                 activeCompetitions {
                     slug
                 }
@@ -1005,7 +516,6 @@ def recupera_dettagli_carte(
                 name
                 rarityTyped
                 seasonYear
-
                 liveSingleSaleOffer {
                     receiverSide {
                         amounts {
@@ -1013,7 +523,6 @@ def recupera_dettagli_carte(
                         }
                     }
                 }
-
                 publicMinPrices {
                     eurCents
                 }
@@ -1025,7 +534,6 @@ def recupera_dettagli_carte(
                 name
                 rarityTyped
                 seasonYear
-
                 liveSingleSaleOffer {
                     receiverSide {
                         amounts {
@@ -1033,7 +541,6 @@ def recupera_dettagli_carte(
                         }
                     }
                 }
-
                 publicMinPrices {
                     eurCents
                 }
@@ -1042,661 +549,191 @@ def recupera_dettagli_carte(
     }
     """
 
-    risultato = esegui_query(
-        query,
-        {
-            "assetIds": asset_ids
-        }
-    )
+    risultato = esegui_query(query, {"assetIds": asset_ids})
 
     if not risultato:
         return None
 
-    carte = (
-        risultato
-        .get("data", {})
-        .get("anyCards")
-    )
+    carte = risultato.get("data", {}).get("anyCards")
 
-    if carte is None:
-        return []
-
-    if not isinstance(
-        carte,
-        list
-    ):
-
-        print(
-            "❌ Formato anyCards inatteso."
-        )
-
-        return None
-
-    return carte
+    return carte if isinstance(carte, list) else []
 
 
 # ============================================================
-# EUR CENTS
+# PREZZI
 # ============================================================
 
-def leggi_eur_cents(
-    amounts
-):
-
-    if not isinstance(
-        amounts,
-        dict
-    ):
+def eur_cents(amounts):
+    if not isinstance(amounts, dict):
         return None
 
-    valore = amounts.get(
-        "eurCents"
-    )
-
-    if valore is None:
-        return None
+    valore = amounts.get("eurCents")
 
     try:
-
-        valore = int(
-            valore
-        )
-
-    except (
-        ValueError,
-        TypeError,
-    ):
-
+        valore = int(valore)
+    except (ValueError, TypeError):
         return None
 
-    if valore <= 0:
+    return valore if valore > 0 else None
+
+
+def prezzo_live(carta):
+    if not isinstance(carta, dict):
         return None
 
-    return valore
+    offerta = carta.get("liveSingleSaleOffer") or {}
+    receiver = offerta.get("receiverSide") or {}
+    cents = eur_cents(receiver.get("amounts") or {})
+
+    return Decimal(cents) / Decimal(100) if cents else None
 
 
-# ============================================================
-# PREZZO LIVE
-# ============================================================
-
-def prezzo_da_live_sale(
-    carta
-):
-
-    if not isinstance(
-        carta,
-        dict
-    ):
+def prezzo_public(carta):
+    if not isinstance(carta, dict):
         return None
 
-    offerta = (
-        carta.get(
-            "liveSingleSaleOffer"
-        )
-        or {}
-    )
+    valore = carta.get("publicMinPrices")
 
-    receiver_side = (
-        offerta.get(
-            "receiverSide"
-        )
-        or {}
-    )
+    if isinstance(valore, dict):
+        cents = eur_cents(valore)
 
-    amounts = (
-        receiver_side.get(
-            "amounts"
-        )
-        or {}
-    )
-
-    eur_cents = leggi_eur_cents(
-        amounts
-    )
-
-    if eur_cents is None:
-        return None
-
-    return (
-        Decimal(eur_cents)
-        / Decimal("100")
-    )
-
-
-# ============================================================
-# PUBLIC MIN PRICE
-# ============================================================
-
-def prezzo_da_public_min_price(
-    carta
-):
-
-    if not isinstance(
-        carta,
-        dict
-    ):
-        return None
-
-    valore = carta.get(
-        "publicMinPrices"
-    )
-
-    if isinstance(
-        valore,
-        dict
-    ):
-
-        eur_cents = leggi_eur_cents(
-            valore
-        )
-
-    elif isinstance(
-        valore,
-        list
-    ):
-
-        valori = []
-
-        for item in valore:
-
-            if not isinstance(
-                item,
-                dict
-            ):
-                continue
-
-            eur_cents = leggi_eur_cents(
-                item
-            )
-
-            if eur_cents is not None:
-
-                valori.append(
-                    eur_cents
-                )
-
-        if not valori:
-            return None
-
-        eur_cents = min(
-            valori
-        )
+    elif isinstance(valore, list):
+        prezzi = [
+            eur_cents(x)
+            for x in valore
+            if isinstance(x, dict)
+        ]
+        prezzi = [x for x in prezzi if x is not None]
+        cents = min(prezzi) if prezzi else None
 
     else:
+        cents = None
 
-        return None
-
-    if eur_cents is None:
-        return None
-
-    return (
-        Decimal(eur_cents)
-        / Decimal("100")
-    )
+    return Decimal(cents) / Decimal(100) if cents else None
 
 
-# ============================================================
-# PREZZO FLOOR
-# ============================================================
-
-def recupera_prezzo_floor(
-    carta
-):
-
-    if not isinstance(
-        carta,
-        dict
-    ):
-        return None
-
-    slug = str(
-        carta.get("slug")
-        or ""
-    ).strip()
-
-    nome = str(
-        carta.get("name")
-        or slug
-        or "Carta sconosciuta"
-    ).strip()
+def recupera_prezzo_floor(carta):
+    slug = str(carta.get("slug") or "").strip()
 
     if not slug:
-
-        print(
-            "      ⚠️ Slug carta assente."
-        )
-
+        print("      ⚠️ Slug carta assente.")
         return None
 
-    print(
-        f"      🔎 Ricerca prezzo floor: "
-        f"{slug}"
-    )
+    print(f"      🔎 Ricerca prezzo floor: {slug}")
 
     valori = []
 
-    # ========================================================
-    # LOWEST PRICE CARD
-    # ========================================================
+    for chiave in (
+        "lowestPriceCard",
+        "lowestPriceCardAnySeason",
+    ):
+        lowest = carta.get(chiave) or {}
 
-    lowest_price_card = (
-        carta.get(
-            "lowestPriceCard"
-        )
-        or {}
-    )
+        if lowest.get("slug"):
+            print(
+                f"      🎯 Carta floor trovata: "
+                f"{lowest['slug']}"
+            )
 
-    lowest_slug = str(
-        lowest_price_card.get(
-            "slug"
-        )
-        or ""
-    ).strip()
+        live = prezzo_live(lowest)
+        public = prezzo_public(lowest)
 
-    if lowest_slug:
+        if live is not None:
+            valori.append(live)
+            print(f"      💰 Offerta vendita: €{live:.2f}")
 
-        print(
-            f"      🎯 Carta floor trovata: "
-            f"{lowest_slug}"
-        )
+        if public is not None:
+            valori.append(public)
+            print(f"      💰 Public min price: €{public:.2f}")
 
-    else:
+        if valori:
+            break
 
-        print(
-            "      ⚠️ lowestPriceCard "
-            "non disponibile."
-        )
+    # Fallback carta originale
+    if not valori:
+        live = prezzo_live(carta)
+        public = prezzo_public(carta)
 
-    prezzo_live = prezzo_da_live_sale(
-        lowest_price_card
-    )
+        if live is not None:
+            valori.append(live)
+            print(f"      💰 Offerta carta: €{live:.2f}")
 
-    if prezzo_live is not None:
-
-        valori.append(
-            prezzo_live
-        )
-
-        print(
-            f"      💰 Offerta vendita: "
-            f"€{prezzo_live:.2f}"
-        )
-
-    prezzo_public = (
-        prezzo_da_public_min_price(
-            lowest_price_card
-        )
-    )
-
-    if prezzo_public is not None:
-
-        valori.append(
-            prezzo_public
-        )
-
-        print(
-            f"      💰 Public min price: "
-            f"€{prezzo_public:.2f}"
-        )
-
-    # ========================================================
-    # ANY SEASON
-    # ========================================================
+        if public is not None:
+            valori.append(public)
+            print(f"      💰 Public min carta: €{public:.2f}")
 
     if not valori:
-
-        lowest_any_season = (
-            carta.get(
-                "lowestPriceCardAnySeason"
-            )
-            or {}
-        )
-
-        if lowest_any_season:
-
-            print(
-                "      🔄 Provo "
-                "lowestPriceCardAnySeason."
-            )
-
-        prezzo_live = (
-            prezzo_da_live_sale(
-                lowest_any_season
-            )
-        )
-
-        if prezzo_live is not None:
-
-            valori.append(
-                prezzo_live
-            )
-
-            print(
-                f"      💰 Offerta any season: "
-                f"€{prezzo_live:.2f}"
-            )
-
-        prezzo_public = (
-            prezzo_da_public_min_price(
-                lowest_any_season
-            )
-        )
-
-        if prezzo_public is not None:
-
-            valori.append(
-                prezzo_public
-            )
-
-            print(
-                f"      💰 Public min any season: "
-                f"€{prezzo_public:.2f}"
-            )
-
-    # ========================================================
-    # FALLBACK CARTA ORIGINALE
-    # ========================================================
-
-    if not valori:
-
-        prezzo_live_carta = (
-            prezzo_da_live_sale(
-                carta
-            )
-        )
-
-        if prezzo_live_carta is not None:
-
-            valori.append(
-                prezzo_live_carta
-            )
-
-            print(
-                f"      💰 Offerta carta: "
-                f"€{prezzo_live_carta:.2f}"
-            )
-
-        prezzo_public_carta = (
-            prezzo_da_public_min_price(
-                carta
-            )
-        )
-
-        if prezzo_public_carta is not None:
-
-            valori.append(
-                prezzo_public_carta
-            )
-
-            print(
-                f"      💰 Public min carta: "
-                f"€{prezzo_public_carta:.2f}"
-            )
-
-    if not valori:
-
-        print(
-            f"      ⚠️ Prezzo non disponibile "
-            f"per {nome}."
-        )
-
+        print("      ⚠️ Prezzo non disponibile.")
         return None
 
-    floor = min(
-        valori
-    )
-
-    print(
-        f"      ✅ FLOOR VERIFICATO: "
-        f"€{floor:.2f}"
-    )
-
+    floor = min(valori)
+    print(f"      ✅ FLOOR VERIFICATO: €{floor:.2f}")
     return floor
 
 
 # ============================================================
-# CONTROLLO SQUADRA + CAMPIONATO
+# SQUADRA / CAMPIONATO
 # ============================================================
 
-def controlla_squadra_e_campionato(
-    carta
-):
+def controlla_squadra_e_campionato(carta):
+    player = carta.get("anyPlayer") or {}
 
-    if not isinstance(
-        carta,
-        dict
-    ):
-        return False
-
-    player = (
-        carta.get(
-            "anyPlayer"
-        )
-        or {}
-    )
-
-    if not isinstance(
-        player,
-        dict
-    ):
-        player = {}
-
-    player_name = (
-        player.get(
-            "displayName"
-        )
-        or player.get(
-            "slug"
-        )
-        or carta.get(
-            "name"
-        )
+    nome = (
+        player.get("displayName")
+        or player.get("slug")
+        or carta.get("name")
         or "Giocatore sconosciuto"
     )
 
-    # ========================================================
-    # ACTIVE CLUB
-    # ========================================================
-
-    active_club = player.get(
-        "activeClub"
-    )
+    active_club = player.get("activeClub")
 
     # REGOLA FONDAMENTALE:
-    #
-    # NESSUNA activeClub = CARTA NON IDONEA.
-    #
-    # Non usiamo vecchie squadre.
-    # Non usiamo anyTeam come sostituto.
-    # Non cerchiamo una squadra storica.
-    #
-    # Se activeClub manca:
-    # -> giocatore senza squadra
-    # -> campionato non valido
-    # -> carta NON IDONEA
-
-    if not active_club:
-
-        print(
-            "      🏟️ Squadra attiva: NESSUNA"
-        )
-
-        print(
-            f"      👤 Giocatore: "
-            f"{player_name}"
-        )
-
-        print(
-            "      🔴 GIOCATORE SENZA SQUADRA"
-        )
-
-        print(
-            "      🔴 CARTA NON IDONEA"
-        )
-
+    # SENZA SQUADRA = CARTA NON IDONEA
+    if not isinstance(active_club, dict):
+        print("      🏟️ Squadra attiva: NESSUNA")
+        print(f"      👤 Giocatore: {nome}")
+        print("      🔴 GIOCATORE SENZA SQUADRA")
+        print("      🔴 CAMPIONATO NON VALIDO")
         return False
 
-    if not isinstance(
-        active_club,
-        dict
-    ):
+    club_name = (
+        active_club.get("name")
+        or active_club.get("slug")
+        or "N/D"
+    )
 
-        print(
-            "      🔴 activeClub ha formato "
-            "inatteso."
-        )
+    print(f"      🏟️ Squadra attiva: {club_name}")
 
-        print(
-            "      🔴 CARTA NON IDONEA"
-        )
+    competizioni = active_club.get("activeCompetitions") or []
 
+    if not isinstance(competizioni, list) or not competizioni:
+        print("      🔴 Nessuna competizione attiva.")
+        print("      🔴 CAMPIONATO NON COPERTO")
         return False
 
-    club_name = str(
-        active_club.get(
-            "name"
-        )
-        or active_club.get(
-            "slug"
-        )
-        or ""
-    ).strip()
-
-    club_slug = normalizza_slug(
-        active_club.get(
-            "slug"
-        )
-    )
-
-    print(
-        f"      🏟️ Squadra attiva: "
-        f"{club_name or 'N/D'}"
-    )
-
-    if club_slug:
-
-        print(
-            f"      🏷️ Squadra slug: "
-            f"{club_slug}"
-        )
-
-    # ========================================================
-    # COMPETIZIONI ATTIVE
-    # ========================================================
-
-    competizioni = (
-        active_club.get(
-            "activeCompetitions"
-        )
-        or []
-    )
-
-    if not isinstance(
-        competizioni,
-        list
-    ):
-
-        print(
-            "      🔴 activeCompetitions "
-            "ha formato inatteso."
-        )
-
-        print(
-            "      🔴 CARTA NON IDONEA"
-        )
-
-        return False
-
-    if not competizioni:
-
-        print(
-            "      🔴 Nessuna competizione "
-            "attiva sulla squadra."
-        )
-
-        print(
-            "      🔴 CAMPIONATO NON COPERTO"
-        )
-
-        print(
-            "      🔴 CARTA NON IDONEA"
-        )
-
-        return False
-
-    print(
-        "      🏆 COMPETIZIONI ATTIVE "
-        "DELLA SQUADRA:"
-    )
-
-    campionati_trovati = []
+    trovati = []
 
     for competizione in competizioni:
-
-        if not isinstance(
-            competizione,
-            dict
-        ):
+        if not isinstance(competizione, dict):
             continue
 
-        slug = normalizza_slug(
-            competizione.get(
-                "slug"
-            )
-        )
-
+        slug = normalizza(competizione.get("slug"))
         if not slug:
             continue
 
-        print(
-            f"         • {slug}"
-        )
+        print(f"         • {slug}")
 
-        nome_campionato = (
-            trova_campionato_coperto(
-                slug
-            )
-        )
-
+        nome_campionato = trova_campionato(slug)
         if nome_campionato:
+            trovati.append(nome_campionato)
 
-            campionati_trovati.append(
-                nome_campionato
-            )
-
-    if campionati_trovati:
-
-        campionati_unici = list(
-            dict.fromkeys(
-                campionati_trovati
-            )
-        )
-
-        print(
-            "      🟢 CAMPIONATO COPERTO"
-        )
-
-        for nome in campionati_unici:
-
-            print(
-                f"         🟢 {nome}"
-            )
-
+    if trovati:
+        print("      🟢 CAMPIONATO COPERTO")
+        for nome_campionato in dict.fromkeys(trovati):
+            print(f"         🟢 {nome_campionato}")
         return True
 
-    print(
-        "      🔴 CAMPIONATO NON COPERTO"
-    )
-
-    print(
-        "      🔎 Nessuna competizione attiva "
-        "della squadra è coperta."
-    )
-
-    print(
-        "      🔴 CARTA NON IDONEA"
-    )
-
+    print("      🔴 CAMPIONATO NON COPERTO")
     return False
 
 
@@ -1704,213 +741,53 @@ def controlla_squadra_e_campionato(
 # ANALISI CARTA
 # ============================================================
 
-def analizza_carta(
-    carta
-):
-
-    if not isinstance(
-        carta,
-        dict
-    ):
-        return False
-
-    asset_id = carta.get(
-        "assetId"
-    )
-
-    slug = carta.get(
-        "slug"
-    )
-
+def analizza_carta(carta):
     nome = (
-        carta.get(
-            "name"
-        )
-        or slug
-        or asset_id
+        carta.get("name")
+        or carta.get("slug")
         or "Carta sconosciuta"
     )
 
-    rarita = str(
-        carta.get(
-            "rarityTyped"
-        )
-        or ""
-    ).upper().strip()
+    asset_id = carta.get("assetId")
+    slug = carta.get("slug")
+    rarita = str(carta.get("rarityTyped") or "").upper().strip()
 
-    # ========================================================
-    # PREZZO
-    # ========================================================
-
-    prezzo = (
-        recupera_prezzo_floor(
-            carta
-        )
-    )
-
-    prezzo_minimo = (
-        Decimal(
-            PREZZO_MINIMO_CENTESIMI
-        )
-        / Decimal("100")
-    )
-
-    prezzo_massimo = (
-        Decimal(
-            PREZZO_MASSIMO_CENTESIMI
-        )
-        / Decimal("100")
-    )
+    prezzo = recupera_prezzo_floor(carta)
 
     prezzo_ok = (
         prezzo is not None
-        and prezzo >= prezzo_minimo
-        and prezzo <= prezzo_massimo
+        and Decimal(PREZZO_MINIMO_CENTESIMI) / 100
+        <= prezzo
+        <= Decimal(PREZZO_MASSIMO_CENTESIMI) / 100
     )
 
-    # ========================================================
-    # RARITÀ
-    # ========================================================
+    rarita_ok = rarita == "LIMITED"
+    campionato_ok = controlla_squadra_e_campionato(carta)
 
-    rarita_ok = (
-        rarita == "LIMITED"
-    )
-
-    # ========================================================
-    # SQUADRA + CAMPIONATO
-    # ========================================================
-
-    campionato_coperto = (
-        controlla_squadra_e_campionato(
-            carta
-        )
-    )
-
-    # ========================================================
-    # IDONEITÀ FINALE
-    # ========================================================
-
-    idonea = (
-        rarita_ok
-        and prezzo_ok
-        and campionato_coperto
-    )
-
-    # ========================================================
-    # LOG
-    # ========================================================
+    idonea = prezzo_ok and rarita_ok and campionato_ok
 
     print("")
+    print(f"   📄 {nome}")
+    print(f"      Asset ID: {asset_id or 'N/D'}")
+    print(f"      Slug: {slug or 'N/D'}")
+    print(f"      Rarità: {rarita or 'N/D'}")
 
-    print(
-        f"   📄 {nome}"
-    )
-
-    print(
-        f"      Asset ID: "
-        f"{asset_id or 'N/D'}"
-    )
-
-    print(
-        f"      Slug: "
-        f"{slug or 'N/D'}"
-    )
-
-    print(
-        f"      Rarità: "
-        f"{rarita or 'N/D'}"
-    )
-
-    if prezzo is not None:
-
-        print(
-            f"      Prezzo floor: "
-            f"€{prezzo:.2f}"
-        )
-
-        if prezzo < prezzo_minimo:
-
-            print(
-                "      🔴 Prezzo inferiore "
-                "al minimo di €0,30"
-            )
-
-        elif prezzo <= prezzo_massimo:
-
-            print(
-                "      🟢 Prezzo tra "
-                "€0,30 e €0,80"
-            )
-
-        else:
-
-            print(
-                "      🔴 Prezzo superiore "
-                "al massimo di €0,80"
-            )
-
+    if prezzo is None:
+        print("      🔴 Prezzo NON verificabile")
+    elif prezzo < Decimal("0.30"):
+        print(f"      🔴 Prezzo inferiore: €{prezzo:.2f}")
+    elif prezzo > Decimal("0.80"):
+        print(f"      🔴 Prezzo superiore: €{prezzo:.2f}")
     else:
-
-        print(
-            "      Prezzo floor: N/D"
-        )
-
-        print(
-            "      🔴 Prezzo NON verificabile"
-        )
-
-    if rarita_ok:
-
-        print(
-            "      🟢 Rarità LIMITED"
-        )
-
-    else:
-
-        print(
-            "      🔴 Rarità NON valida"
-        )
+        print(f"      🟢 Prezzo tra €0,30 e €0,80")
 
     print(
-        "      =================================="
+        "      🟢 Rarità LIMITED"
+        if rarita_ok
+        else "      🔴 Rarità NON valida"
     )
 
-    if idonea:
-
-        print(
-            "      🟢 CARTA IDONEA"
-        )
-
-    else:
-
-        print(
-            "      ❌ CARTA NON IDONEA"
-        )
-
-        # Log esplicito delle condizioni.
-        if not rarita_ok:
-
-            print(
-                "      ❌ Motivo: rarità non LIMITED."
-            )
-
-        if not prezzo_ok:
-
-            print(
-                "      ❌ Motivo: prezzo fuori "
-                "dal range o non verificabile."
-            )
-
-        if not campionato_coperto:
-
-            print(
-                "      ❌ Motivo: squadra/campionato "
-                "non idoneo."
-            )
-
-    print(
-        "      =================================="
-    )
+    print("      🟢 CARTA IDONEA" if idonea else "      ❌ CARTA NON IDONEA")
 
     return idonea
 
@@ -1919,766 +796,187 @@ def analizza_carta(
 # KULENOVIC
 # ============================================================
 
-def controlla_kulenovic(
-    carte_richieste
-):
+def controlla_kulenovic(carte):
+    print("\n🔎 CARTA/E RICHIESTA/E DAL MANAGER:")
 
-    print("")
+    configurato = KULENOVIC_ID.lower().strip()
+    trovato = False
 
-    print(
-        "🔎 CARTA/E RICHIESTA/E "
-        "DAL MANAGER:"
-    )
+    for carta in carte:
+        asset_id = str(carta.get("assetId") or "").strip()
+        slug = str(carta.get("slug") or "").strip()
+        collection = str(carta.get("collection") or "").strip()
 
-    kulenovic_presente = False
-
-    configurato = (
-        KULENOVIC_ID.strip()
-        if KULENOVIC_ID
-        else ""
-    )
-
-    for carta in carte_richieste:
-
-        if not isinstance(
-            carta,
-            dict
-        ):
-            continue
-
-        asset_id = str(
-            carta.get(
-                "assetId"
-            )
-            or ""
-        ).strip()
-
-        slug = str(
-            carta.get(
-                "slug"
-            )
-            or ""
-        ).strip()
-
-        collection = str(
-            carta.get(
-                "collection"
-            )
-            or ""
-        ).strip()
-
-        print(
-            f"   Asset ID: {asset_id}"
-        )
-
-        print(
-            f"   Slug: {slug}"
-        )
-
-        print(
-            f"   Collection: {collection}"
-        )
-
-        match_configurazione = (
-            bool(configurato)
-            and (
-                asset_id.lower()
-                == configurato.lower()
-                or
-                slug.lower()
-                == configurato.lower()
-            )
-        )
-
-        match_slug = (
-            slug.lower()
-            == KULENOVIC_SLUG.lower()
-        )
-
-        match_asset = (
-            asset_id.lower()
-            == KULENOVIC_ASSET_ID.lower()
-        )
+        print(f"   Asset ID: {asset_id}")
+        print(f"   Slug: {slug}")
+        print(f"   Collection: {collection}")
 
         if (
-            match_configurazione
-            or match_slug
-            or match_asset
+            (configurato and (
+                asset_id.lower() == configurato
+                or slug.lower() == configurato
+            ))
+            or slug.lower() == KULENOVIC_SLUG.lower()
+            or asset_id.lower() == KULENOVIC_ASSET_ID.lower()
         ):
+            trovato = True
+            print("   🎯 KULENOVIC RICONOSCIUTO")
 
-            kulenovic_presente = True
-
-            print(
-                "   🎯 KULENOVIC RICONOSCIUTO"
-            )
-
-    if kulenovic_presente:
-
-        print(
-            "🎯 KULENOVIC RICONOSCIUTO!"
-        )
-
+    if trovato:
+        print("🎯 KULENOVIC RICONOSCIUTO!")
     else:
+        print("ℹ️ Kulenovic non riconosciuto nell'offerta.")
 
-        print(
-            "ℹ️ Kulenovic non riconosciuto "
-            "nell'offerta."
-        )
-
-    return kulenovic_presente
+    return trovato
 
 
 # ============================================================
 # ELABORAZIONE OFFERTA
 # ============================================================
 
-def elabora_offerta(
-    offerta
-):
-
-    if not isinstance(
-        offerta,
-        dict
-    ):
+def elabora_offerta(offerta):
+    if not isinstance(offerta, dict):
         return False
 
-    offerta_id = str(
-        offerta.get(
-            "id"
-        )
-        or ""
-    ).strip()
-
+    offerta_id = str(offerta.get("id") or "").strip()
     if not offerta_id:
-
-        print(
-            "⚠️ Offerta senza ID."
-        )
-
         return False
-
-    # ========================================================
-    # BLOCCO DOPPIA ELABORAZIONE
-    # ========================================================
 
     with stato_lock:
-
         if offerta_id in offerte_gia_analizzate:
-
             return True
 
         if offerta_id in offerte_in_elaborazione:
-
             return True
 
-        offerte_in_elaborazione.add(
-            offerta_id
-        )
+        offerte_in_elaborazione.add(offerta_id)
 
-    elaborazione_completata = False
+    completata = False
 
     try:
+        print("\n========================================")
+        print("📨 NUOVA OFFERTA")
+        print(f"🆔 ID: {offerta_id}")
+        print(f"📌 Stato: {offerta.get('status')}")
 
-        print("")
-        print(
-            "========================================"
-        )
-
-        print(
-            "📨 NUOVA OFFERTA"
-        )
-
-        print(
-            f"🆔 ID: {offerta_id}"
-        )
-
-        stato_offerta = str(
-            offerta.get(
-                "status"
-            )
-            or ""
-        ).strip().lower()
-
-        print(
-            f"📌 Stato: "
-            f"{stato_offerta or 'N/D'}"
-        )
-
-        # ====================================================
-        # MANAGER
-        # ====================================================
-
-        sender = (
-            offerta.get(
-                "sender"
-            )
-            or {}
-        )
-
-        nickname = (
-            sender.get(
-                "nickname"
-            )
-            or sender.get(
-                "slug"
-            )
-            or "Sconosciuto"
-        )
-
+        sender = offerta.get("sender") or {}
         print(
             f"👤 Manager: "
-            f"{nickname}"
+            f"{sender.get('nickname') or sender.get('slug') or 'Sconosciuto'}"
         )
 
-        # ====================================================
-        # LATI DELL'OFFERTA
-        # ====================================================
+        sender_side = offerta.get("senderSide") or {}
+        receiver_side = offerta.get("receiverSide") or {}
 
-        sender_side = (
-            offerta.get(
-                "senderSide"
-            )
-            or {}
-        )
+        carte_offerte = sender_side.get("anyCards") or []
+        carte_richieste = receiver_side.get("anyCards") or []
 
-        receiver_side = (
-            offerta.get(
-                "receiverSide"
-            )
-            or {}
-        )
+        print(f"📦 Carte offerte: {len(carte_offerte)}")
+        print(f"📦 Carte richieste: {len(carte_richieste)}")
 
-        carte_offerte = (
-            sender_side.get(
-                "anyCards"
-            )
-            or []
-        )
-
-        carte_che_diamo = (
-            receiver_side.get(
-                "anyCards"
-            )
-            or []
-        )
-
-        print(
-            f"📦 Carte offerte: "
-            f"{len(carte_offerte)}"
-        )
-
-        print(
-            f"📦 Carte richieste: "
-            f"{len(carte_che_diamo)}"
-        )
-
-        # ====================================================
-        # KULENOVIC
-        # ====================================================
-
-        kulenovic_presente = (
-            controlla_kulenovic(
-                carte_che_diamo
-            )
-        )
-
-        # ====================================================
-        # NESSUNA CARTA RICEVUTA
-        # ====================================================
-
-        if not carte_offerte:
-
-            print("")
-            print(
-                "🔴 DECISIONE SIMULATA: "
-                "RIFIUTARE"
-            )
-
-            print(
-                "   Motivo: nessuna carta "
-                "ricevuta nell'offerta."
-            )
-
-            print(
-                "🟡 DRY RUN: nessun rifiuto eseguito."
-            )
-
-            print(
-                "----------------------------------------"
-            )
-
-            elaborazione_completata = True
-
+        # Deve essere richiesto Kulenovic
+        if not controlla_kulenovic(carte_richieste):
+            print("\n🔴 DECISIONE SIMULATA: RIFIUTARE L'OFFERTA")
+            print("   Motivo: Kulenovic non è richiesto.")
+            print("🟡 DRY RUN: nessun rifiuto eseguito.")
+            completata = True
             return True
 
-        # ====================================================
-        # ASSET ID
-        # ====================================================
-
-        asset_ids = []
-
-        for carta in carte_offerte:
-
-            if not isinstance(
-                carta,
-                dict
-            ):
-                continue
-
-            asset_id = str(
-                carta.get(
-                    "assetId"
-                )
-                or ""
-            ).strip()
-
-            if asset_id:
-
-                asset_ids.append(
-                    asset_id
-                )
-
-        asset_ids = list(
-            dict.fromkeys(
-                asset_ids
-            )
-        )
+        asset_ids = [
+            str(c.get("assetId")).strip()
+            for c in carte_offerte
+            if isinstance(c, dict) and c.get("assetId")
+        ]
 
         if not asset_ids:
-
-            print("")
-            print(
-                "🔴 DECISIONE SIMULATA: "
-                "RIFIUTARE"
-            )
-
-            print(
-                "   Motivo: nessuna carta "
-                "ricevuta possiede un Asset ID valido."
-            )
-
-            print(
-                "🟡 DRY RUN: nessun rifiuto eseguito."
-            )
-
-            print(
-                "----------------------------------------"
-            )
-
-            elaborazione_completata = True
-
+            print("\n🔴 DECISIONE SIMULATA: RIFIUTARE L'OFFERTA")
+            print("   Motivo: nessuna carta ricevuta.")
+            print("🟡 DRY RUN: nessun rifiuto eseguito.")
+            completata = True
             return True
 
-        # ====================================================
-        # DETTAGLI
-        # ====================================================
-
-        dettagli = (
-            recupera_dettagli_carte(
-                asset_ids
-            )
-        )
-
-        # ERRORE API:
-        #
-        # Non marchiamo l'offerta come analizzata.
-        # Verrà ritentata al prossimo ciclo.
+        dettagli = recupera_dettagli_carte(asset_ids)
 
         if dettagli is None:
-
-            print(
-                "⚠️ Impossibile recuperare "
-                "i dettagli delle carte."
-            )
-
-            print(
-                "⚠️ L'offerta NON viene marcata "
-                "come analizzata."
-            )
-
-            print(
-                "⚠️ Verrà ritentata al prossimo ciclo."
-            )
-
+            print("⚠️ Impossibile recuperare i dettagli.")
             return False
 
         if not dettagli:
-
-            print(
-                "⚠️ Sorare non ha restituito "
-                "dettagli per le carte ricevute."
-            )
-
-            print(
-                "⚠️ L'offerta NON viene marcata "
-                "come analizzata."
-            )
-
+            print("⚠️ Nessun dettaglio carta restituito.")
             return False
 
-        # ====================================================
-        # ANALISI
-        # ====================================================
+        print("\n🔎 ANALISI DELLE CARTE RICEVUTE:")
 
         carte_idonee = []
 
-        carte_analizzate_asset_ids = set()
-
-        print("")
-        print(
-            "🔎 ANALISI DELLE CARTE RICEVUTE:"
-        )
-
         for carta in dettagli:
+            if analizza_carta(carta):
+                carte_idonee.append(carta)
 
-            if not isinstance(
-                carta,
-                dict
-            ):
-                continue
+        totale = len(asset_ids)
+        idonee = len(carte_idonee)
+        non_idonee = max(0, totale - idonee)
 
-            carta_asset_id = str(
-                carta.get(
-                    "assetId"
-                )
-                or ""
-            ).strip()
+        print("\n----------------------------------------")
+        print(f"📊 CARTE TOTALI: {totale}")
+        print(f"📊 CARTE IDONEE: {idonee}")
+        print(f"📊 CARTE NON IDONEE: {non_idonee}")
 
-            if carta_asset_id:
-
-                carte_analizzate_asset_ids.add(
-                    carta_asset_id
-                )
-
-            if analizza_carta(
-                carta
-            ):
-
-                carte_idonee.append(
-                    carta
-                )
-
-        # ====================================================
-        # CONTROLLO COMPLETEZZA
-        # ====================================================
-
-        asset_ids_normalizzati = {
-            str(x).strip().lower()
-            for x in asset_ids
-            if x
-        }
-
-        asset_ids_analizzati_normalizzati = {
-            str(x).strip().lower()
-            for x in carte_analizzate_asset_ids
-            if x
-        }
-
-        carte_mancanti = (
-            asset_ids_normalizzati
-            - asset_ids_analizzati_normalizzati
-        )
-
-        if carte_mancanti:
-
-            print("")
-            print(
-                "⚠️ ATTENZIONE:"
-            )
-
-            print(
-                f"⚠️ Sorare non ha restituito "
-                f"tutti i dettagli."
-            )
-
-            print(
-                f"⚠️ Carte richieste: "
-                f"{len(asset_ids_normalizzati)}"
-            )
-
-            print(
-                f"⚠️ Carte dettagliate: "
-                f"{len(asset_ids_analizzati_normalizzati)}"
-            )
-
-            print(
-                "⚠️ L'offerta NON viene marcata "
-                "come completata."
-            )
-
-            print(
-                "⚠️ Verrà ritentata al prossimo ciclo."
-            )
-
-            return False
-
-        # ====================================================
-        # STATISTICHE
-        # ====================================================
-
-        numero_totale = len(
-            asset_ids_normalizzati
-        )
-
-        numero_idonee = len(
-            carte_idonee
-        )
-
-        numero_non_idonee = max(
-            0,
-            numero_totale
-            - numero_idonee
-        )
-
-        print("")
-        print(
-            "----------------------------------------"
-        )
-
-        print(
-            f"📊 CARTE TOTALI: "
-            f"{numero_totale}"
-        )
-
-        print(
-            f"📊 CARTE IDONEE: "
-            f"{numero_idonee}"
-        )
-
-        print(
-            f"📊 CARTE NON IDONEE: "
-            f"{numero_non_idonee}"
-        )
-
-        # ====================================================
-        # NESSUNA IDONEA
-        # ====================================================
-
-        if numero_idonee == 0:
-
-            print("")
-            print(
-                "🔴 DECISIONE SIMULATA: "
-                "RIFIUTARE L'OFFERTA"
-            )
-
-            print(
-                "   Motivo: nessuna carta ricevuta "
-                "è idonea."
-            )
-
-            print("")
-            print(
-                "🟡 DRY RUN: nessun rifiuto eseguito."
-            )
-
-            print(
-                "----------------------------------------"
-            )
-
-            elaborazione_completata = True
-
+        # NESSUNA CARTA IDONEA = RIFIUTO
+        if idonee == 0:
+            print("\n🔴 DECISIONE SIMULATA: RIFIUTARE L'OFFERTA")
+            print("   Motivo: nessuna carta ricevuta è idonea.")
+            print("🟡 DRY RUN: nessun rifiuto eseguito.")
+            print("----------------------------------------")
+            completata = True
             return True
 
-        # ====================================================
-        # PAGAMENTO
-        # ====================================================
-
-        pagamento_centesimi = (
-            numero_idonee
-            * PAGAMENTO_PER_CARTA_CENTESIMI
-        )
-
-        pagamento_euro = (
-            Decimal(
-                pagamento_centesimi
-            )
+        pagamento = (
+            Decimal(idonee * PAGAMENTO_PER_CARTA_CENTESIMI)
             / Decimal("100")
         )
 
-        # ====================================================
-        # CONTROPROPOSTA SIMULATA
-        # ====================================================
+        print("\n🟢 DECISIONE SIMULATA: CONTROPROPOSTA")
 
-        print("")
-        print(
-            "🟢 DECISIONE SIMULATA: "
-            "CONTROPROPOSTA"
-        )
+        print("\n🗑️ CARTE NON IDONEE:")
+        print(f"   ❌ {non_idonee} carta/e" if non_idonee else "   Nessuna")
 
-        print("")
-
-        if kulenovic_presente:
-
+        print("\n📥 CARTE IDONEE:")
+        for carta in carte_idonee:
             print(
-                "❌ Kulenovic NON viene considerato "
-                "come carta da cedere."
+                f"   ✅ {carta.get('name') or carta.get('slug') or 'Carta sconosciuta'}"
             )
 
-        else:
+        print(f"\n💰 PAGAMENTO SIMULATO: €{pagamento:.2f}")
+        print(f"   {idonee} × €0,20")
 
-            print(
-                "ℹ️ Kulenovic non presente "
-                "tra le carte richieste."
-            )
-
-        print("")
-
-        # ====================================================
-        # CARTE NON IDONEE
-        # ====================================================
-
-        print(
-            "🗑️ CARTE NON IDONEE:"
-        )
-
-        if numero_non_idonee == 0:
-
-            print(
-                "   Nessuna"
-            )
-
-        else:
-
-            print(
-                f"   ❌ {numero_non_idonee} carta/e"
-            )
-
-        print("")
-
-        # ====================================================
-        # CARTE IDONEE
-        # ====================================================
-
-        print(
-            "📥 CARTE IDONEE:"
-        )
+        print("\n📋 CONTROPROPOSTA SIMULATA:")
+        print("   ❌ Noi NON cediamo Kulenovic")
 
         for carta in carte_idonee:
-
-            nome_carta = (
-                carta.get(
-                    "name"
-                )
-                or carta.get(
-                    "slug"
-                )
-                or "Carta sconosciuta"
-            )
-
-            print(
-                f"   ✅ {nome_carta}"
-            )
-
-        print("")
-
-        print(
-            f"💰 PAGAMENTO SIMULATO: "
-            f"€{pagamento_euro:.2f}"
-        )
-
-        print(
-            f"   {numero_idonee} × €0,20"
-        )
-
-        print("")
-
-        # ====================================================
-        # CONTROPROPOSTA
-        # ====================================================
-
-        print(
-            "📋 CONTROPROPOSTA SIMULATA:"
-        )
-
-        print(
-            "   ❌ Noi NON cediamo Kulenovic"
-        )
-
-        for carta in carte_idonee:
-
-            nome_carta = (
-                carta.get(
-                    "name"
-                )
-                or carta.get(
-                    "slug"
-                )
-                or "Carta sconosciuta"
-            )
-
             print(
                 f"   ✅ Noi riceviamo: "
-                f"{nome_carta}"
+                f"{carta.get('name') or carta.get('slug') or 'Carta sconosciuta'}"
             )
 
-        print(
-            f"   💰 Noi pagheremmo: "
-            f"€{pagamento_euro:.2f}"
-        )
+        print(f"   💰 Noi pagheremmo: €{pagamento:.2f}")
+        print("\n🟡 DRY RUN ATTIVO:")
+        print("   Nessuna controproposta è stata inviata.")
+        print("----------------------------------------")
 
-        print("")
-
-        print(
-            "🟡 DRY RUN ATTIVO:"
-        )
-
-        print(
-            "   Nessuna controproposta "
-            "è stata inviata."
-        )
-
-        print(
-            "----------------------------------------"
-        )
-
-        print("")
-
-        # ====================================================
-        # SUCCESSO
-        # ====================================================
-
-        elaborazione_completata = True
-
+        completata = True
         return True
 
     except Exception as e:
-
-        print(
-            f"❌ Errore elaborazione offerta "
-            f"{offerta_id}: {e}"
-        )
-
-        print(
-            "⚠️ L'offerta NON viene marcata "
-            "come analizzata."
-        )
-
+        print(f"❌ Errore elaborazione offerta {offerta_id}: {e}")
         return False
 
     finally:
-
         with stato_lock:
+            offerte_in_elaborazione.discard(offerta_id)
 
-            offerte_in_elaborazione.discard(
-                offerta_id
-            )
-
-            # IMPORTANTISSIMO:
-            #
-            # L'offerta viene registrata come
-            # analizzata SOLO se l'intera elaborazione
-            # è terminata correttamente.
-            #
-            # In caso di errore API/dati:
-            # -> non viene registrata
-            # -> può essere ritentata.
-
-            if elaborazione_completata:
-
-                offerte_gia_analizzate.add(
-                    offerta_id
-                )
+            if completata:
+                offerte_gia_analizzate.add(offerta_id)
 
 
 # ============================================================
@@ -2686,177 +984,51 @@ def elabora_offerta(
 # ============================================================
 
 def monitor_offerte():
+    print("\n🤖 BOT SORARE AVVIATO")
+    print("🟡 MODALITÀ DRY RUN ATTIVA")
+    print("⚠️ Nessun rifiuto e nessuna controproposta verranno eseguiti.")
+    print(f"💰 REGOLA PREZZO: €0,30 - €0,80")
+    print(f"💰 PAGAMENTO: €0,20 per ogni carta idonea")
 
-    print("")
-    print(
-        "🤖 BOT SORARE AVVIATO"
-    )
-
-    print(
-        "🟡 MODALITÀ DRY RUN ATTIVA"
-    )
-
-    print(
-        "⚠️ Nessun rifiuto e nessuna "
-        "controproposta verranno eseguiti."
-    )
-
-    print("")
-
-    print(
-        "💰 REGOLA PREZZO: "
-        "€0,30 - €0,80"
-    )
-
-    print(
-        "💰 PAGAMENTO: "
-        "€0,20 per ogni carta idonea"
-    )
-
-    stampa_campionati_coperti()
-
-    print("")
-
-    configurazione_ok = (
-        verifica_configurazione()
-    )
-
-    if not configurazione_ok:
-
-        print(
-            "⚠️ ATTENZIONE: una o più "
-            "variabili di configurazione "
-            "mancano."
-        )
-
-    print("")
-
+    stampa_campionati()
+    verifica_configurazione()
     test_firma_stark()
 
-    print("")
-
-    # ========================================================
-    # AUTENTICAZIONE
-    # ========================================================
-
     if not verifica_account():
-
-        print(
-            "❌ Impossibile autenticarsi "
-            "a Sorare."
-        )
-
-        print(
-            "❌ Monitoraggio terminato."
-        )
-
+        print("❌ Impossibile autenticarsi a Sorare.")
+        print("❌ Monitoraggio terminato.")
         return
 
-    print(
-        "🟢 MONITORAGGIO OFFERTE ATTIVO."
-    )
-
-    print("")
-
-    # ========================================================
-    # LOOP
-    # ========================================================
+    print("🟢 MONITORAGGIO OFFERTE ATTIVO.\n")
 
     while True:
-
         try:
-
-            print(
-                "🔎 Controllo offerte..."
-            )
-
+            print("🔎 Controllo offerte...")
             offerte = recupera_offerte()
 
-            # ------------------------------------------------
-            # ERRORE API
-            # ------------------------------------------------
-
             if offerte is None:
-
-                print(
-                    "⚠️ Controllo offerte fallito."
-                )
-
+                print("⚠️ Controllo offerte fallito.")
             else:
-
-                print(
-                    f"📨 Offerte pending ricevute: "
-                    f"{len(offerte)}"
-                )
+                print(f"📨 Offerte pending ricevute: {len(offerte)}")
 
                 for offerta in offerte:
-
-                    if not isinstance(
-                        offerta,
-                        dict
-                    ):
-                        continue
-
-                    offerta_id = str(
-                        offerta.get(
-                            "id"
-                        )
-                        or ""
-                    ).strip()
-
-                    if not offerta_id:
-
-                        print(
-                            "⚠️ Offerta senza ID "
-                            "ignorata."
-                        )
-
-                        continue
-
-                    # ------------------------------------------------
-                    # EVITA LOG RIPETITIVI
-                    # ------------------------------------------------
-
-                    with stato_lock:
-
-                        gia_analizzata = (
-                            offerta_id
-                            in offerte_gia_analizzate
-                        )
-
-                    if gia_analizzata:
-
-                        continue
-
-                    elabora_offerta(
-                        offerta
-                    )
+                    elabora_offerta(offerta)
 
         except Exception as e:
+            print(f"⚠️ Errore nel ciclo: {e}")
 
-            print(
-                f"⚠️ Errore nel ciclo: "
-                f"{e}"
-            )
-
-        time.sleep(
-            INTERVALLO_CONTROLLO
-        )
+        time.sleep(INTERVALLO_CONTROLLO)
 
 
 # ============================================================
-# AVVIO MONITOR UNA SOLA VOLTA
+# AVVIO
 # ============================================================
 
 def avvia_monitoraggio():
-
-    global monitoraggio_avviato
-    global monitor_thread
+    global monitoraggio_avviato, monitor_thread
 
     with stato_lock:
-
         if monitoraggio_avviato:
-
             return False
 
         monitoraggio_avviato = True
@@ -2868,73 +1040,37 @@ def avvia_monitoraggio():
         )
 
         monitor_thread.start()
-
         return True
 
 
 # ============================================================
-# HEALTH CHECK
+# FLASK
 # ============================================================
 
 @app.route("/")
 def home():
+    if avvia_monitoraggio():
+        return "Bot Sorare avviato in modalità DRY RUN.", 200
 
-    avviato = (
-        avvia_monitoraggio()
-    )
-
-    if avviato:
-
-        return (
-            "Bot Sorare avviato "
-            "in modalità DRY RUN.",
-            200,
-        )
-
-    return (
-        "Bot Sorare già attivo.",
-        200,
-    )
+    return "Bot Sorare già attivo.", 200
 
 
 @app.route("/health")
 def health():
-
-    with stato_lock:
-
-        analizzate = len(
-            offerte_gia_analizzate
-        )
-
-        in_elaborazione = len(
-            offerte_in_elaborazione
-        )
-
     return jsonify({
         "status": "ok",
         "bot": "sorare",
         "dry_run": DRY_RUN,
-        "monitoraggio_avviato": (
-            monitoraggio_avviato
-        ),
-        "offerte_gia_analizzate": analizzate,
-        "offerte_in_elaborazione": in_elaborazione,
+        "monitoraggio_avviato": monitoraggio_avviato,
     })
 
 
 # ============================================================
-# STARTUP
+# START LOCALE
 # ============================================================
 
 if __name__ == "__main__":
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            "5000"
-        )
-    )
-
+    port = int(os.environ.get("PORT", "5000"))
     avvia_monitoraggio()
 
     app.run(
