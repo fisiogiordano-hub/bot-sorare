@@ -1,8 +1,8 @@
 import os
-import re
 import time
 import threading
 import requests
+from decimal import Decimal, InvalidOperation
 from flask import Flask
 
 app = Flask(__name__)
@@ -14,38 +14,59 @@ app = Flask(__name__)
 SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 SORARE_JWT_AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 
-# Può essere lasciato vuoto.
-# Il bot riconoscerà comunque Kulenovic tramite slug.
+# Può essere:
+# - asset ID
+# - slug
+# - oppure lasciata vuota
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
-
-KULENOVIC_SLUG = os.getenv(
-    "KULENOVIC_SLUG",
-    "sandro-kulenovic-2025-limited-385"
-).strip().lower()
-
-SORARE_API_URL = "https://api.sorare.com/graphql"
 
 # ============================================================
 # SICUREZZA
 # ============================================================
 
 # IMPORTANTE:
-# Nessuna operazione reale viene eseguita.
+# Lasciamo DRY RUN attivo.
+# Nessun rifiuto e nessuna controproposta reale.
 DRY_RUN = True
 
 # ============================================================
-# REGOLE BOT
+# REGOLE DEL BOT
 # ============================================================
 
 PREZZO_MASSIMO_CENTESIMI = 50
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
 
 # ============================================================
+# SORARE API
+# ============================================================
+
+# Endpoint GraphQL
+SORARE_API_URL = "https://api.sorare.com/graphql"
+
+# ============================================================
+# KULENOVIC
+# ============================================================
+
+# Valori conosciuti dall'offerta reale che stai testando.
+#
+# Il bot li usa come fallback anche se KULENOVIC_ID
+# su Render è vuoto o contiene un valore errato.
+
+KULENOVIC_SLUG = "sandro-kulenovic-2025-limited-385"
+
+KULENOVIC_ASSET_ID = (
+    "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
+    "6796b6c0ed10ba0a6"
+)
+
+# ============================================================
 # STATO
 # ============================================================
 
 offerte_gia_analizzate = set()
+
 monitoraggio_avviato = False
+
 lock_avvio = threading.Lock()
 
 
@@ -56,6 +77,7 @@ lock_avvio = threading.Lock()
 def crea_headers():
 
     if not SORARE_TOKEN:
+
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato."
         )
@@ -63,6 +85,7 @@ def crea_headers():
     token = SORARE_TOKEN
 
     if not token.lower().startswith("bearer "):
+
         token = f"Bearer {token}"
 
     headers = {
@@ -72,6 +95,7 @@ def crea_headers():
     }
 
     if SORARE_JWT_AUD:
+
         headers["JWT-AUD"] = SORARE_JWT_AUD
 
     return headers
@@ -98,7 +122,8 @@ def esegui_query(query, variables=None):
         )
 
         print(
-            f"🌐 Sorare HTTP: {response.status_code}"
+            f"🌐 Sorare HTTP: "
+            f"{response.status_code}"
         )
 
         if response.status_code != 200:
@@ -124,7 +149,13 @@ def esegui_query(query, variables=None):
             for errore in risultato["errors"]:
 
                 print(
-                    f"- {errore.get('message', 'Errore sconosciuto')}"
+                    "- "
+                    + str(
+                        errore.get(
+                            "message",
+                            "Errore sconosciuto"
+                        )
+                    )
                 )
 
             return None
@@ -150,8 +181,10 @@ def verifica_account():
     query CurrentUserTest {
 
         currentUser {
+
             slug
             nickname
+
         }
     }
     """
@@ -159,6 +192,7 @@ def verifica_account():
     risultato = esegui_query(query)
 
     if not risultato:
+
         return False
 
     user = (
@@ -170,7 +204,8 @@ def verifica_account():
     if not user:
 
         print(
-            "❌ Sorare non ha restituito currentUser."
+            "❌ Sorare non ha restituito "
+            "currentUser."
         )
 
         return False
@@ -178,12 +213,17 @@ def verifica_account():
     print("")
     print("========================================")
     print("✅ AUTENTICAZIONE SORARE RIUSCITA")
+
     print(
-        f"👤 Manager: {user.get('nickname')}"
+        f"👤 Manager: "
+        f"{user.get('nickname')}"
     )
+
     print(
-        f"🔗 Slug: {user.get('slug')}"
+        f"🔗 Slug: "
+        f"{user.get('slug')}"
     )
+
     print("========================================")
     print("")
 
@@ -211,9 +251,12 @@ def recupera_offerte():
                     status
 
                     sender {
+
                         ... on User {
+
                             slug
                             nickname
+
                         }
                     }
 
@@ -224,6 +267,7 @@ def recupera_offerte():
                             assetId
                             slug
                             collection
+
                         }
                     }
 
@@ -234,6 +278,7 @@ def recupera_offerte():
                             assetId
                             slug
                             collection
+
                         }
                     }
                 }
@@ -245,6 +290,7 @@ def recupera_offerte():
     risultato = esegui_query(query)
 
     if not risultato:
+
         return []
 
     user = (
@@ -281,6 +327,7 @@ def recupera_offerte():
 def recupera_dettagli_carte(asset_ids):
 
     if not asset_ids:
+
         return []
 
     query = """
@@ -301,14 +348,14 @@ def recupera_dettagli_carte(asset_ids):
 
                 displayName
 
-                slug
-
                 activeClub {
 
                     slug
 
                     activeCompetitions {
+
                         slug
+
                     }
                 }
             }
@@ -318,7 +365,9 @@ def recupera_dettagli_carte(asset_ids):
                 name
 
                 activeCompetitions {
+
                     slug
+
                 }
             }
         }
@@ -333,6 +382,7 @@ def recupera_dettagli_carte(asset_ids):
     )
 
     if not risultato:
+
         return []
 
     carte = (
@@ -346,156 +396,157 @@ def recupera_dettagli_carte(asset_ids):
 
 
 # ============================================================
-# ESTRAZIONE STAGIONE DALLO SLUG
+# UTILITÀ SLUG
 # ============================================================
 
-def estrai_stagione_da_slug(slug):
+def estrai_player_slug(slug):
 
     if not slug:
-        return None
 
-    match = re.search(
-        r"-(\d{4})-(?:limited|rare|super-rare|unique)-\d+$",
-        slug.lower()
-    )
-
-    if not match:
-        return None
-
-    try:
-        return int(
-            match.group(1)
-        )
-    except Exception:
-        return None
-
-
-# ============================================================
-# ESTRAZIONE PLAYER SLUG
-# ============================================================
-
-def estrai_player_slug(card):
-
-    player = (
-        card.get("anyPlayer")
-        or {}
-    )
-
-    player_slug = (
-        player.get("slug")
-        or ""
-    ).strip().lower()
-
-    if player_slug:
-        return player_slug
-
-    card_slug = (
-        card.get("slug")
-        or ""
-    ).strip().lower()
-
-    if not card_slug:
         return None
 
     # Esempio:
     #
-    # sandro-kulenovic-2025-limited-385
+    # alessio-cragno-2023-limited-157
     #
     # diventa:
     #
-    # sandro-kulenovic
+    # alessio-cragno
 
-    match = re.match(
-        r"^(.+)-\d{4}-(?:limited|rare|super-rare|unique)-\d+$",
-        card_slug
+    parti = slug.split("-")
+
+    if len(parti) < 4:
+
+        return None
+
+    # Cerchiamo la parte dell'anno.
+    indice_anno = None
+
+    for i, parte in enumerate(parti):
+
+        if (
+            len(parte) == 4
+            and parte.isdigit()
+            and parte.startswith("20")
+        ):
+
+            indice_anno = i
+            break
+
+    if indice_anno is None:
+
+        return None
+
+    player_slug = "-".join(
+        parti[:indice_anno]
     )
 
-    if match:
-        return match.group(1)
-
-    return None
+    return player_slug or None
 
 
 # ============================================================
-# RECUPERO PREZZO FLOOR
+# PREZZO: TOKEN PRICES
 # ============================================================
 
-def recupera_prezzo_carta(carta):
+def recupera_prezzo_floor(carta):
 
-    slug = (
-        carta.get("slug")
-        or ""
-    ).strip().lower()
+    slug = carta.get("slug")
+
+    if not slug:
+
+        print(
+            "      ⚠️ Slug carta assente."
+        )
+
+        return None
 
     player_slug = estrai_player_slug(
-        carta
-    )
-
-    stagione = estrai_stagione_da_slug(
         slug
     )
 
     if not player_slug:
 
         print(
-            "      ⚠️ Player slug non recuperabile"
+            f"      ⚠️ Impossibile estrarre "
+            f"player slug da: {slug}"
         )
 
         return None
 
-    if stagione is None:
+    rarita = str(
+        carta.get("rarityTyped")
+        or ""
+    ).upper()
+
+    if not rarita:
 
         print(
-            "      ⚠️ Stagione non recuperabile "
-            "dallo slug"
+            "      ⚠️ Rarità assente."
         )
 
         return None
 
     print(
         f"      🔎 Ricerca prezzo floor: "
-        f"{player_slug} / {stagione}"
+        f"{player_slug}"
     )
 
+    # ========================================================
+    # QUERY CORRETTA
+    #
+    # Sorare documenta tokenPrices come fonte degli ultimi
+    # prezzi pubblici di un giocatore/rara/collection.
+    #
+    # Usiamo SOLO:
+    #
+    # amounts {
+    #     eur
+    # }
+    #
+    # e non:
+    # eurCents
+    # price
+    # priceInFiat
+    # amount
+    # amountInFiat
+    # ========================================================
+
     query = """
-    query CardFloorPrice(
+    query TokenPrices(
         $playerSlug: String!
-        $seasonStartYear: Int!
+        $rarity: Rarity!
+        $collection: Collection!
     ) {
 
-        football {
+        tokens {
 
-            player(
-                slug: $playerSlug
+            tokenPrices(
+                playerSlug: $playerSlug
+                rarity: $rarity
+                collection: $collection
             ) {
 
-                lowestPriceAnyCard(
-                    rarity: limited
-                    seasonStartYear: $seasonStartYear
-                ) {
+                amounts {
 
-                    liveSingleSaleOffer {
+                    eur
 
-                        receiverSide {
-
-                            amounts {
-                                eur
-                                wei
-                            }
-                        }
-                    }
                 }
+
+                date
             }
         }
     }
     """
 
+    variables = {
+        "playerSlug": player_slug,
+        "rarity": rarita,
+        "collection": "FOOTBALL",
+    }
+
     risultato = esegui_query(
         query,
-        {
-            "playerSlug": player_slug,
-            "seasonStartYear": stagione,
-        }
+        variables
     )
 
     if not risultato:
@@ -506,234 +557,77 @@ def recupera_prezzo_carta(carta):
 
         return None
 
-    football = (
+    dati = (
         risultato
         .get("data", {})
-        .get("football")
-        or {}
+        .get("tokens", {})
     )
 
-    player = (
-        football.get("player")
-        or {}
+    prezzi = (
+        dati.get("tokenPrices")
+        or []
     )
 
-    floor = (
-        player.get(
-            "lowestPriceAnyCard"
+    valori = []
+
+    for prezzo in prezzi:
+
+        amounts = (
+            prezzo.get("amounts")
+            or {}
         )
-        or {}
-    )
 
-    offerta = (
-        floor.get(
-            "liveSingleSaleOffer"
-        )
-        or {}
-    )
+        eur = amounts.get("eur")
 
-    receiver_side = (
-        offerta.get(
-            "receiverSide"
-        )
-        or {}
-    )
+        if eur is None:
 
-    amounts = (
-        receiver_side.get(
-            "amounts"
-        )
-        or {}
-    )
-
-    # --------------------------------------------------------
-    # EUR
-    # --------------------------------------------------------
-
-    eur = amounts.get("eur")
-
-    if eur is not None:
+            continue
 
         try:
 
-            # Sorare può restituire:
-            # "0.43"
-            # oppure un numero.
-
-            valore = float(eur)
-
-            return int(
-                round(
-                    valore * 100
-                )
+            valore = Decimal(
+                str(eur)
             )
+
+            if valore > 0:
+
+                valori.append(
+                    valore
+                )
 
         except (
+            InvalidOperation,
+            ValueError,
             TypeError,
-            ValueError
         ):
 
-            pass
+            continue
 
-    # --------------------------------------------------------
-    # WEI
-    # --------------------------------------------------------
-    #
-    # Se EUR non è disponibile, proviamo WEI.
-    # 1 ETH = 1000000000000000000 wei
-    #
-    # Per confrontare il limite in EUR avremmo però
-    # bisogno del cambio ETH/EUR corrente.
-    #
-    # Quindi NON lo usiamo per decidere l'idoneità.
-    # --------------------------------------------------------
-
-    wei = amounts.get("wei")
-
-    if wei is not None:
+    if not valori:
 
         print(
-            f"      ℹ️ Prezzo WEI disponibile: {wei}"
+            "      ⚠️ Nessun prezzo EUR "
+            "disponibile."
         )
+
+        return None
+
+    # ========================================================
+    # FLOOR
+    # ========================================================
+
+    floor = min(valori)
 
     print(
-        "      ⚠️ Prezzo EUR non disponibile"
+        f"      💰 Prezzo floor trovato: "
+        f"€{floor:.2f}"
     )
 
-    return None
+    return floor
 
 
 # ============================================================
-# RICONOSCIMENTO KULENOVIC
-# ============================================================
-
-def carta_e_kulenovic(carta):
-
-    asset_id = str(
-        carta.get("assetId")
-        or ""
-    ).strip().lower()
-
-    slug = str(
-        carta.get("slug")
-        or ""
-    ).strip().lower()
-
-    nome = str(
-        carta.get("name")
-        or ""
-    ).strip().lower()
-
-    configured_id = str(
-        KULENOVIC_ID
-        or ""
-    ).strip().lower()
-
-    # --------------------------------------------------------
-    # 1. Asset ID configurato
-    # --------------------------------------------------------
-
-    if configured_id:
-
-        if asset_id == configured_id:
-
-            return True
-
-        if slug == configured_id:
-
-            return True
-
-    # --------------------------------------------------------
-    # 2. Slug configurato
-    # --------------------------------------------------------
-
-    if KULENOVIC_SLUG:
-
-        if slug == KULENOVIC_SLUG:
-
-            return True
-
-    # --------------------------------------------------------
-    # 3. Nome
-    # --------------------------------------------------------
-
-    if "sandro kulenovic" in nome:
-
-        return True
-
-    # --------------------------------------------------------
-    # 4. Fallback player slug
-    # --------------------------------------------------------
-
-    player = (
-        carta.get("anyPlayer")
-        or {}
-    )
-
-    player_slug = str(
-        player.get("slug")
-        or ""
-    ).strip().lower()
-
-    if player_slug == "sandro-kulenovic":
-
-        return True
-
-    return False
-
-
-# ============================================================
-# CONTROLLO KULENOVIC
-# ============================================================
-
-def controlla_kulenovic(carte_richieste):
-
-    print("")
-    print(
-        "🔎 CARTA/E RICHIESTA/E DAL MANAGER:"
-    )
-
-    kulenovic_presente = False
-
-    for carta in carte_richieste:
-
-        asset_id = carta.get(
-            "assetId"
-        )
-
-        slug = carta.get(
-            "slug"
-        )
-
-        collection = carta.get(
-            "collection"
-        )
-
-        print(
-            f"   Asset ID: {asset_id}"
-        )
-
-        print(
-            f"   Slug: {slug}"
-        )
-
-        print(
-            f"   Collection: {collection}"
-        )
-
-        if carta_e_kulenovic(carta):
-
-            kulenovic_presente = True
-
-            print(
-                "   🎯 KULENOVIC RICONOSCIUTO"
-            )
-
-    return kulenovic_presente
-
-
-# ============================================================
-# ANALISI CARTA
+# CONTROLLO CARTA
 # ============================================================
 
 def analizza_carta(carta):
@@ -742,9 +636,13 @@ def analizza_carta(carta):
         "assetId"
     )
 
+    slug = carta.get(
+        "slug"
+    )
+
     nome = (
         carta.get("name")
-        or carta.get("slug")
+        or slug
         or asset_id
         or "Carta sconosciuta"
     )
@@ -765,41 +663,49 @@ def analizza_carta(carta):
     )
 
     competizioni = (
-        club.get(
-            "activeCompetitions"
-        )
+        club.get("activeCompetitions")
         or []
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PREZZO
-    # --------------------------------------------------------
+    # ========================================================
 
-    prezzo_centesimi = recupera_prezzo_carta(
+    prezzo = recupera_prezzo_floor(
         carta
     )
 
-    # --------------------------------------------------------
-    # REGOLE
-    # --------------------------------------------------------
-
-    rarita_ok = (
-        rarita == "LIMITED"
+    prezzo_verificabile = (
+        prezzo is not None
     )
+
+    prezzo_ok = (
+        prezzo_verificabile
+        and prezzo
+        <= Decimal(
+            PREZZO_MASSIMO_CENTESIMI
+        ) / Decimal("100")
+    )
+
+    # ========================================================
+    # CAMPIONATO
+    # ========================================================
 
     campionato_coperto = (
         len(competizioni) > 0
     )
 
-    prezzo_verificabile = (
-        prezzo_centesimi is not None
+    # ========================================================
+    # RARITÀ
+    # ========================================================
+
+    rarita_ok = (
+        rarita == "LIMITED"
     )
 
-    prezzo_ok = (
-        prezzo_verificabile
-        and prezzo_centesimi
-        <= PREZZO_MASSIMO_CENTESIMI
-    )
+    # ========================================================
+    # IDONEITÀ
+    # ========================================================
 
     idonea = (
         rarita_ok
@@ -807,17 +713,19 @@ def analizza_carta(carta):
         and campionato_coperto
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # LOG
-    # --------------------------------------------------------
+    # ========================================================
 
     print("")
+
     print(
         f"   📄 {nome}"
     )
 
     print(
-        f"      Asset ID: {asset_id}"
+        f"      Asset ID: "
+        f"{asset_id}"
     )
 
     print(
@@ -825,27 +733,25 @@ def analizza_carta(carta):
         f"{rarita or 'N/D'}"
     )
 
-    if prezzo_centesimi is not None:
-
-        prezzo_euro = (
-            prezzo_centesimi / 100
-        )
+    if prezzo is not None:
 
         print(
-            f"      Prezzo floor: "
-            f"€{prezzo_euro:.2f}"
+            f"      Prezzo: "
+            f"€{prezzo:.2f}"
         )
 
         if prezzo_ok:
 
             print(
-                "      🟢 Prezzo entro il limite"
+                "      🟢 Prezzo entro "
+                "il limite"
             )
 
         else:
 
             print(
-                "      🔴 Prezzo superiore al limite"
+                "      🔴 Prezzo superiore "
+                "al limite"
             )
 
     else:
@@ -875,6 +781,18 @@ def analizza_carta(carta):
             "      🔴 Campionato NON coperto"
         )
 
+    if rarita_ok:
+
+        print(
+            "      🟢 Rarità LIMITED"
+        )
+
+    else:
+
+        print(
+            "      🔴 Rarità NON valida"
+        )
+
     if idonea:
 
         print(
@@ -891,6 +809,122 @@ def analizza_carta(carta):
 
 
 # ============================================================
+# KULENOVIC
+# ============================================================
+
+def controlla_kulenovic(carte_richieste):
+
+    print("")
+
+    print(
+        "🔎 CARTA/E RICHIESTA/E "
+        "DAL MANAGER:"
+    )
+
+    kulenovic_presente = False
+
+    # Valori configurati su Render
+    configurato = (
+        KULENOVIC_ID.strip()
+        if KULENOVIC_ID
+        else ""
+    )
+
+    for carta in carte_richieste:
+
+        asset_id = str(
+            carta.get("assetId")
+            or ""
+        ).strip()
+
+        slug = str(
+            carta.get("slug")
+            or ""
+        ).strip()
+
+        collection = str(
+            carta.get("collection")
+            or ""
+        ).strip()
+
+        print(
+            f"   Asset ID: "
+            f"{asset_id}"
+        )
+
+        print(
+            f"   Slug: "
+            f"{slug}"
+        )
+
+        print(
+            f"   Collection: "
+            f"{collection}"
+        )
+
+        # ====================================================
+        # MATCH
+        #
+        # 1. valore configurato
+        # 2. slug ufficiale noto
+        # 3. asset ID ufficiale noto
+        # ====================================================
+
+        match_configurazione = (
+            bool(configurato)
+            and (
+                asset_id.lower()
+                == configurato.lower()
+                or
+                slug.lower()
+                == configurato.lower()
+            )
+        )
+
+        match_slug = (
+            slug.lower()
+            == KULENOVIC_SLUG.lower()
+        )
+
+        match_asset = (
+            asset_id.lower()
+            == KULENOVIC_ASSET_ID.lower()
+        )
+
+        if (
+            match_configurazione
+            or match_slug
+            or match_asset
+        ):
+
+            kulenovic_presente = True
+
+            print(
+                "   🎯 KULENOVIC RICONOSCIUTO"
+            )
+
+    if kulenovic_presente:
+
+        print(
+            "🎯 KULENOVIC RICONOSCIUTO!"
+        )
+
+    else:
+
+        print(
+            "ℹ️ Kulenovic non riconosciuto "
+            "nell'offerta."
+        )
+
+        print(
+            "ℹ️ L'offerta viene comunque "
+            "analizzata in DRY RUN."
+        )
+
+    return kulenovic_presente
+
+
+# ============================================================
 # ELABORAZIONE OFFERTA
 # ============================================================
 
@@ -901,12 +935,11 @@ def elabora_offerta(offerta):
     )
 
     if not offerta_id:
+
         return
 
-    if (
-        offerta_id
-        in offerte_gia_analizzate
-    ):
+    if offerta_id in offerte_gia_analizzate:
+
         return
 
     offerte_gia_analizzate.add(
@@ -918,7 +951,8 @@ def elabora_offerta(offerta):
     print("📨 NUOVA OFFERTA")
 
     print(
-        f"🆔 ID: {offerta_id}"
+        f"🆔 ID: "
+        f"{offerta_id}"
     )
 
     print(
@@ -933,7 +967,9 @@ def elabora_offerta(offerta):
 
     print(
         f"👤 Manager: "
-        f"{sender.get('nickname') or sender.get('slug') or 'Sconosciuto'}"
+        f"{sender.get('nickname') "
+        "or sender.get('slug') "
+        "or 'Sconosciuto'}"
     )
 
     sender_side = (
@@ -946,12 +982,20 @@ def elabora_offerta(offerta):
         or {}
     )
 
+    # ========================================================
+    # CARTE OFFERTE
+    # ========================================================
+
     carte_offerte = (
         sender_side.get(
             "anyCards"
         )
         or []
     )
+
+    # ========================================================
+    # CARTE CHE NOI DOVREMMO DARE
+    # ========================================================
 
     carte_che_diamo = (
         receiver_side.get(
@@ -980,30 +1024,8 @@ def elabora_offerta(offerta):
         )
     )
 
-    if kulenovic_presente:
-
-        print(
-            "🎯 KULENOVIC RICONOSCIUTO!"
-        )
-
-    else:
-
-        print(
-            "ℹ️ Kulenovic non riconosciuto."
-        )
-
-        print(
-            f"   Slug atteso: "
-            f"{KULENOVIC_SLUG}"
-        )
-
-        print(
-            "ℹ️ L'offerta viene comunque "
-            "analizzata in DRY RUN."
-        )
-
     # ========================================================
-    # ASSET CARTE RICEVUTE
+    # ASSET ID
     # ========================================================
 
     asset_ids = [
@@ -1024,19 +1046,22 @@ def elabora_offerta(offerta):
         )
 
         print(
-            "🟡 DRY RUN: "
-            "nessuna operazione eseguita."
+            "🟡 DRY RUN: nessuna operazione "
+            "eseguita."
         )
 
         print("----------------------------------------")
+
         return
 
     # ========================================================
     # DETTAGLI
     # ========================================================
 
-    dettagli = recupera_dettagli_carte(
-        asset_ids
+    dettagli = (
+        recupera_dettagli_carte(
+            asset_ids
+        )
     )
 
     if not dettagli:
@@ -1047,6 +1072,7 @@ def elabora_offerta(offerta):
         )
 
         print("----------------------------------------")
+
         return
 
     # ========================================================
@@ -1056,6 +1082,7 @@ def elabora_offerta(offerta):
     carte_idonee = []
 
     print("")
+
     print(
         "🔎 ANALISI DELLE CARTE RICEVUTE:"
     )
@@ -1082,6 +1109,7 @@ def elabora_offerta(offerta):
     )
 
     print("")
+
     print("----------------------------------------")
 
     print(
@@ -1106,6 +1134,7 @@ def elabora_offerta(offerta):
     if numero_idonee == 0:
 
         print("")
+
         print(
             "🔴 DECISIONE: RIFIUTARE L'OFFERTA"
         )
@@ -1116,12 +1145,14 @@ def elabora_offerta(offerta):
         )
 
         print("")
+
         print(
             "🟡 DRY RUN: "
             "nessun rifiuto eseguito."
         )
 
         print("----------------------------------------")
+
         return
 
     # ========================================================
@@ -1134,24 +1165,36 @@ def elabora_offerta(offerta):
     )
 
     pagamento_euro = (
-        pagamento_centesimi / 100
+        Decimal(pagamento_centesimi)
+        / Decimal("100")
     )
 
     print("")
+
     print(
         "🟢 DECISIONE: CONTROPROPOSTA"
     )
 
     print("")
+
     print(
         "📤 DALLA PROPOSTA VIENE RIMOSSA:"
     )
 
-    print(
-        "   ❌ Kulenovic"
-    )
+    if kulenovic_presente:
+
+        print(
+            "   ❌ Kulenovic"
+        )
+
+    else:
+
+        print(
+            "   ℹ️ Kulenovic non presente"
+        )
 
     print("")
+
     print(
         "🗑️ VENGONO ELIMINATE "
         "LE CARTE NON IDONEE:"
@@ -1170,6 +1213,7 @@ def elabora_offerta(offerta):
         )
 
     print("")
+
     print(
         "📥 RIMANGONO SOLO LE CARTE IDONEE:"
     )
@@ -1178,10 +1222,12 @@ def elabora_offerta(offerta):
 
         print(
             f"   ✅ "
-            f"{carta.get('name') or carta.get('slug')}"
+            f"{carta.get('name') "
+            "or carta.get('slug')}"
         )
 
     print("")
+
     print(
         f"💰 PAGAMENTO AL MANAGER: "
         f"€{pagamento_euro:.2f}"
@@ -1192,6 +1238,7 @@ def elabora_offerta(offerta):
     )
 
     print("")
+
     print(
         "📋 CONTROPROPOSTA PREVISTA:"
     )
@@ -1204,7 +1251,8 @@ def elabora_offerta(offerta):
 
         print(
             f"   ✅ Noi riceviamo: "
-            f"{carta.get('name') or carta.get('slug')}"
+            f"{carta.get('name') "
+            "or carta.get('slug')}"
         )
 
     print(
@@ -1253,7 +1301,8 @@ def monitor_offerte():
     if not verifica_account():
 
         print(
-            "❌ Impossibile autenticarsi a Sorare."
+            "❌ Impossibile autenticarsi "
+            "a Sorare."
         )
 
         return
