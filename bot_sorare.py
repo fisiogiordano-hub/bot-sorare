@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+# Configurazioni dalle variabili d'ambiente di Render
 SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
@@ -33,11 +34,11 @@ def esegui_query_sorare(query, variables=None):
         return None
 
 def elabora_offerta_specifica(offerta_id, kul_id):
-    print(f"⚡ [INIZIO] Elaborazione offerta {offerta_id}")
-    print(f"🔑 [DEBUG] ID Kulenovic usato dal bot in questo momento: '{kul_id}'")
+    print(f"⚡ [INIZIO] Elaborazione offerta con Global ID: {offerta_id}")
+    print(f"🔑 [DEBUG] ID Kulenovic configurato: '{kul_id}'")
     
     query_dettaglio = """
-        Query GetOfferDetails($id: ID!) {
+        query GetOfferDetails($id: ID!) {
             offer(id: $id) {
                 id
                 status
@@ -78,7 +79,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     
     kulu_richiesto = any(card.get("id") == kul_id for card in outgoing_cards)
     if not kulu_richiesto:
-        print(f"⚠️ ATTENZIONE: La carta di Kulenovic ({kul_id}) NON corrisponde a nessuna delle carte in uscita di questa offerta!")
+        print(f"⚠️ ATTENZIONE: La carta di Kulenovic ({kul_id}) NON corrisponde alle carte in uscita di questa offerta!")
         return
 
     print(f"🎯 Segnale Kulenovic confermato nell'offerta {offerta_id}!")
@@ -102,7 +103,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
             carte_idonee_ids.append(card_id)
             print(f"✅ Carta idonea trovata: {card_id} (Prezzo: {prezzo}€)")
         else:
-            print(f"⚠️ Carta scartata (ID: {card_id}, Rarità: {rarita}, Prezzo: {prezzo}€, Tutte le competizioni coperte: {campionato_coperto})")
+            print(f"⚠️ Carta scartata (ID: {card_id}, Rarità: {rarita}, Prezzo: {prezzo}€)")
 
     if not carte_idonee_ids:
         print(f"🚫 Nessuna carta idonea nell'offerta {offerta_id}. Rifiuto offerta...")
@@ -119,7 +120,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
     else:
         num_carte = len(carte_idonee_ids)
         totale_euro = num_carte * 0.20
-        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta rimuovendo Kulenovic e offrendo {totale_euro}€.")
+        print(f"✅ Trovate {num_carte} carte idonee! Invio controproposta.")
         
         mutazione_counter = """
             mutation CounterOffer($input: CounterOfferInput!) {
@@ -147,7 +148,7 @@ def monitor_offerte():
     time.sleep(5)
     print("🔄 [DEBUG] Avvio ciclo di monitoraggio offerte Sorare...")
     query_offerte = """
-        Query GetPendingOffers {
+        query GetPendingOffers {
             viewer {
                 receivedOffers(status: pending) {
                     nodes {
@@ -167,13 +168,14 @@ def monitor_offerte():
                     for offerta in offerte:
                         offerta_id = offerta.get("id")
                         if offerta_id and offerta_id not in offerte_gia_gestite:
-                            print(f"🔎 Nuova offerta rilevata: {offerta_id}")
+                            print(f"🔎 Nuova offerta rilevata con Global ID: {offerta_id}")
                             offerte_gia_gestite.add(offerta_id)
                             threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
         except Exception as e:
             print(f"⚠️ Errore critico nel ciclo di monitoraggio: {e}")
         time.sleep(15)
 
+# Avvia il thread di monitoraggio in background
 t = threading.Thread(target=monitor_offerte, daemon=True)
 t.start()
 
@@ -185,7 +187,7 @@ def home():
 def test_offerta(offerta_id):
     print(f"🧪 Test manuale avviato via web per l'offerta: {offerta_id}")
     threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
-    return jsonify({"status": "Test avviato", "offerta_id": offerta_id, "kul_id_usato": KULENOVIC_ID})
+    return jsonify({"status": "Test avviato", "offerta_id": offerta_id})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
