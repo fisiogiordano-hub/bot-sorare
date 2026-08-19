@@ -3,7 +3,7 @@ import time
 import threading
 import requests
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from flask import Flask
 
 
@@ -47,8 +47,22 @@ DRY_RUN = True
 # REGOLE BOT
 # ============================================================
 
-# Una carta è idonea solamente se il suo floor è <= €0,50.
+# Una carta è idonea solamente se il suo floor è:
+#
+# MINIMO €0,30
+# MASSIMO €0,50
+#
+# Quindi:
+#
+# €0,29 -> NON IDONEA
+# €0,30 -> IDONEA
+# €0,37 -> IDONEA
+# €0,50 -> IDONEA
+# €0,51 -> NON IDONEA
+
+PREZZO_MINIMO_CENTESIMI = 30
 PREZZO_MASSIMO_CENTESIMI = 50
+
 
 # Pagamento previsto:
 # €0,20 per ogni carta idonea.
@@ -377,32 +391,6 @@ def recupera_offerte():
 
 # ============================================================
 # DETTAGLI CARTE
-#
-# QUI C'È LA CORREZIONE PRINCIPALE.
-#
-# Recuperiamo direttamente:
-#
-#   lowestPriceCard
-#
-# che nello schema attuale di Sorare rappresenta la carta
-# più economica dello stesso giocatore, stessa rarità e
-# stessa stagione.
-#
-# Poi leggiamo:
-#
-#   liveSingleSaleOffer
-#       receiverSide
-#           amounts
-#               eurCents
-#
-# NON usiamo:
-#
-#   card(slug:)
-#   amounts.eur
-#   amounts.fiat
-#   CoinGecko
-#   conversioni ETH -> EUR
-#
 # ============================================================
 
 def recupera_dettagli_carte(asset_ids):
@@ -752,11 +740,7 @@ def recupera_prezzo_floor(carta):
         )
 
     # ========================================================
-    # FALLBACK:
-    #
-    # Se lowestPriceCard non ha un prezzo leggibile,
-    # controlliamo la carta stessa.
-    #
+    # FALLBACK
     # ========================================================
 
     if not valori:
@@ -800,14 +784,6 @@ def recupera_prezzo_floor(carta):
     # ========================================================
 
     if not valori:
-
-        # ----------------------------------------------------
-        # IMPORTANTE:
-        #
-        # Non inventiamo un prezzo.
-        # Se Sorare non ci dà un prezzo verificabile,
-        # la carta NON viene considerata idonea.
-        # ----------------------------------------------------
 
         print(
             f"      ⚠️ Prezzo non disponibile per {nome}."
@@ -884,6 +860,17 @@ def analizza_carta(carta):
         prezzo is not None
     )
 
+    # --------------------------------------------------------
+    # LIMITE MINIMO
+    # --------------------------------------------------------
+
+    prezzo_minimo = (
+        Decimal(
+            PREZZO_MINIMO_CENTESIMI
+        )
+        / Decimal("100")
+    )
+
     prezzo_massimo = (
         Decimal(
             PREZZO_MASSIMO_CENTESIMI
@@ -891,8 +878,18 @@ def analizza_carta(carta):
         / Decimal("100")
     )
 
+    # --------------------------------------------------------
+    # CONTROLLO PREZZO
+    #
+    # DEVE ESSERE:
+    #
+    # €0,30 <= prezzo <= €0,50
+    #
+    # --------------------------------------------------------
+
     prezzo_ok = (
         prezzo_verificabile
+        and prezzo >= prezzo_minimo
         and prezzo <= prezzo_massimo
     )
 
@@ -914,6 +911,14 @@ def analizza_carta(carta):
 
     # ========================================================
     # IDONEITÀ
+    #
+    # TUTTE le condizioni devono essere vere:
+    #
+    # 1. LIMITED
+    # 2. Prezzo >= €0,30
+    # 3. Prezzo <= €0,50
+    # 4. Campionato coperto
+    #
     # ========================================================
 
     idonea = (
@@ -951,16 +956,36 @@ def analizza_carta(carta):
             f"€{prezzo:.2f}"
         )
 
-        if prezzo_ok:
+        # ----------------------------------------------------
+        # PREZZO TROPPO BASSO
+        # ----------------------------------------------------
+
+        if prezzo < prezzo_minimo:
 
             print(
-                "      🟢 Prezzo entro €0,50"
+                "      🔴 Prezzo inferiore al minimo "
+                "di €0,30"
             )
+
+        # ----------------------------------------------------
+        # PREZZO CORRETTO
+        # ----------------------------------------------------
+
+        elif prezzo <= prezzo_massimo:
+
+            print(
+                "      🟢 Prezzo tra €0,30 e €0,50"
+            )
+
+        # ----------------------------------------------------
+        # PREZZO TROPPO ALTO
+        # ----------------------------------------------------
 
         else:
 
             print(
-                "      🔴 Prezzo superiore a €0,50"
+                "      🔴 Prezzo superiore al massimo "
+                "di €0,50"
             )
 
     else:
@@ -972,6 +997,10 @@ def analizza_carta(carta):
         print(
             "      🔴 Prezzo NON verificabile"
         )
+
+    # ========================================================
+    # CAMPIONATO
+    # ========================================================
 
     print(
         f"      Competizioni attive: "
@@ -990,6 +1019,10 @@ def analizza_carta(carta):
             "      🔴 Campionato NON coperto"
         )
 
+    # ========================================================
+    # RARITÀ
+    # ========================================================
+
     if rarita_ok:
 
         print(
@@ -1001,6 +1034,10 @@ def analizza_carta(carta):
         print(
             "      🔴 Rarità NON valida"
         )
+
+    # ========================================================
+    # IDONEITÀ
+    # ========================================================
 
     if idonea:
 
