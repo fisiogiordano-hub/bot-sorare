@@ -147,12 +147,15 @@ def elabora_offerta_specifica(offerta_id, kul_id):
 def monitor_offerte():
     time.sleep(5)
     print("🔄 [DEBUG] Avvio ciclo di monitoraggio offerte Sorare...")
+    
+    # Query aggiornata per catturare tutte le offerte e leggerne lo stato nei log
     query_offerte = """
-        query GetPendingOffers {
+        Query GetAllOffers {
             viewer {
-                receivedOffers(status: pending) {
+                receivedOffers {
                     nodes {
                         id
+                        status
                     }
                 }
             }
@@ -167,10 +170,17 @@ def monitor_offerte():
                     offerte = viewer.get("receivedOffers", {}).get("nodes", [])
                     for offerta in offerte:
                         offerta_id = offerta.get("id")
+                        stato_offerta = offerta.get("status")
+                        
                         if offerta_id and offerta_id not in offerte_gia_gestite:
-                            print(f"🔎 Nuova offerta rilevata con Global ID: {offerta_id}")
+                            print(f"🔎 Offerta trovata! ID: {offerta_id} - Stato: {stato_offerta}")
                             offerte_gia_gestite.add(offerta_id)
-                            threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
+                            
+                            # Elabora se è pending
+                            if stato_offerta == "pending":
+                                threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
+                            else:
+                                print(f"ℹ️ L'offerta {offerta_id} non è in stato pending (stato: {stato_offerta}), la ignoro.")
         except Exception as e:
             print(f"⚠️ Errore critico nel ciclo di monitoraggio: {e}")
         time.sleep(15)
