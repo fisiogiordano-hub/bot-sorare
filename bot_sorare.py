@@ -165,12 +165,14 @@ def graphql(query, variables=None):
 
             if data.get("errors"):
                 print("❌ Errore GraphQL:", flush=True)
+
                 for e in data["errors"]:
                     print(
                         " -",
                         e.get("message", str(e)),
                         flush=True,
                     )
+
                 return None
 
             return data
@@ -219,13 +221,16 @@ def recupera_offerte():
                 pendingTokenOffersReceived(first: 50) {
                     nodes {
                         id
+                        blockchainId
                         status
+
                         sender {
                             ... on User {
                                 slug
                                 nickname
                             }
                         }
+
                         senderSide {
                             anyCards {
                                 assetId
@@ -233,6 +238,7 @@ def recupera_offerte():
                                 collection
                             }
                         }
+
                         receiverSide {
                             anyCards {
                                 assetId
@@ -370,8 +376,10 @@ def public(card):
     for value in values:
         try:
             cents = int(value.get("eurCents"))
+
             if cents > 0:
                 prices.append(cents)
+
         except (TypeError, ValueError, AttributeError):
             pass
 
@@ -391,6 +399,7 @@ def floor(card):
 
 def controlla_squadra(card):
     player = card.get("anyPlayer") or {}
+
     name = (
         player.get("displayName")
         or player.get("slug")
@@ -457,9 +466,12 @@ def analizza_carta(card):
     if price is None:
         print("      🔴 Prezzo floor NON verificabile", flush=True)
         price_ok = False
+
     else:
         print(f"      💰 Prezzo floor: €{price / 100:.2f}", flush=True)
+
         price_ok = MIN_PRICE <= price <= MAX_PRICE
+
         print(
             "      🟢 Prezzo valido"
             if price_ok
@@ -513,16 +525,31 @@ def kulenovic_richiesto(cards):
 # RIFIUTO REALE
 # ============================================================
 
-def rifiuta_offerta(offer_id):
+def rifiuta_offerta(offer):
+    offer_id = str(offer.get("id") or "").strip()
+    blockchain_id = str(offer.get("blockchainId") or "").strip()
+
     print(f"🔴 RIFIUTO RICHIESTO: {offer_id}", flush=True)
 
     if DRY:
         print("🟡 DRY RUN: rifiuto non inviato.", flush=True)
         return True
 
+    if not blockchain_id:
+        print(
+            "❌ Rifiuto fallito: blockchainId mancante.",
+            flush=True,
+        )
+        return False
+
     mutation = """
         mutation RejectOffer($input: rejectOfferInput!) {
             rejectOffer(input: $input) {
+                tokenOffer {
+                    id
+                    blockchainId
+                    status
+                }
                 errors {
                     message
                 }
@@ -532,27 +559,43 @@ def rifiuta_offerta(offer_id):
 
     variables = {
         "input": {
-            "offerId": offer_id,
+            "blockchainId": blockchain_id,
             "clientMutationId": str(time.time_ns()),
         }
     }
 
+    print(
+        f"🔑 Blockchain ID: {blockchain_id}",
+        flush=True,
+    )
+
     data = graphql(mutation, variables)
 
     if not data:
-        print("❌ Rifiuto fallito: nessuna risposta.", flush=True)
+        print(
+            "❌ Rifiuto fallito: nessuna risposta.",
+            flush=True,
+        )
         return False
 
-    result = data.get("data", {}).get("rejectOffer")
+    result = (
+        data.get("data") or {}
+    ).get("rejectOffer")
 
     if not result:
-        print("❌ Rifiuto fallito: payload assente.", flush=True)
+        print(
+            "❌ Rifiuto fallito: payload assente.",
+            flush=True,
+        )
         return False
 
     errors = result.get("errors") or []
 
     if errors:
-        print("❌ Sorare ha rifiutato la mutation:", flush=True)
+        print(
+            "❌ Errore durante il rifiuto:",
+            flush=True,
+        )
 
         for error in errors:
             print(
@@ -562,7 +605,14 @@ def rifiuta_offerta(offer_id):
 
         return False
 
-    print("✅ OFFERTA RIFIUTATA REALMENTE.", flush=True)
+    token_offer = result.get("tokenOffer") or {}
+
+    print(
+        f"✅ OFFERTA RIFIUTATA REALMENTE: "
+        f"{token_offer.get('id') or offer_id}",
+        flush=True,
+    )
+
     return True
 
 
@@ -578,7 +628,10 @@ def prepara_controproposta(offer, cards):
     target = (sender.get("slug") or "").strip()
 
     if not target:
-        print("❌ Slug del manager non disponibile.", flush=True)
+        print(
+            "❌ Slug del manager non disponibile.",
+            flush=True,
+        )
         return False
 
     receive_ids = [
@@ -588,12 +641,18 @@ def prepara_controproposta(offer, cards):
     ]
 
     if not receive_ids:
-        print("❌ Nessun asset id valido.", flush=True)
+        print(
+            "❌ Nessun asset id valido.",
+            flush=True,
+        )
         return False
 
     payment = Decimal(len(receive_ids) * PAY) / Decimal(100)
 
-    print("\n========================================", flush=True)
+    print(
+        "\n========================================",
+        flush=True,
+    )
     print("🟢 CONTROPROPOSTA", flush=True)
     print(f"👤 Destinatario: {target}", flush=True)
     print("📥 Carte che riceviamo:", flush=True)
@@ -604,9 +663,18 @@ def prepara_controproposta(offer, cards):
             flush=True,
         )
 
-    print(f"💰 Pagamento: €{payment:.2f}", flush=True)
-    print("🎯 Kulenovic: NON viene ceduto", flush=True)
-    print("========================================", flush=True)
+    print(
+        f"💰 Pagamento: €{payment:.2f}",
+        flush=True,
+    )
+    print(
+        "🎯 Kulenovic: NON viene ceduto",
+        flush=True,
+    )
+    print(
+        "========================================",
+        flush=True,
+    )
 
     if DRY:
         print(
@@ -654,39 +722,71 @@ def elabora_offerta(offer):
         received = sender_side.get("anyCards") or []
         requested = receiver_side.get("anyCards") or []
 
-        print("\n========================================", flush=True)
+        print(
+            "\n========================================",
+            flush=True,
+        )
         print("📨 NUOVA OFFERTA", flush=True)
         print(f"🆔 ID: {oid}", flush=True)
-        print(f"📌 Stato: {offer.get('status')}", flush=True)
+        print(
+            f"🔑 Blockchain ID: "
+            f"{offer.get('blockchainId') or 'N/D'}",
+            flush=True,
+        )
+        print(
+            f"📌 Stato: {offer.get('status')}",
+            flush=True,
+        )
         print(
             f"👤 Manager: "
             f"{sender.get('nickname') or sender.get('slug') or 'N/D'}",
             flush=True,
         )
-        print(f"📦 Carte offerte: {len(received)}", flush=True)
-        print(f"📦 Carte richieste: {len(requested)}", flush=True)
+        print(
+            f"📦 Carte offerte: {len(received)}",
+            flush=True,
+        )
+        print(
+            f"📦 Carte richieste: {len(requested)}",
+            flush=True,
+        )
 
         if not kulenovic_richiesto(requested):
-            print("❌ Kulenovic non richiesto.", flush=True)
-            done = rifiuta_offerta(oid)
+            print(
+                "❌ Kulenovic non richiesto.",
+                flush=True,
+            )
+
+            done = rifiuta_offerta(offer)
             return
 
         ids = [
             card.get("assetId")
             for card in received
-            if isinstance(card, dict) and card.get("assetId")
+            if isinstance(card, dict)
+            and card.get("assetId")
         ]
 
         if not ids:
-            print("🔴 Nessuna carta ricevuta.", flush=True)
-            done = rifiuta_offerta(oid)
+            print(
+                "🔴 Nessuna carta ricevuta.",
+                flush=True,
+            )
+
+            done = rifiuta_offerta(offer)
             return
 
         cards = dettagli_carte(ids)
 
         if cards is None:
-            print("⚠️ Dettagli carte non disponibili.", flush=True)
-            print("⚠️ Offerta lasciata non elaborata.", flush=True)
+            print(
+                "⚠️ Dettagli carte non disponibili.",
+                flush=True,
+            )
+            print(
+                "⚠️ Offerta lasciata non elaborata.",
+                flush=True,
+            )
             return
 
         good = []
@@ -704,19 +804,34 @@ def elabora_offerta(offer):
         valid = len(good)
         invalid = max(0, total - valid)
 
-        print("\n----------------------------------------", flush=True)
-        print(f"📊 CARTE TOTALI: {total}", flush=True)
-        print(f"📊 CARTE IDONEE: {valid}", flush=True)
-        print(f"📊 CARTE NON IDONEE: {invalid}", flush=True)
+        print(
+            "\n----------------------------------------",
+            flush=True,
+        )
+        print(
+            f"📊 CARTE TOTALI: {total}",
+            flush=True,
+        )
+        print(
+            f"📊 CARTE IDONEE: {valid}",
+            flush=True,
+        )
+        print(
+            f"📊 CARTE NON IDONEE: {invalid}",
+            flush=True,
+        )
 
         if valid == 0:
-            print("\n🔴 NESSUNA CARTA IDONEA", flush=True)
+            print(
+                "\n🔴 NESSUNA CARTA IDONEA",
+                flush=True,
+            )
             print(
                 "🔴 DECISIONE: RIFIUTARE L'OFFERTA",
                 flush=True,
             )
 
-            done = rifiuta_offerta(oid)
+            done = rifiuta_offerta(offer)
             return
 
         if invalid:
@@ -725,6 +840,7 @@ def elabora_offerta(offer):
                 "dalla controproposta.",
                 flush=True,
             )
+
             print(
                 f"🟢 Rimangono {valid} carte idonee.",
                 flush=True,
@@ -732,9 +848,18 @@ def elabora_offerta(offer):
 
         payment = Decimal(valid * PAY) / Decimal(100)
 
-        print("\n🟢 DECISIONE: CONTROPROPOSTA", flush=True)
-        print("❌ Noi NON cediamo Kulenovic.", flush=True)
-        print("📥 Noi riceviamo SOLO le carte idonee:", flush=True)
+        print(
+            "\n🟢 DECISIONE: CONTROPROPOSTA",
+            flush=True,
+        )
+        print(
+            "❌ Noi NON cediamo Kulenovic.",
+            flush=True,
+        )
+        print(
+            "📥 Noi riceviamo SOLO le carte idonee:",
+            flush=True,
+        )
 
         for card in good:
             print(
@@ -742,12 +867,21 @@ def elabora_offerta(offer):
                 flush=True,
             )
 
-        print(f"💰 Pagamento: €{payment:.2f}", flush=True)
+        print(
+            f"💰 Pagamento: €{payment:.2f}",
+            flush=True,
+        )
 
-        done = prepara_controproposta(offer, good)
+        done = prepara_controproposta(
+            offer,
+            good,
+        )
 
     except Exception as e:
-        print(f"❌ Errore offerta {oid}: {e}", flush=True)
+        print(
+            f"❌ Errore offerta {oid}: {e}",
+            flush=True,
+        )
 
     finally:
         with lock:
@@ -762,7 +896,10 @@ def elabora_offerta(offer):
 # ============================================================
 
 def monitor():
-    print("\n🤖 BOT SORARE AVVIATO", flush=True)
+    print(
+        "\n🤖 BOT SORARE AVVIATO",
+        flush=True,
+    )
 
     print(
         "🟡 MODALITÀ DRY RUN ATTIVA"
@@ -777,16 +914,31 @@ def monitor():
             flush=True,
         )
 
-    print("💰 REGOLA PREZZO: €0,30 - €0,80", flush=True)
-    print("💰 PAGAMENTO: €0,20 per ogni carta idonea", flush=True)
+    print(
+        "💰 REGOLA PREZZO: €0,30 - €0,80",
+        flush=True,
+    )
+    print(
+        "💰 PAGAMENTO: €0,20 per ogni carta idonea",
+        flush=True,
+    )
     print(
         f"🏆 {len(set(CAMPIONATI.values()))} campionati coperti.",
         flush=True,
     )
 
-    print("========================================", flush=True)
-    print("🔧 VERIFICA CONFIGURAZIONE", flush=True)
-    print("========================================", flush=True)
+    print(
+        "========================================",
+        flush=True,
+    )
+    print(
+        "🔧 VERIFICA CONFIGURAZIONE",
+        flush=True,
+    )
+    print(
+        "========================================",
+        flush=True,
+    )
 
     for name, value in (
         ("SORARE_JWT_TOKEN", TOKEN),
@@ -801,22 +953,31 @@ def monitor():
             flush=True,
         )
 
-    print(f"🔵 DRY_RUN = {DRY}", flush=True)
+    print(
+        f"🔵 DRY_RUN = {DRY}",
+        flush=True,
+    )
 
     if STARK:
         try:
             int(STARK.removeprefix("0x"), 16)
+
             print(
                 "✅ Formato esadecimale verificato.",
                 flush=True,
             )
+
         except ValueError:
             print(
                 "❌ Chiave Stark non esadecimale.",
                 flush=True,
             )
+
     else:
-        print("❌ Chiave Stark assente.", flush=True)
+        print(
+            "❌ Chiave Stark assente.",
+            flush=True,
+        )
 
     if not verifica_account():
         print(
@@ -844,6 +1005,7 @@ def monitor():
                     "⚠️ Controllo offerte fallito.",
                     flush=True,
                 )
+
             else:
                 print(
                     f"📨 Offerte pending ricevute: "
@@ -889,7 +1051,11 @@ def health():
         "status": "ok",
         "bot": "sorare",
         "dry_run": DRY,
-        "monitoraggio": "attivo" if _started else "in avvio",
+        "monitoraggio": (
+            "attivo"
+            if _started
+            else "in avvio"
+        ),
         "rifiuto_reale": not DRY,
         "regola": (
             "carte non idonee escluse; "
