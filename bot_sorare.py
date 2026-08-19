@@ -2,194 +2,475 @@ import os
 import time
 import threading
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask
 
 app = Flask(__name__)
 
-SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
-KULENOVIC_ID = os.getenv("KULENOVIC_ID", "")
+# ============================================================
+# CONFIGURAZIONE
+# ============================================================
+
+SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
+SORARE_JWT_AUD = os.getenv("SORARE_JWT_AUD", "").strip()
+KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
+
+# Per ora SOLO TEST.
+# Il bot NON rifiuta e NON invia controproposte.
+DRY_RUN = True
+
+# Regole del bot
+PREZZO_MASSIMO_EURO = 0.50
+PAGAMENTO_PER_CARTA_EURO = 0.20
+
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
-offerte_gia_gestite = set()
+offerte_gia_analizzate = set()
 monitoraggio_avviato = False
 lock_avvio = threading.Lock()
 
-def esegui_query_sorare(query, variables=None):
-    token = SORARE_JWT_TOKEN.strip()
-    
-    if "pYy" in token or "=" in token:
-        cookie_value = token if "_sorare_session_id=" in token else f"_sorare_session_id={token}"
-        headers = {
-            "Content-Type": "application/json",
-            "Cookie": cookie_value
-        }
-    else:
-        if not token.lower().startswith("bearer "):
-            token = f"Bearer {token}"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": token
-        }
 
+# ============================================================
+# API SORARE
+# ============================================================
+
+def crea_headers():
+    if not SORARE_TOKEN:
+        raise RuntimeError("SORARE_JWT_TOKEN non configurato.")
+
+    headers = {
+        "Content-Type": "application/json",
+    }
+
+    # JWT moderno
+    if SORARE_TOKEN.lower().startswith("bearer "):
+        token = SORARE_TOKEN
+    else:
+        token = f"Bearer {SORARE_TOKEN}"
+
+    headers["Authorization"] = token
+
+    if SORARE_JWT_AUD:
+        headers["JWT-AUD"] = SORARE_JWT_AUD
+
+    return headers
+
+
+def esegui_query(query, variables=None):
     payload = {
         "query": query,
-        "variables": variables or {}
+        "variables": variables or {},
     }
+
     try:
-        response = requests.post(SORARE_API_URL, json=payload, headers=headers, timeout=25)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"❌ Errore API Sorare ({response.status_code}): {response.text}")
+        response = requests.post(
+            SORARE_API_URL,
+            json=payload,
+            headers=crea_headers(),
+            timeout=30,
+        )
+
+        print(f"🌐 Sorare HTTP: {response.status_code}")
+
+        if response.status_code != 200:
+            print("❌ Risposta HTTP non valida:")
+            print(response.text[:2000])
             return None
+
+        risultato = response.json()
+
+        if risultato.get("errors"):
+            print("❌ Errori GraphQL:")
+            for errore in risultato["errors"]:
+                print(errore.get("message"))
+
+        return risultato
+
     except Exception as e:
-        print(f"❌ Eccezione durante la richiesta HTTP: {e}")
+        print(f"❌ Errore richiesta Sorare: {e}")
         return None
 
-def elabora_offerta_specifica(offerta_id, kul_id):
-    print(f"⚡ [INIZIO] Elaborazione offerta con Global ID: {offerta_id}")
-    
-    query_dettaglio = """
-        query GetOfferDetails($id: ID!) {
-            offer(id: $id) {
-                id
-                status
-                outgoingCards {
+
+# ============================================================
+# TEST AUTENTICAZIONE + OFFERTE
+# ============================================================
+
+def verifica_account():
+    query = """
+    query CurrentUserTest {
+        currentUser {
+            slug
+            nickname
+        }
+    }
+    """
+
+    risultato = esegui_query(query)
+
+    if not risultato:
+        return False
+
+    user = risultato.get("data", {}).get("currentUser")
+
+    if not user:
+        print("❌ Sorare non ha restituito currentUser.")
+        print("Controlleremo il token/audience nei log.")
+        return False
+
+    print("")
+    print("========================================")
+    print("✅ AUTENTICAZIONE SORARE RIUSCITA")
+    print(f"👤 Manager: {user.get('nickname')}")
+    print(f"🔗 Slug: {user.get('slug')}")
+    print("========================================")
+    print("")
+
+    return True
+
+
+# ============================================================
+# RECUPERO OFFERTE RICEVUTE
+# ============================================================
+
+def recupera_offerte():
+    query = """
+    query PendingOffers {
+        currentUser {
+            pendingTokenOffersReceived(first: 50) {
+                nodes {
                     id
-                }
-                incomingCards {
-                    id
-                    rarity
-                    erc721Token {
-                        price
+                    status
+                    sender {
+                        ... on User {
+                            slug
+                            nickname
+                        }
                     }
-                    player {
-                        activeClub {
-                            activeCompetitions {
-                                supported
-                            }
+                    senderSide {
+                        amounts {
+                            eur
+                        }
+                        anyCards {
+                            assetId
+                            slug
+                            collection
+                        }
+                    }
+                    receiverSide {
+                        amounts {
+                            eur
+                        }
+                        anyCards {
+                            assetId
+                            slug
+                            collection
                         }
                     }
                 }
             }
         }
+    }
     """
-    risultato = esegui_query_sorare(query_dettaglio, {"id": offerta_id})
+
+    risultato = esegui_query(query)
+
     if not risultato:
-        print(f"⚠️ Impossibile ottenere i dettagli per l'offerta {offerta_id}")
-        return
+        return []
 
-    offerta = risultato.get("data", {}).get("offer")
-    if not offerta:
-        print(f"⚠️ L'offerta {offerta_id} non esiste.")
-        return
-        
-    print(f"📄 Stato offerta: {offerta.get('status')}")
-    
-    outgoing_cards = offerta.get("outgoingCards", [])
-    kulu_richiesto = any(card.get("id") == kul_id for card in outgoing_cards)
-    
-    if not kulu_richiesto:
-        print(f"⚠️ Questa offerta non riguarda la carta di Kulenovic target.")
-        return
+    user = risultato.get("data", {}).get("currentUser")
 
-    incoming_cards = offerta.get("incomingCards", [])
-    carte_idonee_ids = []
+    if not user:
+        print("❌ currentUser assente nella risposta.")
+        return []
 
-    for card in incoming_cards:
-        card_id = card.get("id")
-        rarita = card.get("rarity")
-        token_info = card.get("erc721Token") or {}
-        prezzo = token_info.get("price") or 0.0
-        player_info = card.get("player") or {}
-        active_club = player_info.get("activeClub") or {}
-        competitions = active_club.get("activeCompetitions") or []
-        campionato_coperto = all(comp.get("supported", False) for comp in competitions) if competitions else False
-        
-        if rarita == "limited" and prezzo <= 0.50 and campionato_coperto:
-            carte_idonee_ids.append(card_id)
-            print(f"✅ Carta idonea: {card_id}")
-        else:
-            print(f"⚠️ Carta scartata: {card_id}")
+    connessione = user.get("pendingTokenOffersReceived") or {}
+    offerte = connessione.get("nodes") or []
 
-    if not carte_idonee_ids:
-        print(f"🚫 Nessuna carta idonea. Rifiuto offerta...")
-        mutazione_reject = """
-            mutation RejectOffer($input: RejectOfferInput!) {
-                rejectOffer(input: $input) {
-                    offer { id status }
-                }
+    return offerte
+
+
+# ============================================================
+# DETTAGLI DELLE CARTE
+# ============================================================
+
+def recupera_dettagli_carte(asset_ids):
+    if not asset_ids:
+        return []
+
+    query = """
+    query CardDetails($assetIds: [String!]) {
+        anyCards(assetIds: $assetIds) {
+            assetId
+            slug
+            name
+            rarityTyped
+            publicMinPrices {
+                eur
             }
-        """
-        esegui_query_sorare(mutazione_reject, {"input": {"offerId": offerta_id}})
-    else:
-        num_carte = len(carte_idonee_ids)
-        totale_euro = num_carte * 0.20
-        print(f"✅ Invio controproposta.")
-        mutazione_counter = """
-            mutation CounterOffer($input: CounterOfferInput!) {
-                counterOffer(input: $input) {
-                    offer { id status }
-                }
-            }
-        """
-        variables = {
-            "input": {
-                "initialOfferId": offerta_id,
-                "recvCardIds": carte_idonee_ids,
-                "sendCardIds": [],
-                "sendAmount": {"amount": str(totale_euro), "currency": "EUR"}
-            }
-        }
-        esegui_query_sorare(mutazione_counter, variables)
-
-def monitor_offerte():
-    print("🔄 [DEBUG] Avvio ciclo di monitoraggio in background...")
-    query_offerte = """
-        query GetAllOffers {
-            currentUser {
-                receivedOffers {
-                    nodes {
-                        id
-                        status
+            anyPlayer {
+                displayName
+                activeClub {
+                    slug
+                    activeCompetitions {
+                        slug
                     }
                 }
             }
+            anyTeam {
+                name
+                activeCompetitions {
+                    slug
+                }
+            }
         }
+    }
     """
+
+    risultato = esegui_query(
+        query,
+        {"assetIds": asset_ids},
+    )
+
+    if not risultato:
+        return []
+
+    return risultato.get("data", {}).get("anyCards") or []
+
+
+# ============================================================
+# CONTROLLO CARTA
+# ============================================================
+
+def analizza_carta(carta):
+    asset_id = carta.get("assetId")
+    nome = (
+        carta.get("name")
+        or carta.get("slug")
+        or asset_id
+        or "Carta sconosciuta"
+    )
+
+    rarita = str(carta.get("rarityTyped") or "").upper()
+
+    prezzi = carta.get("publicMinPrices") or {}
+    prezzo = prezzi.get("eur")
+
+    player = carta.get("anyPlayer") or {}
+    club = player.get("activeClub") or {}
+
+    competizioni = club.get("activeCompetitions") or []
+
+    campionato_coperto = len(competizioni) > 0
+
+    idonea = (
+        rarita == "LIMITED"
+        and prezzo is not None
+        and float(prezzo) <= PREZZO_MASSIMO_EURO
+        and campionato_coperto
+    )
+
+    print("")
+    print(f"   📄 {nome}")
+    print(f"      Asset ID: {asset_id}")
+    print(f"      Rarità: {rarita}")
+    print(f"      Prezzo: €{prezzo if prezzo is not None else 'N/D'}")
+    print(
+        f"      Competizioni attive: "
+        f"{len(competizioni)}"
+    )
+
+    if idonea:
+        print("      ✅ IDONEA")
+    else:
+        print("      ❌ NON IDONEA")
+
+    return idonea
+
+
+# ============================================================
+# ELABORAZIONE OFFERTA
+# ============================================================
+
+def elabora_offerta(offerta):
+    offerta_id = offerta.get("id")
+
+    if not offerta_id:
+        return
+
+    if offerta_id in offerte_gia_analizzate:
+        return
+
+    offerte_gia_analizzate.add(offerta_id)
+
+    print("")
+    print("========================================")
+    print("📨 NUOVA OFFERTA")
+    print(f"🆔 ID: {offerta_id}")
+    print(f"📌 Stato: {offerta.get('status')}")
+
+    sender = offerta.get("sender") or {}
+    print(
+        f"👤 Manager: "
+        f"{sender.get('nickname') or sender.get('slug') or 'Sconosciuto'}"
+    )
+
+    sender_side = offerta.get("senderSide") or {}
+    receiver_side = offerta.get("receiverSide") or {}
+
+    carte_offerte = sender_side.get("anyCards") or []
+    carte_che_diamo = receiver_side.get("anyCards") or []
+
+    print(f"📦 Carte offerte dal manager: {len(carte_offerte)}")
+    print(f"📦 Carte richieste al bot: {len(carte_che_diamo)}")
+
+    # --------------------------------------------------------
+    # CONTROLLO KULENOVIC
+    # --------------------------------------------------------
+
+    kulenovic_presente = False
+
+    for carta in carte_che_diamo:
+        if (
+            carta.get("assetId") == KULENOVIC_ID
+            or carta.get("slug") == KULENOVIC_ID
+        ):
+            kulenovic_presente = True
+            break
+
+    if not kulenovic_presente:
+        print("ℹ️ Offerta ignorata: Kulenovic non è presente.")
+        print("========================================")
+        return
+
+    print("🎯 KULENOVIC PRESENTE!")
+
+    # --------------------------------------------------------
+    # DETTAGLI CARTE RICEVUTE
+    # --------------------------------------------------------
+
+    asset_ids = [
+        carta.get("assetId")
+        for carta in carte_offerte
+        if carta.get("assetId")
+    ]
+
+    dettagli = recupera_dettagli_carte(asset_ids)
+
+    if not dettagli:
+        print("⚠️ Impossibile recuperare i dettagli delle carte.")
+        print("========================================")
+        return
+
+    carte_idonee = []
+
+    print("")
+    print("🔎 ANALISI DELLE CARTE:")
+
+    for carta in dettagli:
+        if analizza_carta(carta):
+            carte_idonee.append(carta)
+
+    # --------------------------------------------------------
+    # DECISIONE
+    # --------------------------------------------------------
+
+    numero_idonee = len(carte_idonee)
+
+    print("")
+    print("----------------------------------------")
+    print(f"📊 CARTE IDONEE: {numero_idonee}")
+
+    if numero_idonee == 0:
+        print("🔴 DECISIONE: RIFIUTARE L'OFFERTA")
+        print("🟡 DRY RUN: nessuna operazione eseguita.")
+        print("----------------------------------------")
+        print("")
+
+        return
+
+    conguaglio = numero_idonee * PAGAMENTO_PER_CARTA_EURO
+
+    print(f"💰 CONGUAGLIO: €{conguaglio:.2f}")
+    print("🟢 DECISIONE: CONTROPROPOSTA")
+    print("")
+    print("La controproposta prevista sarebbe:")
+
+    for carta in carte_idonee:
+        print(
+            f"   ➡️ Ricevere: "
+            f"{carta.get('name') or carta.get('slug')}"
+        )
+
+    print(f"   ➡️ Ricevere anche €{conguaglio:.2f}")
+    print("   ➡️ Kulenovic: NON viene ceduto")
+
+    print("")
+    print("🟡 DRY RUN: nessuna operazione eseguita.")
+    print("----------------------------------------")
+    print("")
+
+
+# ============================================================
+# CICLO MONITORAGGIO
+# ============================================================
+
+def monitor_offerte():
+    print("🤖 BOT SORARE AVVIATO")
+    print("🟡 MODALITÀ DRY RUN ATTIVA")
+    print("⚠️ Nessun rifiuto e nessuna controproposta verranno eseguiti.")
+    print("")
+
+    if not verifica_account():
+        print("❌ Impossibile autenticarsi a Sorare.")
+        return
+
     while True:
         try:
-            risultato = esegui_query_sorare(query_offerte)
-            print(f"🔎 [DEBUG] Risposta grezza API Sorare: {risultato}")
-            
-            if risultato:
-                user = risultato.get("data", {}).get("currentUser")
-                if user:
-                    offerte = user.get("receivedOffers", {}).get("nodes", [])
-                    print(f"🔎 [DEBUG] Numero offerte trovate: {len(offerte)}")
-                    for offerta in offerte:
-                        offerta_id = offerta.get("id")
-                        stato_offerta = offerta.get("status")
-                        print(f"🔎 Offerta analizzata -> ID: {offerta_id} | Stato: {stato_offerta}")
-                        if offerta_id and offerta_id not in offerte_gia_gestite:
-                            offerte_gia_gestite.add(offerta_id)
-                            if stato_offerta == "pending":
-                                threading.Thread(target=elabora_offerta_specifica, args=(offerta_id, KULENOVIC_ID)).start()
-        except Exception as e:
-            print(f"⚠️ Errore ciclo: {e}")
-        time.sleep(15)
+            print("🔎 Controllo offerte...")
 
-@app.route('/')
+            offerte = recupera_offerte()
+
+            print(f"📨 Offerte pending ricevute: {len(offerte)}")
+
+            for offerta in offerte:
+                elabora_offerta(offerta)
+
+        except Exception as e:
+            print(f"⚠️ Errore nel ciclo: {e}")
+
+        time.sleep(60)
+
+
+# ============================================================
+# FLASK
+# ============================================================
+
+@app.route("/")
 def home():
     global monitoraggio_avviato
+
     with lock_avvio:
         if not monitoraggio_avviato:
             monitoraggio_avviato = True
-            t = threading.Thread(target=monitor_offerte, daemon=True)
-            t.start()
-            return "Bot Sorare online e ciclo avviato!"
-    return "Bot Sorare online e attivo!"
 
-if __name__ == '__main__':
+            thread = threading.Thread(
+                target=monitor_offerte,
+                daemon=True,
+            )
+
+            thread.start()
+
+            return "Bot Sorare avviato in modalità DRY RUN."
+
+    return "Bot Sorare già attivo."
+
+
+# ============================================================
+# AVVIO
+# ============================================================
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(
+        host="0.0.0.0",
+        port=port,
+    )
