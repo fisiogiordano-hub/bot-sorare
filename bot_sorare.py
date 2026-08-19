@@ -863,7 +863,7 @@ def analizza_carta(carta):
     )
 
     # --------------------------------------------------------
-    # LIMITE MINIMO
+    # LIMITI PREZZO
     # --------------------------------------------------------
 
     prezzo_minimo = (
@@ -885,7 +885,7 @@ def analizza_carta(carta):
     #
     # DEVE ESSERE:
     #
-    # €0,30 <= prezzo <= €0,50
+    # €0,30 <= prezzo <= €0,80
     #
     # --------------------------------------------------------
 
@@ -918,7 +918,7 @@ def analizza_carta(carta):
     #
     # 1. LIMITED
     # 2. Prezzo >= €0,30
-    # 3. Prezzo <= €0,50
+    # 3. Prezzo <= €0,80
     # 4. Campionato coperto
     #
     # ========================================================
@@ -976,7 +976,7 @@ def analizza_carta(carta):
         elif prezzo <= prezzo_massimo:
 
             print(
-                "      🟢 Prezzo tra €0,30 e €0,50"
+                "      🟢 Prezzo tra €0,30 e €0,80"
             )
 
         # ----------------------------------------------------
@@ -987,7 +987,7 @@ def analizza_carta(carta):
 
             print(
                 "      🔴 Prezzo superiore al massimo "
-                "di €0,50"
+                "di €0,80"
             )
 
     else:
@@ -1552,6 +1552,18 @@ def monitor_offerte():
     print(
         "⚠️ Nessun rifiuto e nessuna "
         "controproposta verranno eseguiti."
+    )
+
+    print("")
+
+    print(
+        "💰 REGOLA PREZZO: "
+        "€0,30 - €0,80"
+    )
+
+    print(
+        "💰 PAGAMENTO: "
+        "€0,20 per ogni carta idonea"
     )
 
     print("")
