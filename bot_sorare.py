@@ -3,6 +3,7 @@ import time
 import threading
 import requests
 import hashlib
+import importlib
 
 from decimal import Decimal
 from flask import Flask
@@ -25,14 +26,11 @@ SORARE_JWT_AUD = os.getenv(
     ""
 ).strip()
 
-# Può essere asset ID, slug oppure vuota.
 KULENOVIC_ID = os.getenv(
     "KULENOVIC_ID",
     ""
 ).strip()
 
-# Chiave privata Stark.
-# NON viene mai stampata nei log.
 SORARE_STARK_PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
     ""
@@ -45,8 +43,8 @@ SORARE_STARK_PRIVATE_KEY = os.getenv(
 
 # SEMPRE DRY RUN.
 #
-# Nessun rifiuto.
-# Nessuna controproposta.
+# Nessun rifiuto reale.
+# Nessuna controproposta reale.
 # Nessuna transazione reale.
 DRY_RUN = True
 
@@ -114,7 +112,11 @@ def test_firma_stark():
     if not SORARE_STARK_PRIVATE_KEY:
 
         print(
-            "❌ SORARE_STARK_PRIVATE_KEY non configurata."
+            "⚠️ SORARE_STARK_PRIVATE_KEY non configurata."
+        )
+
+        print(
+            "🟡 Il bot continua in DRY RUN."
         )
 
         print(
@@ -128,7 +130,7 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Normalizzazione chiave
+    # Normalizzazione
     # --------------------------------------------------------
 
     chiave = SORARE_STARK_PRIVATE_KEY.strip()
@@ -144,13 +146,13 @@ def test_firma_stark():
     if not chiave_hex:
 
         print(
-            "❌ Chiave Stark vuota."
+            "⚠️ Chiave Stark vuota."
         )
 
         return False
 
     # --------------------------------------------------------
-    # Controllo esadecimale
+    # Controllo formato
     # --------------------------------------------------------
 
     try:
@@ -181,77 +183,134 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Import compatibile con starknet-py attuale
-    # --------------------------------------------------------
+    # IMPORT DINAMICO
     #
-    # Nelle versioni attuali:
+    # Non assumiamo più che:
     #
-    #   KeyPair
-    #       -> starknet_py.net.signer.key_pair
+    # starknet_py.net.signer.stark_curve
     #
-    #   message_signature
-    #       -> starknet_py.hash.utils
-    #
-    #   verify_message_signature
-    #       -> starknet_py.hash.utils
-    #
-    # Il vecchio:
-    #
-    #   starknet_py.net.signer.stark_curve
-    #
-    # non viene più utilizzato.
+    # esista nella versione installata.
     # --------------------------------------------------------
 
-    try:
+    moduli_da_provare = [
 
-        from starknet_py.net.signer.key_pair import (
-            KeyPair,
-        )
+        "starknet_py.net.signer.stark_curve",
 
-        from starknet_py.hash.utils import (
-            message_signature,
-            verify_message_signature,
-        )
+        "starknet_py.net.signer",
 
-    except Exception as e:
+    ]
 
-        print(
-            "❌ Impossibile importare le API Starknet."
-        )
+    modulo = None
+
+    for nome_modulo in moduli_da_provare:
 
         print(
-            f"   Dettaglio: {e}"
+            f"🔎 Controllo API Stark: {nome_modulo}"
+        )
+
+        try:
+
+            candidato = importlib.import_module(
+                nome_modulo
+            )
+
+            modulo = candidato
+
+            print(
+                f"✅ Modulo disponibile: {nome_modulo}"
+            )
+
+            break
+
+        except Exception as e:
+
+            print(
+                f"   ⚠️ Modulo non disponibile: "
+                f"{e}"
+            )
+
+    # --------------------------------------------------------
+    # Se l'API non è disponibile:
+    #
+    # NON blocchiamo il bot.
+    # --------------------------------------------------------
+
+    if modulo is None:
+
+        print("")
+        print(
+            "⚠️ API firma Stark non disponibile "
+            "con questa versione di starknet-py."
         )
 
         print(
-            "   Verifica che starknet-py sia installato "
-            "nel requirements.txt."
+            "🟡 Questo non impedisce il DRY RUN."
+        )
+
+        print(
+            "🟡 Nessuna operazione reale verrà eseguita."
+        )
+
+        print(
+            "🟢 Il bot continua verso Sorare API."
+        )
+
+        print(
+            "========================================"
+        )
+
+        return False
+
+    # --------------------------------------------------------
+    # Ricerca PrivateKey
+    # --------------------------------------------------------
+
+    PrivateKey = getattr(
+        modulo,
+        "PrivateKey",
+        None
+    )
+
+    if PrivateKey is None:
+
+        print(
+            "⚠️ PrivateKey non disponibile "
+            "nell'API rilevata."
+        )
+
+        print(
+            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
 
     print(
-        "✅ API Starknet importate correttamente."
+        "✅ Classe PrivateKey disponibile."
     )
 
     # --------------------------------------------------------
-    # Creazione KeyPair
+    # Inizializzazione
     # --------------------------------------------------------
 
     try:
 
-        key_pair = KeyPair.from_private_key(
+        private_key = PrivateKey(
             private_key_int
         )
 
     except Exception as e:
 
         print(
-            "❌ Impossibile inizializzare la KeyPair Stark."
+            "⚠️ Impossibile inizializzare "
+            "la PrivateKey Stark."
         )
 
         print(
             f"   Dettaglio: {e}"
+        )
+
+        print(
+            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -266,24 +325,20 @@ def test_firma_stark():
 
     try:
 
-        public_key = key_pair.public_key
+        public_key = private_key.public_key
 
     except Exception as e:
 
         print(
-            "❌ Impossibile derivare la public key."
+            "⚠️ Impossibile derivare la public key."
         )
 
         print(
             f"   Dettaglio: {e}"
         )
 
-        return False
-
-    if not public_key:
-
         print(
-            "❌ Public key non generata."
+            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -296,20 +351,11 @@ def test_firma_stark():
     # Messaggio di test
     #
     # ESCLUSIVAMENTE LOCALE.
-    #
-    # NON è una richiesta Sorare.
-    # NON è una mutation.
-    # NON è una transazione.
-    # NON viene inviato a Sorare.
     # --------------------------------------------------------
 
     messaggio_testo = (
         "SORARE_LOCAL_SIGNATURE_TEST"
     )
-
-    # --------------------------------------------------------
-    # Hash SHA-256
-    # --------------------------------------------------------
 
     try:
 
@@ -325,7 +371,7 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "❌ Impossibile creare l'hash di test."
+            "⚠️ Impossibile creare hash di test."
         )
 
         print(
@@ -335,7 +381,7 @@ def test_firma_stark():
         return False
 
     # --------------------------------------------------------
-    # Campo primo Stark
+    # Stark field prime
     # --------------------------------------------------------
 
     STARK_FIELD_PRIME = (
@@ -351,32 +397,80 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Generazione firma
+    # Ricerca funzione firma
     # --------------------------------------------------------
-    #
-    # API attuale:
-    #
-    # message_signature(
-    #     msg_hash=...,
-    #     priv_key=...
-    # )
+
+    message_signature = getattr(
+        modulo,
+        "message_signature",
+        None
+    )
+
+    # Alcune versioni possono esporre la funzione
+    # direttamente nel modulo signer.
+
+    if message_signature is None:
+
+        try:
+
+            signer_module = importlib.import_module(
+                "starknet_py.net.signer"
+            )
+
+            message_signature = getattr(
+                signer_module,
+                "message_signature",
+                None
+            )
+
+        except Exception:
+
+            message_signature = None
+
+    if message_signature is None:
+
+        print(
+            "⚠️ Funzione message_signature "
+            "non disponibile."
+        )
+
+        print(
+            "🟡 Il bot continua in DRY RUN."
+        )
+
+        return False
+
+    print(
+        "✅ Funzione message_signature disponibile."
+    )
+
+    # --------------------------------------------------------
+    # Generazione firma
     # --------------------------------------------------------
 
     try:
 
+        print(
+            "🔐 Generazione firma locale..."
+        )
+
         firma = message_signature(
-            msg_hash=messaggio_hash,
-            priv_key=key_pair.private_key,
+            private_key,
+            messaggio_hash
         )
 
     except Exception as e:
 
         print(
-            "❌ Generazione firma fallita."
+            "⚠️ Generazione firma locale fallita."
         )
 
         print(
             f"   Dettaglio: {e}"
+        )
+
+        print(
+            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -384,7 +478,11 @@ def test_firma_stark():
     if not firma:
 
         print(
-            "❌ Firma non generata."
+            "⚠️ Firma non generata."
+        )
+
+        print(
+            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -394,7 +492,7 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Controllo struttura firma
+    # Controllo r/s
     # --------------------------------------------------------
 
     try:
@@ -402,22 +500,24 @@ def test_firma_stark():
         r = firma[0]
         s = firma[1]
 
+        if r is None or s is None:
+
+            raise ValueError(
+                "r oppure s assente"
+            )
+
     except Exception as e:
 
         print(
-            "❌ Struttura della firma inattesa."
+            "⚠️ Struttura firma inattesa."
         )
 
         print(
             f"   Dettaglio: {e}"
         )
 
-        return False
-
-    if r is None or s is None:
-
         print(
-            "❌ Firma priva dei valori r/s."
+            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -427,34 +527,33 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Verifica firma
-    # --------------------------------------------------------
-    #
-    # API attuale:
-    #
-    # verify_message_signature(
-    #     msg_hash,
-    #     signature,
-    #     public_key
-    # )
+    # Verifica
     # --------------------------------------------------------
 
     try:
 
-        verificata = verify_message_signature(
+        verificata = public_key.verify(
             messaggio_hash,
-            firma,
-            key_pair.public_key,
+            firma
         )
 
     except Exception as e:
 
         print(
-            "❌ Errore durante la verifica locale."
+            "⚠️ Verifica locale non disponibile."
         )
 
         print(
             f"   Dettaglio: {e}"
+        )
+
+        print(
+            "🟡 Firma generata, ma verifica "
+            "locale non disponibile."
+        )
+
+        print(
+            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -466,13 +565,13 @@ def test_firma_stark():
         )
 
         print(
-            "========================================"
+            "🟡 Il bot rimane in DRY RUN."
         )
 
         return False
 
     # --------------------------------------------------------
-    # RISULTATO POSITIVO
+    # SUCCESSO
     # --------------------------------------------------------
 
     print(
@@ -489,10 +588,6 @@ def test_firma_stark():
 
     print(
         "🟢 Coppia firma/verifica funzionante."
-    )
-
-    print(
-        "🟡 Questo NON è un test di una mutation Sorare."
     )
 
     print(
@@ -1185,12 +1280,12 @@ def recupera_prezzo_floor(carta):
 
 def analizza_carta(carta):
 
-    asset_id = (
-        carta.get("assetId")
+    asset_id = carta.get(
+        "assetId"
     )
 
-    slug = (
-        carta.get("slug")
+    slug = carta.get(
+        "slug"
     )
 
     nome = (
@@ -1556,7 +1651,6 @@ def elabora_offerta(offerta):
     if not asset_ids:
 
         print("")
-
         print(
             "🔴 DECISIONE: RIFIUTARE"
         )
@@ -1595,7 +1689,6 @@ def elabora_offerta(offerta):
     carte_idonee = []
 
     print("")
-
     print(
         "🔎 ANALISI DELLE CARTE RICEVUTE:"
     )
@@ -1622,7 +1715,6 @@ def elabora_offerta(offerta):
     )
 
     print("")
-
     print(
         "----------------------------------------"
     )
@@ -1645,7 +1737,6 @@ def elabora_offerta(offerta):
     if numero_idonee == 0:
 
         print("")
-
         print(
             "🔴 DECISIONE: RIFIUTARE L'OFFERTA"
         )
@@ -1655,7 +1746,6 @@ def elabora_offerta(offerta):
         )
 
         print("")
-
         print(
             "🟡 DRY RUN: nessun rifiuto eseguito."
         )
@@ -1679,13 +1769,11 @@ def elabora_offerta(offerta):
     )
 
     print("")
-
     print(
         "🟢 DECISIONE: CONTROPROPOSTA"
     )
 
     print("")
-
     print(
         "📤 DALLA PROPOSTA VIENE RIMOSSA:"
     )
@@ -1703,7 +1791,6 @@ def elabora_offerta(offerta):
         )
 
     print("")
-
     print(
         "🗑️ VENGONO ELIMINATE "
         "LE CARTE NON IDONEE:"
@@ -1722,7 +1809,6 @@ def elabora_offerta(offerta):
         )
 
     print("")
-
     print(
         "📥 RIMANGONO SOLO LE CARTE IDONEE:"
     )
@@ -1751,7 +1837,6 @@ def elabora_offerta(offerta):
     )
 
     print("")
-
     print(
         "📋 CONTROPROPOSTA PREVISTA:"
     )
@@ -1833,7 +1918,21 @@ def monitor_offerte():
     # TEST LOCALE FIRMA
     # ========================================================
 
-    firma_ok = test_firma_stark()
+    try:
+
+        firma_ok = test_firma_stark()
+
+    except Exception as e:
+
+        print(
+            "⚠️ Errore inatteso nel test Stark."
+        )
+
+        print(
+            f"   Dettaglio: {e}"
+        )
+
+        firma_ok = False
 
     if not firma_ok:
 
@@ -1842,11 +1941,11 @@ def monitor_offerte():
         )
 
         print(
-            "⚠️ Il bot continua in DRY RUN."
+            "🟡 Il bot continua comunque in DRY RUN."
         )
 
         print(
-            "⚠️ Nessuna operazione reale verrà eseguita."
+            "🟡 Nessuna operazione reale verrà eseguita."
         )
 
     else:
@@ -1860,6 +1959,9 @@ def monitor_offerte():
         )
 
     print("")
+    print(
+        "🔄 Passaggio alla verifica account Sorare..."
+    )
 
     if not verifica_account():
 
@@ -1868,6 +1970,16 @@ def monitor_offerte():
         )
 
         return
+
+    print(
+        "🟢 Monitoraggio offerte attivo."
+    )
+
+    print(
+        "⏱️ Controllo ogni 10 secondi."
+    )
+
+    print("")
 
     while True:
 
@@ -1895,10 +2007,6 @@ def monitor_offerte():
             print(
                 f"⚠️ Errore nel ciclo: {e}"
             )
-
-        # ====================================================
-        # CONTROLLO OGNI 10 SECONDI
-        # ====================================================
 
         time.sleep(10)
 
