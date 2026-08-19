@@ -17,7 +17,6 @@ lock_avvio = threading.Lock()
 def esegui_query_sorare(query, variables=None):
     token = SORARE_JWT_TOKEN.strip()
     
-    # Se la stringa è un cookie di sessione anziché un token JWT
     if "pYy" in token or "=" in token:
         cookie_value = token if "_sorare_session_id=" in token else f"_sorare_session_id={token}"
         headers = {
@@ -148,7 +147,7 @@ def monitor_offerte():
     print("🔄 [DEBUG] Avvio ciclo di monitoraggio in background...")
     query_offerte = """
         query GetAllOffers {
-            viewer {
+            currentUser {
                 receivedOffers {
                     nodes {
                         id
@@ -164,9 +163,9 @@ def monitor_offerte():
             print(f"🔎 [DEBUG] Risposta grezza API Sorare: {risultato}")
             
             if risultato:
-                viewer = risultato.get("data", {}).get("viewer")
-                if viewer:
-                    offerte = viewer.get("receivedOffers", {}).get("nodes", [])
+                user = risultato.get("data", {}).get("currentUser")
+                if user:
+                    offerte = user.get("receivedOffers", {}).get("nodes", [])
                     print(f"🔎 [DEBUG] Numero offerte trovate: {len(offerte)}")
                     for offerta in offerte:
                         offerta_id = offerta.get("id")
