@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import requests
+import hashlib
 
 from decimal import Decimal
 from flask import Flask
@@ -107,7 +108,7 @@ def test_firma_stark():
     print("========================================")
 
     # --------------------------------------------------------
-    # Controllo variabile
+    # Controllo variabile ambiente
     # --------------------------------------------------------
 
     if not SORARE_STARK_PRIVATE_KEY:
@@ -127,10 +128,10 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Controllo formato esadecimale
+    # Normalizzazione chiave
     # --------------------------------------------------------
 
-    chiave = SORARE_STARK_PRIVATE_KEY
+    chiave = SORARE_STARK_PRIVATE_KEY.strip()
 
     if chiave.lower().startswith("0x"):
 
@@ -147,6 +148,10 @@ def test_firma_stark():
         )
 
         return False
+
+    # --------------------------------------------------------
+    # Controllo esadecimale
+    # --------------------------------------------------------
 
     try:
 
@@ -176,7 +181,7 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Import libreria Starknet
+    # Import Starknet
     # --------------------------------------------------------
 
     try:
@@ -189,17 +194,17 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "❌ Impossibile importare starknet-py:"
+            "❌ Impossibile importare starknet-py."
         )
 
         print(
-            str(e)
+            f"   Dettaglio: {e}"
         )
 
         return False
 
     # --------------------------------------------------------
-    # Firma locale
+    # Inizializzazione private key
     # --------------------------------------------------------
 
     try:
@@ -211,31 +216,101 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "❌ Impossibile inizializzare la chiave Stark:"
+            "❌ Impossibile inizializzare la chiave Stark."
         )
 
         print(
-            str(e)
+            f"   Dettaglio: {e}"
         )
 
         return False
 
-    # Messaggio di test fisso.
+    print(
+        "✅ Private key Stark inizializzata."
+    )
+
+    # --------------------------------------------------------
+    # Derivazione public key
+    # --------------------------------------------------------
+
+    try:
+
+        public_key = private_key.public_key
+
+    except Exception as e:
+
+        print(
+            "❌ Impossibile derivare la public key."
+        )
+
+        print(
+            f"   Dettaglio: {e}"
+        )
+
+        return False
+
+    print(
+        "✅ Public key Stark derivata."
+    )
+
+    # --------------------------------------------------------
+    # Messaggio di test
+    #
+    # Questo messaggio è esclusivamente locale.
     #
     # NON è una richiesta Sorare.
+    # NON è una mutation.
     # NON è una transazione.
     # NON viene inviato a Sorare.
+    # --------------------------------------------------------
+
     messaggio_testo = (
         "SORARE_LOCAL_SIGNATURE_TEST"
     )
 
-    # Hash numerico del messaggio.
+    # --------------------------------------------------------
+    # Hash SHA-256
+    # --------------------------------------------------------
+
+    try:
+
+        digest = hashlib.sha256(
+            messaggio_testo.encode("utf-8")
+        ).digest()
+
+        messaggio_hash = int.from_bytes(
+            digest,
+            byteorder="big"
+        )
+
+    except Exception as e:
+
+        print(
+            "❌ Impossibile creare l'hash di test."
+        )
+
+        print(
+            f"   Dettaglio: {e}"
+        )
+
+        return False
+
+    # --------------------------------------------------------
+    # Campo primo Stark
     #
-    # Utilizziamo un valore deterministico
-    # esclusivamente per il test locale.
-    messaggio_hash = int.from_bytes(
-        messaggio_testo.encode("utf-8"),
-        byteorder="big"
+    # Il valore viene portato nel range del field Stark.
+    # --------------------------------------------------------
+
+    STARK_FIELD_PRIME = (
+        (2 ** 251)
+        + (17 * (2 ** 192))
+        + 1
+    )
+
+    messaggio_hash %= STARK_FIELD_PRIME
+
+    print(
+        "✅ Hash di test Stark preparato."
     )
 
     # --------------------------------------------------------
@@ -252,11 +327,11 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "❌ Generazione firma fallita:"
+            "❌ Generazione firma fallita."
         )
 
         print(
-            str(e)
+            f"   Dettaglio: {e}"
         )
 
         return False
@@ -270,7 +345,40 @@ def test_firma_stark():
         return False
 
     print(
-        "✅ Firma locale generata."
+        "✅ Firma Stark generata."
+    )
+
+    # --------------------------------------------------------
+    # Controllo struttura firma
+    # --------------------------------------------------------
+
+    try:
+
+        r = firma[0]
+        s = firma[1]
+
+    except Exception as e:
+
+        print(
+            "❌ Struttura della firma inattesa."
+        )
+
+        print(
+            f"   Dettaglio: {e}"
+        )
+
+        return False
+
+    if r is None or s is None:
+
+        print(
+            "❌ Firma priva dei valori r/s."
+        )
+
+        return False
+
+    print(
+        "✅ Firma contiene r e s."
     )
 
     # --------------------------------------------------------
@@ -278,8 +386,6 @@ def test_firma_stark():
     # --------------------------------------------------------
 
     try:
-
-        public_key = private_key.public_key
 
         verificata = public_key.verify(
             messaggio_hash,
@@ -289,17 +395,11 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "⚠️ Firma generata ma verifica locale "
-            "non disponibile con questa versione "
-            "di starknet-py."
+            "❌ Errore durante la verifica locale."
         )
 
         print(
             f"   Dettaglio: {e}"
-        )
-
-        print(
-            "🟡 Nessuna operazione Sorare eseguita."
         )
 
         return False
@@ -316,13 +416,28 @@ def test_firma_stark():
 
         return False
 
+    # --------------------------------------------------------
+    # RISULTATO POSITIVO
+    # --------------------------------------------------------
+
     print(
         "✅ FIRMA VERIFICATA LOCALMENTE."
     )
 
     print(
-        "🟢 Chiave Stark caricata e utilizzabile "
-        "per una firma locale."
+        "🟢 Private key funzionante."
+    )
+
+    print(
+        "🟢 Public key derivata correttamente."
+    )
+
+    print(
+        "🟢 Coppia firma/verifica funzionante."
+    )
+
+    print(
+        "🟡 Questo NON è un test di una mutation Sorare."
     )
 
     print(
@@ -340,6 +455,7 @@ def test_firma_stark():
     print(
         "========================================"
     )
+
     print("")
 
     return True
