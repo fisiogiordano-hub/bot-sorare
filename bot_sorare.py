@@ -14,7 +14,6 @@ app = Flask(__name__)
 SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 SORARE_JWT_AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 
-# Può essere asset ID, slug oppure vuota.
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
 
 # ============================================================
@@ -29,12 +28,10 @@ DRY_RUN = True
 # REGOLE BOT
 # ============================================================
 
-# Prezzo massimo accettabile:
-# €0,50
+# Prezzo massimo accettabile: €0,50
 PREZZO_MASSIMO_CENTESIMI = 50
 
-# Pagamento previsto:
-# €0,20 per ogni carta idonea
+# Pagamento previsto: €0,20 per ogni carta idonea
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
 
 # ============================================================
@@ -129,17 +126,34 @@ def esegui_query(query, variables=None):
 
             return None
 
-        risultato = response.json()
+        try:
+            risultato = response.json()
 
-        errors = risultato.get("errors")
+        except ValueError:
 
-        if errors:
+            print(
+                "❌ Risposta Sorare non valida come JSON."
+            )
+
+            print(
+                response.text[:3000]
+            )
+
+            return None
+
+        # ====================================================
+        # ERRORI GRAPHQL
+        # ====================================================
+
+        risultato_errors = risultato.get("errors")
+
+        if risultato_errors:
 
             print(
                 "❌ Errori GraphQL:"
             )
 
-            for errore in errors:
+            for errore in risultato_errors:
 
                 print(
                     "- "
@@ -172,9 +186,12 @@ def verifica_account():
 
     query = """
     query CurrentUserTest {
+
         currentUser {
+
             slug
             nickname
+
         }
     }
     """
@@ -381,31 +398,17 @@ def recupera_dettagli_carte(asset_ids):
 
 
 # ============================================================
-# CONVERSIONE WEI -> EURO
+# CONVERSIONE PREZZO
 # ============================================================
 
-def converti_wei_in_euro(wei):
+def converti_prezzo_euro(valore):
 
-    if wei is None:
+    if valore is None:
         return None
 
     try:
 
-        valore_wei = Decimal(
-            str(wei)
-        )
-
-        if valore_wei <= 0:
-            return None
-
-        # Sorare usa wei come unità minima di ETH.
-        # 1 ETH = 10^18 wei.
-        eth = (
-            valore_wei
-            / Decimal("1000000000000000000")
-        )
-
-        return eth
+        prezzo = Decimal(str(valore))
 
     except (
         InvalidOperation,
@@ -415,38 +418,10 @@ def converti_wei_in_euro(wei):
 
         return None
 
-
-# ============================================================
-# ESTRAZIONE VALORE MONETARIO
-# ============================================================
-
-def estrai_wei_da_amounts(amounts):
-
-    if not isinstance(amounts, dict):
+    if prezzo <= 0:
         return None
 
-    # Alcune versioni dello schema possono restituire
-    # direttamente wei.
-
-    wei = amounts.get("wei")
-
-    if wei is not None:
-        return wei
-
-    # Fallback per eventuali strutture future.
-
-    for chiave in (
-        "amount",
-        "raw",
-        "value",
-    ):
-
-        valore = amounts.get(chiave)
-
-        if valore is not None:
-            return valore
-
-    return None
+    return prezzo
 
 
 # ============================================================
@@ -454,47 +429,54 @@ def estrai_wei_da_amounts(amounts):
 #
 # IMPORTANTE:
 #
-# NON chiediamo più:
+# NON utilizziamo:
 #
-#     eur
+#     card(slug: ...)
 #
-# perché Sorare restituisce:
+# perché il tuo schema Sorare restituisce:
 #
-#     Field 'eur' doesn't exist on type 'MonetaryAmount'
+#     Field 'card' doesn't exist on type 'Query'
 #
-# Usiamo solamente wei.
+# Utilizziamo invece anyCards(), che il tuo endpoint
+# sta già accettando correttamente.
+#
+# Il prezzo viene cercato direttamente nei dati della carta.
 # ============================================================
 
 def recupera_prezzo_floor(carta):
+
+    asset_id = (
+        carta.get("assetId")
+        or ""
+    ).strip()
 
     slug = (
         carta.get("slug")
         or ""
     ).strip()
 
-    if not slug:
+    if not asset_id:
 
         print(
-            "      ⚠️ Slug carta assente."
+            "      ⚠️ Asset ID carta assente."
         )
 
         return None
 
     print(
-        f"      🔎 Ricerca prezzo floor: {slug}"
+        f"      🔎 Ricerca prezzo floor: {slug or asset_id}"
     )
 
-    # --------------------------------------------------------
-    # PRIMA TENTATIVO: carta tramite slug
-    # --------------------------------------------------------
-
     query = """
-    query CardFloorPrice(
-        $slug: String!
+    query CardPriceByAsset(
+        $assetIds: [String!]
     ) {
 
-        card(slug: $slug) {
+        anyCards(
+            assetIds: $assetIds
+        ) {
 
+            assetId
             slug
             name
             rarityTyped
@@ -505,6 +487,7 @@ def recupera_prezzo_floor(carta):
 
                     amounts {
 
+                        fiat
                         wei
 
                     }
@@ -517,6 +500,7 @@ def recupera_prezzo_floor(carta):
 
                     amounts {
 
+                        fiat
                         wei
 
                     }
@@ -529,7 +513,7 @@ def recupera_prezzo_floor(carta):
     risultato = esegui_query(
         query,
         {
-            "slug": slug
+            "assetIds": [asset_id]
         }
     )
 
@@ -541,21 +525,24 @@ def recupera_prezzo_floor(carta):
 
         return None
 
-    dati = (
+    carte = (
         risultato
         .get("data", {})
-        .get("card")
+        .get("anyCards")
+        or []
     )
 
-    if not dati:
+    if not carte:
 
         print(
-            "      ⚠️ Carta non trovata."
+            "      ⚠️ Carta non trovata tramite asset ID."
         )
 
         return None
 
-    valori_wei = []
+    dati = carte[0]
+
+    valori = []
 
     # ========================================================
     # LIVE SINGLE SALE
@@ -582,31 +569,48 @@ def recupera_prezzo_floor(carta):
         or {}
     )
 
-    wei = estrai_wei_da_amounts(
-        amounts
-    )
+    # ========================================================
+    # PROVA FIAT
+    #
+    # Alcune versioni dello schema non espongono "eur".
+    # Cerchiamo quindi il valore fiat.
+    # ========================================================
 
-    if wei is not None:
+    fiat = amounts.get("fiat")
 
-        try:
+    prezzo_fiat = None
 
-            valore = Decimal(
-                str(wei)
+    if fiat is not None:
+
+        if isinstance(fiat, dict):
+
+            # Possibili rappresentazioni dell'amount.
+            for chiave in (
+                "eur",
+                "value",
+                "amount",
+            ):
+
+                if chiave in fiat:
+
+                    prezzo_fiat = converti_prezzo_euro(
+                        fiat.get(chiave)
+                    )
+
+                    if prezzo_fiat is not None:
+                        break
+
+        else:
+
+            prezzo_fiat = converti_prezzo_euro(
+                fiat
             )
 
-            if valore > 0:
+    if prezzo_fiat is not None:
 
-                valori_wei.append(
-                    valore
-                )
-
-        except (
-            InvalidOperation,
-            ValueError,
-            TypeError,
-        ):
-
-            pass
+        valori.append(
+            prezzo_fiat
+        )
 
     # ========================================================
     # BEST BID ASTA
@@ -633,40 +637,64 @@ def recupera_prezzo_floor(carta):
         or {}
     )
 
-    bid_wei = estrai_wei_da_amounts(
-        bid_amounts
-    )
+    bid_fiat = bid_amounts.get("fiat")
 
-    if bid_wei is not None:
+    prezzo_bid = None
 
-        try:
+    if bid_fiat is not None:
 
-            valore = Decimal(
-                str(bid_wei)
+        if isinstance(bid_fiat, dict):
+
+            for chiave in (
+                "eur",
+                "value",
+                "amount",
+            ):
+
+                if chiave in bid_fiat:
+
+                    prezzo_bid = converti_prezzo_euro(
+                        bid_fiat.get(chiave)
+                    )
+
+                    if prezzo_bid is not None:
+                        break
+
+        else:
+
+            prezzo_bid = converti_prezzo_euro(
+                bid_fiat
             )
 
-            if valore > 0:
+    if prezzo_bid is not None:
 
-                valori_wei.append(
-                    valore
-                )
+        valori.append(
+            prezzo_bid
+        )
 
-        except (
-            InvalidOperation,
-            ValueError,
-            TypeError,
-        ):
+    # ========================================================
+    # FALLBACK WEI
+    #
+    # NON consideriamo il WEI come EUR.
+    # Serve solamente come informazione diagnostica.
+    # ========================================================
 
-            pass
+    wei = amounts.get("wei")
+
+    if not valori and wei:
+
+        print(
+            f"      ℹ️ Prezzo disponibile in WEI: {wei}"
+        )
 
     # ========================================================
     # NESSUN PREZZO
     # ========================================================
 
-    if not valori_wei:
+    if not valori:
 
         print(
-            "      ⚠️ Nessun prezzo disponibile."
+            "      ⚠️ Nessun prezzo EUR disponibile."
         )
 
         return None
@@ -675,48 +703,13 @@ def recupera_prezzo_floor(carta):
     # FLOOR
     # ========================================================
 
-    floor_wei = min(
-        valori_wei
-    )
-
-    # --------------------------------------------------------
-    # ATTENZIONE:
-    #
-    # Qui otteniamo ETH, non EUR.
-    #
-    # Per confrontare €0,50 serve un prezzo ETH/EUR.
-    # Non inventiamo un cambio.
-    #
-    # Quindi per sicurezza il bot considera il prezzo
-    # NON verificabile se Sorare non fornisce direttamente
-    # un valore EUR.
-    # --------------------------------------------------------
-
-    eth = converti_wei_in_euro(
-        floor_wei
-    )
-
-    if eth is None:
-
-        print(
-            "      ⚠️ Prezzo non convertibile."
-        )
-
-        return None
+    floor = min(valori)
 
     print(
-        f"      💰 Prezzo blockchain: {eth} ETH"
+        f"      💰 Prezzo trovato: €{floor:.2f}"
     )
 
-    print(
-        "      ⚠️ Sorare non ha fornito il controvalore EUR."
-    )
-
-    print(
-        "      ⚠️ Prezzo EUR non verificabile."
-    )
-
-    return None
+    return floor
 
 
 # ============================================================
@@ -755,28 +748,8 @@ def analizza_carta(carta):
         or {}
     )
 
-    competizioni_player = (
-        club.get("activeCompetitions")
-        or []
-    )
-
-    team = (
-        carta.get("anyTeam")
-        or {}
-    )
-
-    competizioni_team = (
-        team.get("activeCompetitions")
-        or []
-    )
-
-    # ========================================================
-    # UNIAMO LE COMPETIZIONI
-    # ========================================================
-
     competizioni = (
-        competizioni_player
-        or competizioni_team
+        club.get("activeCompetitions")
         or []
     )
 
@@ -792,15 +765,16 @@ def analizza_carta(carta):
         prezzo is not None
     )
 
+    prezzo_massimo = (
+        Decimal(
+            PREZZO_MASSIMO_CENTESIMI
+        )
+        / Decimal("100")
+    )
+
     prezzo_ok = (
         prezzo_verificabile
-        and prezzo
-        <= (
-            Decimal(
-                PREZZO_MASSIMO_CENTESIMI
-            )
-            / Decimal("100")
-        )
+        and prezzo <= prezzo_massimo
     )
 
     # ========================================================
@@ -1115,10 +1089,8 @@ def elabora_offerta(offerta):
     # KULENOVIC
     # ========================================================
 
-    kulenovic_presente = (
-        controlla_kulenovic(
-            carte_che_diamo
-        )
+    kulenovic_presente = controlla_kulenovic(
+        carte_che_diamo
     )
 
     # ========================================================
@@ -1134,6 +1106,7 @@ def elabora_offerta(offerta):
     if not asset_ids:
 
         print("")
+
         print(
             "🔴 DECISIONE: RIFIUTARE"
         )
@@ -1146,9 +1119,7 @@ def elabora_offerta(offerta):
             "🟡 DRY RUN: nessuna operazione eseguita."
         )
 
-        print(
-            "----------------------------------------"
-        )
+        print("----------------------------------------")
 
         return
 
@@ -1166,9 +1137,7 @@ def elabora_offerta(offerta):
             "⚠️ Impossibile recuperare i dettagli delle carte."
         )
 
-        print(
-            "----------------------------------------"
-        )
+        print("----------------------------------------")
 
         return
 
@@ -1375,10 +1344,7 @@ def elabora_offerta(offerta):
             "   Nessuna controproposta è stata inviata."
         )
 
-    print(
-        "----------------------------------------"
-    )
-
+    print("----------------------------------------")
     print("")
 
 
