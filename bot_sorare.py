@@ -14,13 +14,13 @@ SORARE_TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 SORARE_JWT_AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
 
-# Per ora SOLO TEST.
+# PER ORA SOLO TEST.
 # Il bot NON rifiuta e NON invia controproposte.
 DRY_RUN = True
 
 # Regole del bot
-PREZZO_MASSIMO_EURO = 0.50
-PAGAMENTO_PER_CARTA_EURO = 0.20
+PREZZO_MASSIMO_CENTESIMI = 50
+PAGAMENTO_PER_CARTA_CENTESIMI = 20
 
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
@@ -35,19 +35,20 @@ lock_avvio = threading.Lock()
 
 def crea_headers():
     if not SORARE_TOKEN:
-        raise RuntimeError("SORARE_JWT_TOKEN non configurato.")
+        raise RuntimeError(
+            "SORARE_JWT_TOKEN non configurato."
+        )
+
+    token = SORARE_TOKEN
+
+    if not token.lower().startswith("bearer "):
+        token = f"Bearer {token}"
 
     headers = {
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": token,
     }
-
-    # JWT moderno
-    if SORARE_TOKEN.lower().startswith("bearer "):
-        token = SORARE_TOKEN
-    else:
-        token = f"Bearer {SORARE_TOKEN}"
-
-    headers["Authorization"] = token
 
     if SORARE_JWT_AUD:
         headers["JWT-AUD"] = SORARE_JWT_AUD
@@ -80,8 +81,13 @@ def esegui_query(query, variables=None):
 
         if risultato.get("errors"):
             print("❌ Errori GraphQL:")
+
             for errore in risultato["errors"]:
-                print(errore.get("message"))
+                print(
+                    f"- {errore.get('message', 'Errore sconosciuto')}"
+                )
+
+            return None
 
         return risultato
 
@@ -91,7 +97,7 @@ def esegui_query(query, variables=None):
 
 
 # ============================================================
-# TEST AUTENTICAZIONE + OFFERTE
+# VERIFICA ACCOUNT
 # ============================================================
 
 def verifica_account():
@@ -109,11 +115,14 @@ def verifica_account():
     if not risultato:
         return False
 
-    user = risultato.get("data", {}).get("currentUser")
+    user = (
+        risultato
+        .get("data", {})
+        .get("currentUser")
+    )
 
     if not user:
         print("❌ Sorare non ha restituito currentUser.")
-        print("Controlleremo il token/audience nei log.")
         return False
 
     print("")
@@ -128,10 +137,11 @@ def verifica_account():
 
 
 # ============================================================
-# RECUPERO OFFERTE RICEVUTE
+# RECUPERO OFFERTE
 # ============================================================
 
 def recupera_offerte():
+
     query = """
     query PendingOffers {
         currentUser {
@@ -139,26 +149,23 @@ def recupera_offerte():
                 nodes {
                     id
                     status
+
                     sender {
                         ... on User {
                             slug
                             nickname
                         }
                     }
+
                     senderSide {
-                        amounts {
-                            eur
-                        }
                         anyCards {
                             assetId
                             slug
                             collection
                         }
                     }
+
                     receiverSide {
-                        amounts {
-                            eur
-                        }
                         anyCards {
                             assetId
                             slug
@@ -176,16 +183,22 @@ def recupera_offerte():
     if not risultato:
         return []
 
-    user = risultato.get("data", {}).get("currentUser")
+    user = (
+        risultato
+        .get("data", {})
+        .get("currentUser")
+    )
 
     if not user:
         print("❌ currentUser assente nella risposta.")
         return []
 
-    connessione = user.get("pendingTokenOffersReceived") or {}
-    offerte = connessione.get("nodes") or []
+    connessione = (
+        user.get("pendingTokenOffersReceived")
+        or {}
+    )
 
-    return offerte
+    return connessione.get("nodes") or []
 
 
 # ============================================================
@@ -193,6 +206,7 @@ def recupera_offerte():
 # ============================================================
 
 def recupera_dettagli_carte(asset_ids):
+
     if not asset_ids:
         return []
 
@@ -203,20 +217,27 @@ def recupera_dettagli_carte(asset_ids):
             slug
             name
             rarityTyped
+
             publicMinPrices {
-                eur
+                eurCents
+                referenceCurrency
             }
+
             anyPlayer {
                 displayName
+
                 activeClub {
                     slug
+
                     activeCompetitions {
                         slug
                     }
                 }
             }
+
             anyTeam {
                 name
+
                 activeCompetitions {
                     slug
                 }
@@ -233,7 +254,12 @@ def recupera_dettagli_carte(asset_ids):
     if not risultato:
         return []
 
-    return risultato.get("data", {}).get("anyCards") or []
+    return (
+        risultato
+        .get("data", {})
+        .get("anyCards")
+        or []
+    )
 
 
 # ============================================================
@@ -241,7 +267,9 @@ def recupera_dettagli_carte(asset_ids):
 # ============================================================
 
 def analizza_carta(carta):
+
     asset_id = carta.get("assetId")
+
     nome = (
         carta.get("name")
         or carta.get("slug")
@@ -249,22 +277,36 @@ def analizza_carta(carta):
         or "Carta sconosciuta"
     )
 
-    rarita = str(carta.get("rarityTyped") or "").upper()
+    rarita = str(
+        carta.get("rarityTyped") or ""
+    ).upper()
 
     prezzi = carta.get("publicMinPrices") or {}
-    prezzo = prezzi.get("eur")
+
+    prezzo_centesimi = prezzi.get("eurCents")
 
     player = carta.get("anyPlayer") or {}
+
     club = player.get("activeClub") or {}
 
-    competizioni = club.get("activeCompetitions") or []
+    competizioni = (
+        club.get("activeCompetitions")
+        or []
+    )
 
     campionato_coperto = len(competizioni) > 0
 
+    rarita_ok = rarita == "LIMITED"
+
+    prezzo_ok = (
+        prezzo_centesimi is not None
+        and int(prezzo_centesimi)
+        <= PREZZO_MASSIMO_CENTESIMI
+    )
+
     idonea = (
-        rarita == "LIMITED"
-        and prezzo is not None
-        and float(prezzo) <= PREZZO_MASSIMO_EURO
+        rarita_ok
+        and prezzo_ok
         and campionato_coperto
     )
 
@@ -272,7 +314,15 @@ def analizza_carta(carta):
     print(f"   📄 {nome}")
     print(f"      Asset ID: {asset_id}")
     print(f"      Rarità: {rarita}")
-    print(f"      Prezzo: €{prezzo if prezzo is not None else 'N/D'}")
+
+    if prezzo_centesimi is not None:
+        print(
+            f"      Prezzo: "
+            f"€{int(prezzo_centesimi) / 100:.2f}"
+        )
+    else:
+        print("      Prezzo: N/D")
+
     print(
         f"      Competizioni attive: "
         f"{len(competizioni)}"
@@ -291,6 +341,7 @@ def analizza_carta(carta):
 # ============================================================
 
 def elabora_offerta(offerta):
+
     offerta_id = offerta.get("id")
 
     if not offerta_id:
@@ -308,27 +359,52 @@ def elabora_offerta(offerta):
     print(f"📌 Stato: {offerta.get('status')}")
 
     sender = offerta.get("sender") or {}
+
     print(
         f"👤 Manager: "
         f"{sender.get('nickname') or sender.get('slug') or 'Sconosciuto'}"
     )
 
-    sender_side = offerta.get("senderSide") or {}
-    receiver_side = offerta.get("receiverSide") or {}
+    sender_side = (
+        offerta.get("senderSide")
+        or {}
+    )
 
-    carte_offerte = sender_side.get("anyCards") or []
-    carte_che_diamo = receiver_side.get("anyCards") or []
+    receiver_side = (
+        offerta.get("receiverSide")
+        or {}
+    )
 
-    print(f"📦 Carte offerte dal manager: {len(carte_offerte)}")
-    print(f"📦 Carte richieste al bot: {len(carte_che_diamo)}")
+    # Carte che il manager ci offre
+    carte_offerte = (
+        sender_side.get("anyCards")
+        or []
+    )
 
-    # --------------------------------------------------------
+    # Carte che il manager ci chiede
+    carte_che_diamo = (
+        receiver_side.get("anyCards")
+        or []
+    )
+
+    print(
+        f"📦 Carte offerte dal manager: "
+        f"{len(carte_offerte)}"
+    )
+
+    print(
+        f"📦 Carte richieste al bot: "
+        f"{len(carte_che_diamo)}"
+    )
+
+    # ========================================================
     # CONTROLLO KULENOVIC
-    # --------------------------------------------------------
+    # ========================================================
 
     kulenovic_presente = False
 
     for carta in carte_che_diamo:
+
         if (
             carta.get("assetId") == KULENOVIC_ID
             or carta.get("slug") == KULENOVIC_ID
@@ -337,15 +413,22 @@ def elabora_offerta(offerta):
             break
 
     if not kulenovic_presente:
-        print("ℹ️ Offerta ignorata: Kulenovic non è presente.")
+
+        print(
+            "ℹ️ Offerta ignorata: "
+            "Kulenovic non è presente."
+        )
+
         print("========================================")
         return
 
-    print("🎯 KULENOVIC PRESENTE!")
+    print(
+        "🎯 KULENOVIC PRESENTE!"
+    )
 
-    # --------------------------------------------------------
-    # DETTAGLI CARTE RICEVUTE
-    # --------------------------------------------------------
+    # ========================================================
+    # CARTE RICEVUTE
+    # ========================================================
 
     asset_ids = [
         carta.get("assetId")
@@ -353,12 +436,43 @@ def elabora_offerta(offerta):
         if carta.get("assetId")
     ]
 
-    dettagli = recupera_dettagli_carte(asset_ids)
+    if not asset_ids:
+
+        print("")
+        print(
+            "🔴 DECISIONE: RIFIUTARE"
+        )
+
+        print(
+            "   Motivo: nessuna carta ricevuta."
+        )
+
+        if DRY_RUN:
+            print(
+                "🟡 DRY RUN: nessuna operazione eseguita."
+            )
+
+        print("----------------------------------------")
+        return
+
+    dettagli = recupera_dettagli_carte(
+        asset_ids
+    )
 
     if not dettagli:
-        print("⚠️ Impossibile recuperare i dettagli delle carte.")
-        print("========================================")
+
+        print("")
+        print(
+            "⚠️ Impossibile recuperare "
+            "i dettagli delle carte."
+        )
+
+        print("----------------------------------------")
         return
+
+    # ========================================================
+    # ANALISI
+    # ========================================================
 
     carte_idonee = []
 
@@ -366,76 +480,187 @@ def elabora_offerta(offerta):
     print("🔎 ANALISI DELLE CARTE:")
 
     for carta in dettagli:
+
         if analizza_carta(carta):
             carte_idonee.append(carta)
 
-    # --------------------------------------------------------
-    # DECISIONE
-    # --------------------------------------------------------
+    numero_idonee = len(
+        carte_idonee
+    )
 
-    numero_idonee = len(carte_idonee)
+    numero_totale = len(
+        asset_ids
+    )
 
     print("")
     print("----------------------------------------")
-    print(f"📊 CARTE IDONEE: {numero_idonee}")
+    print(
+        f"📊 CARTE TOTALI: {numero_totale}"
+    )
+    print(
+        f"📊 CARTE IDONEE: {numero_idonee}"
+    )
+
+    # ========================================================
+    # NESSUNA CARTA IDONEA
+    # ========================================================
 
     if numero_idonee == 0:
-        print("🔴 DECISIONE: RIFIUTARE L'OFFERTA")
-        print("🟡 DRY RUN: nessuna operazione eseguita.")
-        print("----------------------------------------")
-        print("")
 
+        print("")
+        print(
+            "🔴 DECISIONE: RIFIUTARE L'OFFERTA"
+        )
+
+        print(
+            "   Motivo: nessuna carta è idonea."
+        )
+
+        if DRY_RUN:
+            print(
+                "🟡 DRY RUN: nessuna operazione eseguita."
+            )
+
+        print("----------------------------------------")
         return
 
-    conguaglio = numero_idonee * PAGAMENTO_PER_CARTA_EURO
+    # ========================================================
+    # CONTROPROPOSTA
+    # ========================================================
+    #
+    # IMPORTANTISSIMO:
+    #
+    # - Le carte NON idonee vengono eliminate.
+    # - Riceviamo SOLO le carte idonee.
+    # - Kulenovic viene TOLTO dalla richiesta originale.
+    # - Paghiamo €0,20 per ogni carta idonea.
+    #
+    # ========================================================
 
-    print(f"💰 CONGUAGLIO: €{conguaglio:.2f}")
-    print("🟢 DECISIONE: CONTROPROPOSTA")
+    pagamento_centesimi = (
+        numero_idonee
+        * PAGAMENTO_PER_CARTA_CENTESIMI
+    )
+
+    pagamento_euro = (
+        pagamento_centesimi / 100
+    )
+
     print("")
-    print("La controproposta prevista sarebbe:")
+    print(
+        "🟢 DECISIONE: CONTROPROPOSTA"
+    )
+
+    print("")
+    print(
+        "📤 Viene RIMOSSA dalla richiesta:"
+    )
+
+    print(
+        "   ❌ Kulenovic"
+    )
+
+    print("")
+    print(
+        "📥 Carte che rimangono nella proposta:"
+    )
 
     for carta in carte_idonee:
+
         print(
-            f"   ➡️ Ricevere: "
+            f"   ✅ "
             f"{carta.get('name') or carta.get('slug')}"
         )
 
-    print(f"   ➡️ Ricevere anche €{conguaglio:.2f}")
-    print("   ➡️ Kulenovic: NON viene ceduto")
+    print("")
+    print(
+        "🗑️ Carte NON idonee eliminate:"
+    )
+
+    numero_non_idonee = (
+        numero_totale
+        - numero_idonee
+    )
+
+    print(
+        f"   ❌ {numero_non_idonee}"
+    )
 
     print("")
-    print("🟡 DRY RUN: nessuna operazione eseguita.")
+    print(
+        f"💰 Pagamento al manager: "
+        f"€{pagamento_euro:.2f}"
+    )
+
+    print(
+        f"   ({numero_idonee} × €0,20)"
+    )
+
+    print("")
+
+    if DRY_RUN:
+
+        print(
+            "🟡 DRY RUN: nessuna operazione eseguita."
+        )
+
     print("----------------------------------------")
     print("")
 
 
 # ============================================================
-# CICLO MONITORAGGIO
+# MONITORAGGIO
 # ============================================================
 
 def monitor_offerte():
+
     print("🤖 BOT SORARE AVVIATO")
-    print("🟡 MODALITÀ DRY RUN ATTIVA")
-    print("⚠️ Nessun rifiuto e nessuna controproposta verranno eseguiti.")
+
+    print(
+        "🟡 MODALITÀ DRY RUN ATTIVA"
+    )
+
+    print(
+        "⚠️ Nessun rifiuto e nessuna "
+        "controproposta verranno eseguiti."
+    )
+
     print("")
 
     if not verifica_account():
-        print("❌ Impossibile autenticarsi a Sorare.")
+
+        print(
+            "❌ Impossibile autenticarsi a Sorare."
+        )
+
         return
 
     while True:
+
         try:
-            print("🔎 Controllo offerte...")
+
+            print(
+                "🔎 Controllo offerte..."
+            )
 
             offerte = recupera_offerte()
 
-            print(f"📨 Offerte pending ricevute: {len(offerte)}")
+            print(
+                f"📨 Offerte pending ricevute: "
+                f"{len(offerte)}"
+            )
 
             for offerta in offerte:
-                elabora_offerta(offerta)
+
+                elabora_offerta(
+                    offerta
+                )
 
         except Exception as e:
-            print(f"⚠️ Errore nel ciclo: {e}")
+
+            print(
+                f"⚠️ Errore nel ciclo: {e}"
+            )
 
         time.sleep(60)
 
@@ -446,10 +671,13 @@ def monitor_offerte():
 
 @app.route("/")
 def home():
+
     global monitoraggio_avviato
 
     with lock_avvio:
+
         if not monitoraggio_avviato:
+
             monitoraggio_avviato = True
 
             thread = threading.Thread(
@@ -459,9 +687,14 @@ def home():
 
             thread.start()
 
-            return "Bot Sorare avviato in modalità DRY RUN."
+            return (
+                "Bot Sorare avviato "
+                "in modalità DRY RUN."
+            )
 
-    return "Bot Sorare già attivo."
+    return (
+        "Bot Sorare già attivo."
+    )
 
 
 # ============================================================
@@ -469,7 +702,14 @@ def home():
 # ============================================================
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
+
     app.run(
         host="0.0.0.0",
         port=port,
