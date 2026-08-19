@@ -52,22 +52,15 @@ DRY_RUN = True
 # MINIMO €0,30
 # MASSIMO €0,80
 #
-# Inoltre deve essere:
-#
-# - LIMITED
-# - con almeno una competizione attiva
-#
 # Quindi:
 #
 # €0,29 -> NON IDONEA
-# €0,30 -> IDONEA se competizione coperta
-# €0,37 -> IDONEA se competizione coperta
-# €0,50 -> IDONEA se competizione coperta
-# €0,79 -> IDONEA se competizione coperta
-# €0,80 -> IDONEA se competizione coperta
+# €0,30 -> IDONEA
+# €0,37 -> IDONEA
+# €0,50 -> IDONEA
+# €0,79 -> IDONEA
+# €0,80 -> IDONEA
 # €0,81 -> NON IDONEA
-#
-# Competizioni = 0 -> SEMPRE NON IDONEA
 
 PREZZO_MINIMO_CENTESIMI = 30
 PREZZO_MASSIMO_CENTESIMI = 80
@@ -110,10 +103,6 @@ offerte_gia_analizzate = set()
 monitoraggio_avviato = False
 
 lock_avvio = threading.Lock()
-
-monitor_thread = None
-
-stop_monitor = threading.Event()
 
 
 # ============================================================
@@ -894,6 +883,8 @@ def analizza_carta(carta):
     # --------------------------------------------------------
     # CONTROLLO PREZZO
     #
+    # DEVE ESSERE:
+    #
     # €0,30 <= prezzo <= €0,80
     #
     # --------------------------------------------------------
@@ -906,10 +897,6 @@ def analizza_carta(carta):
 
     # ========================================================
     # CAMPIONATO
-    #
-    # IMPORTANTE:
-    #
-    # Se activeCompetitions è vuoto, la carta NON è idonea.
     # ========================================================
 
     campionato_coperto = (
@@ -932,7 +919,7 @@ def analizza_carta(carta):
     # 1. LIMITED
     # 2. Prezzo >= €0,30
     # 3. Prezzo <= €0,80
-    # 4. Almeno una competizione attiva
+    # 4. Campionato coperto
     #
     # ========================================================
 
@@ -971,6 +958,10 @@ def analizza_carta(carta):
             f"€{prezzo:.2f}"
         )
 
+        # ----------------------------------------------------
+        # PREZZO TROPPO BASSO
+        # ----------------------------------------------------
+
         if prezzo < prezzo_minimo:
 
             print(
@@ -978,11 +969,19 @@ def analizza_carta(carta):
                 "di €0,30"
             )
 
+        # ----------------------------------------------------
+        # PREZZO CORRETTO
+        # ----------------------------------------------------
+
         elif prezzo <= prezzo_massimo:
 
             print(
                 "      🟢 Prezzo tra €0,30 e €0,80"
             )
+
+        # ----------------------------------------------------
+        # PREZZO TROPPO ALTO
+        # ----------------------------------------------------
 
         else:
 
@@ -1542,8 +1541,6 @@ def elabora_offerta(offerta):
 
 def monitor_offerte():
 
-    global monitoraggio_avviato
-
     print(
         "🤖 BOT SORARE AVVIATO"
     )
@@ -1571,247 +1568,46 @@ def monitor_offerte():
 
     print("")
 
-    # ========================================================
-    # AUTENTICAZIONE
-    # ========================================================
+    if not verifica_account():
 
-    while not stop_monitor.is_set():
+        print(
+            "❌ Impossibile autenticarsi a Sorare."
+        )
+
+        return
+
+    while True:
 
         try:
 
-            if verifica_account():
-
-                break
-
             print(
-                "⚠️ Autenticazione fallita."
+                "🔎 Controllo offerte..."
             )
 
+            offerte = recupera_offerte()
+
             print(
-                "🔄 Nuovo tentativo tra 30 secondi..."
+                f"📨 Offerte pending ricevute: "
+                f"{len(offerte)}"
             )
 
-            if stop_monitor.wait(30):
+            for offerta in offerte:
 
-                return
+                elabora_offerta(
+                    offerta
+                )
 
         except Exception as e:
 
             print(
-                f"⚠️ Errore autenticazione: {e}"
+                f"⚠️ Errore nel ciclo: {e}"
             )
 
-            print(
-                "🔄 Nuovo tentativo tra 30 secondi..."
-            )
-
-            if stop_monitor.wait(30):
-
-                return
-
-    # ========================================================
-    # MONITORAGGIO CONTINUO
-    # ========================================================
-
-    try:
-
-        while not stop_monitor.is_set():
-
-            try:
-
-                print(
-                    "🔎 Controllo offerte..."
-                )
-
-                offerte = recupera_offerte()
-
-                print(
-                    f"📨 Offerte pending ricevute: "
-                    f"{len(offerte)}"
-                )
-
-                for offerta in offerte:
-
-                    if stop_monitor.is_set():
-
-                        break
-
-                    try:
-
-                        elabora_offerta(
-                            offerta
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            "⚠️ Errore elaborazione "
-                            f"offerta: {e}"
-                        )
-
-            except Exception as e:
-
-                print(
-                    f"⚠️ Errore nel ciclo monitoraggio: {e}"
-                )
-
-                print(
-                    "🔄 Il monitoraggio continuerà."
-                )
-
-            # =================================================
-            # ATTENDE 60 SECONDI
-            #
-            # Event.wait permette di interrompere
-            # immediatamente l'attesa se necessario.
-            # =================================================
-
-            if stop_monitor.wait(60):
-
-                break
-
-    except Exception as e:
-
-        print(
-            f"🔴 ERRORE FATALE DEL MONITOR: {e}"
-        )
-
-        print(
-            "🔄 Il watchdog provvederà al riavvio."
-        )
-
-    finally:
-
-        monitoraggio_avviato = False
-
-        print(
-            "⚠️ Thread monitoraggio terminato."
-        )
-
-
-# ============================================================
-# WATCHDOG MONITORAGGIO
-# ============================================================
-
-def watchdog_monitoraggio():
-
-    global monitor_thread
-    global monitoraggio_avviato
-
-    print(
-        "🛡️ WATCHDOG MONITORAGGIO AVVIATO"
-    )
-
-    while not stop_monitor.is_set():
-
-        try:
-
-            # ------------------------------------------------
-            # Se il thread non esiste oppure è morto,
-            # lo riavviamo.
-            # ------------------------------------------------
-
-            if (
-                monitor_thread is None
-                or not monitor_thread.is_alive()
-            ):
-
-                with lock_avvio:
-
-                    if stop_monitor.is_set():
-
-                        break
-
-                    if (
-                        monitor_thread is None
-                        or not monitor_thread.is_alive()
-                    ):
-
-                        print(
-                            "🔄 Monitoraggio non attivo."
-                        )
-
-                        print(
-                            "🚀 Riavvio automatico del monitoraggio..."
-                        )
-
-                        monitoraggio_avviato = True
-
-                        monitor_thread = threading.Thread(
-                            target=monitor_offerte,
-                            name="SorareMonitor",
-                            daemon=True,
-                        )
-
-                        monitor_thread.start()
-
-            # ------------------------------------------------
-            # Controllo ogni 10 secondi.
-            # ------------------------------------------------
-
-            if stop_monitor.wait(10):
-
-                break
-
-        except Exception as e:
-
-            print(
-                f"⚠️ Errore watchdog: {e}"
-            )
-
-            if stop_monitor.wait(10):
-
-                break
-
-
-# ============================================================
-# AVVIO MONITOR
-# ============================================================
-
-def avvia_monitoraggio():
-
-    global monitor_thread
-    global monitoraggio_avviato
-
-    with lock_avvio:
-
-        if (
-            monitor_thread is not None
-            and monitor_thread.is_alive()
-        ):
-
-            monitoraggio_avviato = True
-
-            return False
-
-        monitoraggio_avviato = True
-
-        monitor_thread = threading.Thread(
-            target=monitor_offerte,
-            name="SorareMonitor",
-            daemon=True,
-        )
-
-        monitor_thread.start()
-
-        return True
-
-
-# ============================================================
-# AVVIO WATCHDOG
-# ============================================================
-
-def avvia_watchdog():
-
-    thread = threading.Thread(
-        target=watchdog_monitoraggio,
-        name="SorareWatchdog",
-        daemon=True,
-    )
-
-    thread.start()
-
-    return thread
+        # ====================================================
+        # MODIFICA: controllo ogni 10 secondi
+        # ====================================================
+
+        time.sleep(10)
 
 
 # ============================================================
@@ -1821,14 +1617,25 @@ def avvia_watchdog():
 @app.route("/")
 def home():
 
-    avviato = avvia_monitoraggio()
+    global monitoraggio_avviato
 
-    if avviato:
+    with lock_avvio:
 
-        return (
-            "Bot Sorare avviato "
-            "in modalità DRY RUN."
-        )
+        if not monitoraggio_avviato:
+
+            monitoraggio_avviato = True
+
+            thread = threading.Thread(
+                target=monitor_offerte,
+                daemon=True,
+            )
+
+            thread.start()
+
+            return (
+                "Bot Sorare avviato "
+                "in modalità DRY RUN."
+            )
 
     return (
         "Bot Sorare già attivo."
@@ -1836,36 +1643,10 @@ def home():
 
 
 # ============================================================
-# HEALTH CHECK
-# ============================================================
-
-@app.route("/health")
-def health():
-
-    thread_attivo = (
-        monitor_thread is not None
-        and monitor_thread.is_alive()
-    )
-
-    return {
-        "status": "ok",
-        "dry_run": DRY_RUN,
-        "monitoraggio_attivo": thread_attivo,
-    }
-
-
-# ============================================================
 # AVVIO
 # ============================================================
 
 if __name__ == "__main__":
-
-    # Avvio del watchdog.
-    avvia_watchdog()
-
-    # Avvio diretto del monitor quando si esegue:
-    # python app.py
-    avvia_monitoraggio()
 
     port = int(
         os.environ.get(
