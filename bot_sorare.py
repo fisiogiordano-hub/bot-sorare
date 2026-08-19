@@ -164,10 +164,6 @@ def monitor_offerte():
             print(f"⚠️ Errore ciclo: {e}")
         time.sleep(15)
 
-@app.before_request
-functools_safe_start = lambda: None # placeholder
-
-# Avvia il monitoraggio alla prima richiesta ricevuta (es. UptimeRobot o visita al sito)
 @app.route('/')
 def home():
     global monitoraggio_avviato
@@ -176,8 +172,8 @@ def home():
             monitoraggio_avviato = True
             t = threading.Thread(target=monitor_offerte, daemon=True)
             t.start()
-            return "Bot Sorare online e ciclo di monitoraggio avviato con successo!"
-    return "Bot Sorare online e già in esecuzione!"
+            return "Bot Sorare online e ciclo avviato!"
+    return "Bot Sorare online e attivo!"
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
