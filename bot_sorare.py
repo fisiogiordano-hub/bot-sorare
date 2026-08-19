@@ -6,12 +6,13 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Configurazioni dalle variabili d'ambiente di Render
 SORARE_JWT_TOKEN = os.getenv("SORARE_JWT_TOKEN", "")
 KULENOVIC_ID = os.getenv("KULENOVIC_ID", "")
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
 offerte_gia_gestite = set()
+monitoraggio_avviato = False
+lock_avvio = threading.Lock()
 
 def esegui_query_sorare(query, variables=None):
     headers = {
@@ -131,9 +132,7 @@ def elabora_offerta_specifica(offerta_id, kul_id):
         esegui_query_sorare(mutazione_counter, variables)
 
 def monitor_offerte():
-    time.sleep(5)
-    print("🔄 [DEBUG] Avvio ciclo di monitoraggio...")
-    
+    print("🔄 [DEBUG] Avvio ciclo di monitoraggio in background...")
     query_offerte = """
         query GetAllOffers {
             viewer {
@@ -165,12 +164,20 @@ def monitor_offerte():
             print(f"⚠️ Errore ciclo: {e}")
         time.sleep(15)
 
-t = threading.Thread(target=monitor_offerte, daemon=True)
-t.start()
+@app.before_request
+functools_safe_start = lambda: None # placeholder
 
+# Avvia il monitoraggio alla prima richiesta ricevuta (es. UptimeRobot o visita al sito)
 @app.route('/')
 def home():
-    return "Bot Sorare online!"
+    global monitoraggio_avviato
+    with lock_avvio:
+        if not monitoraggio_avviato:
+            monitoraggio_avviato = True
+            t = threading.Thread(target=monitor_offerte, daemon=True)
+            t.start()
+            return "Bot Sorare online e ciclo di monitoraggio avviato con successo!"
+    return "Bot Sorare online e già in esecuzione!"
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
