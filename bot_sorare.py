@@ -37,7 +37,9 @@ KULENOVIC_ID = os.getenv(
 
 # SEMPRE DRY RUN.
 #
-# Nessun rifiuto e nessuna controproposta reale.
+# Nessun rifiuto.
+# Nessuna controproposta.
+# Nessuna transazione reale.
 DRY_RUN = True
 
 
@@ -45,12 +47,11 @@ DRY_RUN = True
 # REGOLE BOT
 # ============================================================
 
-# Prezzo massimo carta idonea:
-# €0,50
+# Una carta è idonea solamente se il suo floor è <= €0,50.
 PREZZO_MASSIMO_CENTESIMI = 50
 
-# Pagamento:
-# €0,20 per ogni carta idonea
+# Pagamento previsto:
+# €0,20 per ogni carta idonea.
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
 
 
@@ -58,9 +59,8 @@ PAGAMENTO_PER_CARTA_CENTESIMI = 20
 # SORARE API
 # ============================================================
 
-# Endpoint federato attuale.
 SORARE_API_URL = (
-    "https://api.sorare.com/federation/graphql"
+    "https://api.sorare.com/graphql"
 )
 
 
@@ -377,6 +377,32 @@ def recupera_offerte():
 
 # ============================================================
 # DETTAGLI CARTE
+#
+# QUI C'È LA CORREZIONE PRINCIPALE.
+#
+# Recuperiamo direttamente:
+#
+#   lowestPriceCard
+#
+# che nello schema attuale di Sorare rappresenta la carta
+# più economica dello stesso giocatore, stessa rarità e
+# stessa stagione.
+#
+# Poi leggiamo:
+#
+#   liveSingleSaleOffer
+#       receiverSide
+#           amounts
+#               eurCents
+#
+# NON usiamo:
+#
+#   card(slug:)
+#   amounts.eur
+#   amounts.fiat
+#   CoinGecko
+#   conversioni ETH -> EUR
+#
 # ============================================================
 
 def recupera_dettagli_carte(asset_ids):
@@ -398,10 +424,12 @@ def recupera_dettagli_carte(asset_ids):
             slug
             name
             rarityTyped
+            collection
 
             anyPlayer {
 
                 displayName
+                slug
 
                 activeClub {
 
@@ -422,6 +450,60 @@ def recupera_dettagli_carte(asset_ids):
                 activeCompetitions {
 
                     slug
+
+                }
+            }
+
+            lowestPriceCard {
+
+                assetId
+                slug
+                name
+                rarityTyped
+                seasonYear
+
+                liveSingleSaleOffer {
+
+                    receiverSide {
+
+                        amounts {
+
+                            eurCents
+
+                        }
+                    }
+                }
+
+                publicMinPrices {
+
+                    eurCents
+
+                }
+            }
+
+            lowestPriceCardAnySeason {
+
+                assetId
+                slug
+                name
+                rarityTyped
+                seasonYear
+
+                liveSingleSaleOffer {
+
+                    receiverSide {
+
+                        amounts {
+
+                            eurCents
+
+                        }
+                    }
+                }
+
+                publicMinPrices {
+
+                    eurCents
 
                 }
             }
@@ -451,23 +533,28 @@ def recupera_dettagli_carte(asset_ids):
 
 
 # ============================================================
-# CONVERSIONE WEI -> EUR
+# LETTURA EUR CENTS
 # ============================================================
 
-def wei_to_eur(wei):
+def leggi_eur_cents(amounts):
 
-    if wei is None:
+    if not amounts:
+
+        return None
+
+    valore = amounts.get(
+        "eurCents"
+    )
+
+    if valore is None:
 
         return None
 
     try:
 
-        valore = Decimal(
-            str(wei)
-        )
+        valore = int(valore)
 
     except (
-        InvalidOperation,
         ValueError,
         TypeError,
     ):
@@ -478,517 +565,270 @@ def wei_to_eur(wei):
 
         return None
 
-    # --------------------------------------------------------
-    # ATTENZIONE:
-    #
-    # Sorare restituisce l'importo crypto in WEI.
-    #
-    # Non interpretiamo più:
-    #
-    # amounts.eur
-    # amounts.fiat
-    #
-    # perché sono proprio i campi che ti stanno causando
-    # gli errori 422.
-    #
-    # --------------------------------------------------------
-
-    eth = (
-        valore
-        / Decimal("1000000000000000000")
-    )
-
-    return eth
+    return valore
 
 
 # ============================================================
-# PREZZO CARTA
-#
-# IMPORTANTE:
-#
-# NON utilizziamo:
-#
-# card(slug:)
-#
-# perché il tuo endpoint risponde:
-#
-# Field 'card' doesn't exist on type 'Query'
-#
-# Utilizziamo invece:
-#
-# tokens {
-#     nfts(assetIds: ...)
-# }
-#
-# che è il percorso corretto per il token/NFT.
+# PREZZO DA LIVE SALE
 # ============================================================
 
-def recupera_prezzo_floor(carta):
+def prezzo_da_live_sale(carta):
 
-    asset_id = str(
-        carta.get("assetId")
-        or ""
-    ).strip()
-
-    slug = str(
-        carta.get("slug")
-        or ""
-    ).strip()
-
-    if not asset_id:
-
-        print(
-            "      ⚠️ Asset ID assente."
-        )
+    if not carta:
 
         return None
 
-    print(
-        f"      🔎 Ricerca prezzo floor: {slug or asset_id}"
-    )
-
-    query = """
-    query TokenMarketData(
-        $assetIds: [String!]!
-    ) {
-
-        tokens {
-
-            nfts(
-                assetIds: $assetIds
-            ) {
-
-                assetId
-                slug
-                publicMinPrice
-                privateMinPrice
-
-                latestEnglishAuction {
-
-                    bestBid {
-
-                        amounts {
-
-                            wei
-
-                        }
-                    }
-                }
-
-                liveSingleSaleOffer {
-
-                    senderSide {
-
-                        amounts {
-
-                            wei
-
-                        }
-                    }
-
-                    receiverSide {
-
-                        amounts {
-
-                            wei
-
-                        }
-                    }
-                }
-            }
-        }
-    }
-    """
-
-    risultato = esegui_query(
-        query,
-        {
-            "assetIds": [asset_id]
-        }
-    )
-
-    if not risultato:
-
-        print(
-            "      ⚠️ Prezzo non recuperabile."
-        )
-
-        return None
-
-    data = (
-        risultato
-        .get("data", {})
-    )
-
-    tokens = (
-        data
-        .get("tokens", {})
-        .get("nfts")
-        or []
-    )
-
-    if not tokens:
-
-        print(
-            "      ⚠️ Token non trovato."
-        )
-
-        return None
-
-    token = tokens[0]
-
-    valori_wei = []
-
-    # ========================================================
-    # PUBLIC MIN PRICE
-    # ========================================================
-
-    public_min_price = token.get(
-        "publicMinPrice"
-    )
-
-    if public_min_price is not None:
-
-        try:
-
-            valore = Decimal(
-                str(public_min_price)
-            )
-
-            if valore > 0:
-
-                valori_wei.append(
-                    valore
-                )
-
-        except (
-            InvalidOperation,
-            ValueError,
-            TypeError,
-        ):
-
-            pass
-
-    # ========================================================
-    # PRIVATE MIN PRICE
-    # ========================================================
-
-    private_min_price = token.get(
-        "privateMinPrice"
-    )
-
-    if private_min_price is not None:
-
-        try:
-
-            valore = Decimal(
-                str(private_min_price)
-            )
-
-            if valore > 0:
-
-                valori_wei.append(
-                    valore
-                )
-
-        except (
-            InvalidOperation,
-            ValueError,
-            TypeError,
-        ):
-
-            pass
-
-    # ========================================================
-    # ASTA
-    # ========================================================
-
-    asta = (
-        token.get(
-            "latestEnglishAuction"
-        )
-        or {}
-    )
-
-    best_bid = (
-        asta.get(
-            "bestBid"
-        )
-        or {}
-    )
-
-    amounts = (
-        best_bid.get(
-            "amounts"
-        )
-        or {}
-    )
-
-    bid_wei = amounts.get(
-        "wei"
-    )
-
-    if bid_wei is not None:
-
-        try:
-
-            valore = Decimal(
-                str(bid_wei)
-            )
-
-            if valore > 0:
-
-                valori_wei.append(
-                    valore
-                )
-
-        except (
-            InvalidOperation,
-            ValueError,
-            TypeError,
-        ):
-
-            pass
-
-    # ========================================================
-    # LIVE SINGLE SALE
-    # ========================================================
-
-    sale = (
-        token.get(
+    offerta = (
+        carta.get(
             "liveSingleSaleOffer"
         )
         or {}
     )
 
-    # --------------------------------------------------------
-    # senderSide
-    # --------------------------------------------------------
-
-    sender_side = (
-        sale.get(
-            "senderSide"
-        )
-        or {}
-    )
-
-    sender_amounts = (
-        sender_side.get(
-            "amounts"
-        )
-        or {}
-    )
-
-    sender_wei = sender_amounts.get(
-        "wei"
-    )
-
-    if sender_wei is not None:
-
-        try:
-
-            valore = Decimal(
-                str(sender_wei)
-            )
-
-            if valore > 0:
-
-                valori_wei.append(
-                    valore
-                )
-
-        except (
-            InvalidOperation,
-            ValueError,
-            TypeError,
-        ):
-
-            pass
-
-    # --------------------------------------------------------
-    # receiverSide
-    # --------------------------------------------------------
-
     receiver_side = (
-        sale.get(
+        offerta.get(
             "receiverSide"
         )
         or {}
     )
 
-    receiver_amounts = (
+    amounts = (
         receiver_side.get(
             "amounts"
         )
         or {}
     )
 
-    receiver_wei = receiver_amounts.get(
-        "wei"
+    eur_cents = leggi_eur_cents(
+        amounts
     )
 
-    if receiver_wei is not None:
-
-        try:
-
-            valore = Decimal(
-                str(receiver_wei)
-            )
-
-            if valore > 0:
-
-                valori_wei.append(
-                    valore
-                )
-
-        except (
-            InvalidOperation,
-            ValueError,
-            TypeError,
-        ):
-
-            pass
-
-    # ========================================================
-    # NESSUN PREZZO
-    # ========================================================
-
-    if not valori_wei:
-
-        print(
-            "      ⚠️ Nessun prezzo WEI disponibile."
-        )
+    if eur_cents is None:
 
         return None
 
-    # ========================================================
-    # FLOOR WEI
-    # ========================================================
-
-    floor_wei = min(
-        valori_wei
+    return (
+        Decimal(eur_cents)
+        / Decimal("100")
     )
 
-    # ========================================================
-    # CONVERSIONE
-    #
-    # NOTA:
-    #
-    # WEI -> ETH è possibile direttamente.
-    #
-    # Per decidere il limite di €0,50 dobbiamo conoscere
-    # anche il cambio ETH/EUR.
-    #
-    # Il codice tenta quindi prima un prezzo fiat già
-    # disponibile in eventuali campi compatibili.
-    # ========================================================
 
-    prezzo_euro = recupera_cambio_eth_eur(
-        floor_wei
-    )
+# ============================================================
+# PREZZO DA PUBLIC MIN PRICE
+# ============================================================
 
-    if prezzo_euro is None:
+def prezzo_da_public_min_price(carta):
 
-        print(
-            "      ⚠️ Prezzo ETH trovato, "
-            "ma conversione EUR non disponibile."
+    if not carta:
+
+        return None
+
+    amounts = (
+        carta.get(
+            "publicMinPrices"
         )
+        or {}
+    )
+
+    eur_cents = leggi_eur_cents(
+        amounts
+    )
+
+    if eur_cents is None:
+
+        return None
+
+    return (
+        Decimal(eur_cents)
+        / Decimal("100")
+    )
+
+
+# ============================================================
+# PREZZO FLOOR
+# ============================================================
+
+def recupera_prezzo_floor(carta):
+
+    slug = str(
+        carta.get("slug")
+        or ""
+    ).strip()
+
+    nome = str(
+        carta.get("name")
+        or slug
+        or "Carta sconosciuta"
+    ).strip()
+
+    if not slug:
 
         print(
-            f"      ℹ️ Floor WEI: {floor_wei}"
+            "      ⚠️ Slug carta assente."
         )
 
         return None
 
     print(
-        f"      💰 Prezzo floor: €{prezzo_euro:.4f}"
+        f"      🔎 Ricerca prezzo floor: {slug}"
     )
 
-    return prezzo_euro
-
-
-# ============================================================
-# CAMBIO ETH/EUR
-# ============================================================
-
-def recupera_cambio_eth_eur(wei):
-
-    if wei is None:
-
-        return None
-
-    try:
-
-        wei_decimal = Decimal(
-            str(wei)
-        )
-
-        if wei_decimal <= 0:
-
-            return None
-
-    except (
-        InvalidOperation,
-        ValueError,
-        TypeError,
-    ):
-
-        return None
-
     # ========================================================
-    # APPROCCIO 1:
+    # CARTA PIÙ ECONOMICA DELLA STESSA:
     #
-    # endpoint pubblico CoinGecko.
+    # - giocatore
+    # - rarità
+    # - stagione
     #
-    # Serve solamente per convertire il valore WEI in EUR.
-    # Non viene usato per determinare se la carta esiste.
     # ========================================================
 
-    try:
-
-        response = requests.get(
-            "https://api.coingecko.com/api/v3/simple/price",
-            params={
-                "ids": "ethereum",
-                "vs_currencies": "eur",
-            },
-            timeout=10,
+    lowest_price_card = (
+        carta.get(
+            "lowestPriceCard"
         )
+        or {}
+    )
 
-        if response.status_code == 200:
+    lowest_slug = str(
+        lowest_price_card.get(
+            "slug"
+        )
+        or ""
+    ).strip()
 
-            dati = response.json()
-
-            eth_eur = (
-                dati
-                .get("ethereum", {})
-                .get("eur")
-            )
-
-            if eth_eur is not None:
-
-                cambio = Decimal(
-                    str(eth_eur)
-                )
-
-                if cambio > 0:
-
-                    eth = (
-                        wei_decimal
-                        / Decimal(
-                            "1000000000000000000"
-                        )
-                    )
-
-                    return eth * cambio
-
-    except Exception as e:
+    if lowest_slug:
 
         print(
-            f"      ⚠️ Cambio ETH/EUR non disponibile: {e}"
+            f"      🎯 Carta floor trovata: "
+            f"{lowest_slug}"
         )
 
-    return None
+    else:
+
+        print(
+            "      ⚠️ lowestPriceCard non disponibile."
+        )
+
+    valori = []
+
+    # ========================================================
+    # 1. LIVE SINGLE SALE
+    # ========================================================
+
+    prezzo_live = prezzo_da_live_sale(
+        lowest_price_card
+    )
+
+    if prezzo_live is not None:
+
+        valori.append(
+            prezzo_live
+        )
+
+        print(
+            f"      💰 Offerta vendita: "
+            f"€{prezzo_live:.2f}"
+        )
+
+    # ========================================================
+    # 2. PUBLIC MIN PRICE
+    # ========================================================
+
+    prezzo_public = (
+        prezzo_da_public_min_price(
+            lowest_price_card
+        )
+    )
+
+    if prezzo_public is not None:
+
+        valori.append(
+            prezzo_public
+        )
+
+        print(
+            f"      💰 Public min price: "
+            f"€{prezzo_public:.2f}"
+        )
+
+    # ========================================================
+    # FALLBACK:
+    #
+    # Se lowestPriceCard non ha un prezzo leggibile,
+    # controlliamo la carta stessa.
+    #
+    # ========================================================
+
+    if not valori:
+
+        prezzo_live_carta = (
+            prezzo_da_live_sale(
+                carta
+            )
+        )
+
+        if prezzo_live_carta is not None:
+
+            valori.append(
+                prezzo_live_carta
+            )
+
+            print(
+                f"      💰 Offerta carta: "
+                f"€{prezzo_live_carta:.2f}"
+            )
+
+        prezzo_public_carta = (
+            prezzo_da_public_min_price(
+                carta
+            )
+        )
+
+        if prezzo_public_carta is not None:
+
+            valori.append(
+                prezzo_public_carta
+            )
+
+            print(
+                f"      💰 Public min carta: "
+                f"€{prezzo_public_carta:.2f}"
+            )
+
+    # ========================================================
+    # NESSUN PREZZO
+    # ========================================================
+
+    if not valori:
+
+        # ----------------------------------------------------
+        # IMPORTANTE:
+        #
+        # Non inventiamo un prezzo.
+        # Se Sorare non ci dà un prezzo verificabile,
+        # la carta NON viene considerata idonea.
+        # ----------------------------------------------------
+
+        print(
+            f"      ⚠️ Prezzo non disponibile per {nome}."
+        )
+
+        return None
+
+    # ========================================================
+    # FLOOR
+    # ========================================================
+
+    floor = min(
+        valori
+    )
+
+    print(
+        f"      ✅ FLOOR VERIFICATO: "
+        f"€{floor:.2f}"
+    )
+
+    return floor
 
 
 # ============================================================
@@ -1097,35 +937,40 @@ def analizza_carta(carta):
     )
 
     print(
+        f"      Slug: {slug or 'N/D'}"
+    )
+
+    print(
         f"      Rarità: {rarita or 'N/D'}"
     )
 
     if prezzo is not None:
 
         print(
-            f"      Prezzo: €{prezzo:.4f}"
+            f"      Prezzo floor: "
+            f"€{prezzo:.2f}"
         )
 
         if prezzo_ok:
 
             print(
-                "      🟢 Prezzo entro il limite"
+                "      🟢 Prezzo entro €0,50"
             )
 
         else:
 
             print(
-                "      🔴 Prezzo superiore al limite"
+                "      🔴 Prezzo superiore a €0,50"
             )
 
     else:
 
         print(
-            "      Prezzo: N/D"
+            "      Prezzo floor: N/D"
         )
 
         print(
-            "      ⚠️ Prezzo non verificabile"
+            "      🔴 Prezzo NON verificabile"
         )
 
     print(
@@ -1221,9 +1066,9 @@ def controlla_kulenovic(carte_richieste):
             f"   Collection: {collection}"
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # MATCH CONFIGURAZIONE
-        # ----------------------------------------------------
+        # ====================================================
 
         match_configurazione = (
             bool(configurato)
@@ -1236,18 +1081,18 @@ def controlla_kulenovic(carte_richieste):
             )
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # MATCH SLUG
-        # ----------------------------------------------------
+        # ====================================================
 
         match_slug = (
             slug.lower()
             == KULENOVIC_SLUG.lower()
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # MATCH ASSET
-        # ----------------------------------------------------
+        # ====================================================
 
         match_asset = (
             asset_id.lower()
