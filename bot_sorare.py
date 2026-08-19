@@ -24,6 +24,17 @@ SORARE_JWT_AUD = os.getenv(
     ""
 ).strip()
 
+# Chiave privata Stark.
+#
+# IMPORTANTE:
+# - deve essere configurata nelle Environment Variables di Render
+# - NON viene mai stampata nei log
+# - NON viene usata per eseguire operazioni reali in questo test
+SORARE_STARK_PRIVATE_KEY = os.getenv(
+    "SORARE_STARK_PRIVATE_KEY",
+    ""
+).strip()
+
 # Può essere asset ID, slug oppure vuota.
 KULENOVIC_ID = os.getenv(
     "KULENOVIC_ID",
@@ -47,27 +58,9 @@ DRY_RUN = True
 # REGOLE BOT
 # ============================================================
 
-# Una carta è idonea solamente se il suo floor è:
-#
-# MINIMO €0,30
-# MASSIMO €0,80
-#
-# Quindi:
-#
-# €0,29 -> NON IDONEA
-# €0,30 -> IDONEA
-# €0,37 -> IDONEA
-# €0,50 -> IDONEA
-# €0,79 -> IDONEA
-# €0,80 -> IDONEA
-# €0,81 -> NON IDONEA
-
 PREZZO_MINIMO_CENTESIMI = 30
 PREZZO_MASSIMO_CENTESIMI = 80
 
-
-# Pagamento previsto:
-# €0,20 per ogni carta idonea.
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
 
 
@@ -103,6 +96,113 @@ offerte_gia_analizzate = set()
 monitoraggio_avviato = False
 
 lock_avvio = threading.Lock()
+
+
+# ============================================================
+# TEST CHIAVE STARK
+# ============================================================
+
+def verifica_chiave_stark():
+
+    print("")
+    print("========================================")
+    print("🔐 TEST CHIAVE STARK")
+
+    if not SORARE_STARK_PRIVATE_KEY:
+
+        print(
+            "❌ SORARE_STARK_PRIVATE_KEY NON CONFIGURATA."
+        )
+
+        print(
+            "   Controlla Render → Environment."
+        )
+
+        print("========================================")
+        print("")
+
+        return False
+
+    # --------------------------------------------------------
+    # NON stampiamo MAI la chiave.
+    # --------------------------------------------------------
+
+    print(
+        "✅ SORARE_STARK_PRIVATE_KEY presente."
+    )
+
+    # --------------------------------------------------------
+    # Controlli preliminari sul valore.
+    #
+    # Non mostriamo mai il contenuto della chiave.
+    # --------------------------------------------------------
+
+    valore = SORARE_STARK_PRIVATE_KEY
+
+    if len(valore) < 10:
+
+        print(
+            "❌ La chiave configurata è troppo corta."
+        )
+
+        print("========================================")
+        print("")
+
+        return False
+
+    # --------------------------------------------------------
+    # Prova a interpretare la chiave come valore esadecimale.
+    #
+    # Questo NON firma nulla.
+    # NON invia nulla.
+    # NON modifica Sorare.
+    # --------------------------------------------------------
+
+    valore_hex = valore
+
+    if valore_hex.lower().startswith("0x"):
+
+        valore_hex = valore_hex[2:]
+
+    try:
+
+        int(
+            valore_hex,
+            16,
+        )
+
+    except ValueError:
+
+        print(
+            "❌ La chiave non sembra essere "
+            "un valore esadecimale valido."
+        )
+
+        print("========================================")
+        print("")
+
+        return False
+
+    print(
+        "✅ Formato esadecimale verificato."
+    )
+
+    print(
+        "🟡 Nessuna firma reale eseguita."
+    )
+
+    print(
+        "🟡 Nessuna transazione eseguita."
+    )
+
+    print(
+        "🟡 Nessuna mutation Sorare eseguita."
+    )
+
+    print("========================================")
+    print("")
+
+    return True
 
 
 # ============================================================
@@ -160,10 +260,6 @@ def esegui_query(query, variables=None):
             f"🌐 Sorare HTTP: {response.status_code}"
         )
 
-        # ----------------------------------------------------
-        # HTTP ERROR
-        # ----------------------------------------------------
-
         if response.status_code != 200:
 
             print(
@@ -175,10 +271,6 @@ def esegui_query(query, variables=None):
             )
 
             return None
-
-        # ----------------------------------------------------
-        # JSON
-        # ----------------------------------------------------
 
         try:
 
@@ -195,10 +287,6 @@ def esegui_query(query, variables=None):
             )
 
             return None
-
-        # ----------------------------------------------------
-        # GRAPHQL ERRORS
-        # ----------------------------------------------------
 
         errori = risultato.get(
             "errors"
@@ -663,15 +751,6 @@ def recupera_prezzo_floor(carta):
         f"      🔎 Ricerca prezzo floor: {slug}"
     )
 
-    # ========================================================
-    # CARTA PIÙ ECONOMICA DELLA STESSA:
-    #
-    # - giocatore
-    # - rarità
-    # - stagione
-    #
-    # ========================================================
-
     lowest_price_card = (
         carta.get(
             "lowestPriceCard"
@@ -701,10 +780,6 @@ def recupera_prezzo_floor(carta):
 
     valori = []
 
-    # ========================================================
-    # 1. LIVE SINGLE SALE
-    # ========================================================
-
     prezzo_live = prezzo_da_live_sale(
         lowest_price_card
     )
@@ -719,10 +794,6 @@ def recupera_prezzo_floor(carta):
             f"      💰 Offerta vendita: "
             f"€{prezzo_live:.2f}"
         )
-
-    # ========================================================
-    # 2. PUBLIC MIN PRICE
-    # ========================================================
 
     prezzo_public = (
         prezzo_da_public_min_price(
@@ -740,10 +811,6 @@ def recupera_prezzo_floor(carta):
             f"      💰 Public min price: "
             f"€{prezzo_public:.2f}"
         )
-
-    # ========================================================
-    # FALLBACK
-    # ========================================================
 
     if not valori:
 
@@ -781,10 +848,6 @@ def recupera_prezzo_floor(carta):
                 f"€{prezzo_public_carta:.2f}"
             )
 
-    # ========================================================
-    # NESSUN PREZZO
-    # ========================================================
-
     if not valori:
 
         print(
@@ -792,10 +855,6 @@ def recupera_prezzo_floor(carta):
         )
 
         return None
-
-    # ========================================================
-    # FLOOR
-    # ========================================================
 
     floor = min(
         valori
@@ -850,10 +909,6 @@ def analizza_carta(carta):
         or []
     )
 
-    # ========================================================
-    # PREZZO
-    # ========================================================
-
     prezzo = recupera_prezzo_floor(
         carta
     )
@@ -861,10 +916,6 @@ def analizza_carta(carta):
     prezzo_verificabile = (
         prezzo is not None
     )
-
-    # --------------------------------------------------------
-    # LIMITI PREZZO
-    # --------------------------------------------------------
 
     prezzo_minimo = (
         Decimal(
@@ -880,58 +931,25 @@ def analizza_carta(carta):
         / Decimal("100")
     )
 
-    # --------------------------------------------------------
-    # CONTROLLO PREZZO
-    #
-    # DEVE ESSERE:
-    #
-    # €0,30 <= prezzo <= €0,80
-    #
-    # --------------------------------------------------------
-
     prezzo_ok = (
         prezzo_verificabile
         and prezzo >= prezzo_minimo
         and prezzo <= prezzo_massimo
     )
 
-    # ========================================================
-    # CAMPIONATO
-    # ========================================================
-
     campionato_coperto = (
         len(competizioni) > 0
     )
 
-    # ========================================================
-    # RARITÀ
-    # ========================================================
-
     rarita_ok = (
         rarita == "LIMITED"
     )
-
-    # ========================================================
-    # IDONEITÀ
-    #
-    # TUTTE le condizioni devono essere vere:
-    #
-    # 1. LIMITED
-    # 2. Prezzo >= €0,30
-    # 3. Prezzo <= €0,80
-    # 4. Campionato coperto
-    #
-    # ========================================================
 
     idonea = (
         rarita_ok
         and prezzo_ok
         and campionato_coperto
     )
-
-    # ========================================================
-    # LOG
-    # ========================================================
 
     print("")
 
@@ -958,10 +976,6 @@ def analizza_carta(carta):
             f"€{prezzo:.2f}"
         )
 
-        # ----------------------------------------------------
-        # PREZZO TROPPO BASSO
-        # ----------------------------------------------------
-
         if prezzo < prezzo_minimo:
 
             print(
@@ -969,19 +983,11 @@ def analizza_carta(carta):
                 "di €0,30"
             )
 
-        # ----------------------------------------------------
-        # PREZZO CORRETTO
-        # ----------------------------------------------------
-
         elif prezzo <= prezzo_massimo:
 
             print(
                 "      🟢 Prezzo tra €0,30 e €0,80"
             )
-
-        # ----------------------------------------------------
-        # PREZZO TROPPO ALTO
-        # ----------------------------------------------------
 
         else:
 
@@ -1000,10 +1006,6 @@ def analizza_carta(carta):
             "      🔴 Prezzo NON verificabile"
         )
 
-    # ========================================================
-    # CAMPIONATO
-    # ========================================================
-
     print(
         f"      Competizioni attive: "
         f"{len(competizioni)}"
@@ -1021,10 +1023,6 @@ def analizza_carta(carta):
             "      🔴 Campionato NON coperto"
         )
 
-    # ========================================================
-    # RARITÀ
-    # ========================================================
-
     if rarita_ok:
 
         print(
@@ -1036,10 +1034,6 @@ def analizza_carta(carta):
         print(
             "      🔴 Rarità NON valida"
         )
-
-    # ========================================================
-    # IDONEITÀ
-    # ========================================================
 
     if idonea:
 
@@ -1105,10 +1099,6 @@ def controlla_kulenovic(carte_richieste):
             f"   Collection: {collection}"
         )
 
-        # ====================================================
-        # MATCH CONFIGURAZIONE
-        # ====================================================
-
         match_configurazione = (
             bool(configurato)
             and (
@@ -1120,18 +1110,10 @@ def controlla_kulenovic(carte_richieste):
             )
         )
 
-        # ====================================================
-        # MATCH SLUG
-        # ====================================================
-
         match_slug = (
             slug.lower()
             == KULENOVIC_SLUG.lower()
         )
-
-        # ====================================================
-        # MATCH ASSET
-        # ====================================================
 
         match_asset = (
             asset_id.lower()
@@ -1228,18 +1210,10 @@ def elabora_offerta(offerta):
         or {}
     )
 
-    # ========================================================
-    # CARTE OFFERTE DAL MANAGER
-    # ========================================================
-
     carte_offerte = (
         sender_side.get("anyCards")
         or []
     )
-
-    # ========================================================
-    # CARTE CHE NOI DOVREMMO DARE
-    # ========================================================
 
     carte_che_diamo = (
         receiver_side.get("anyCards")
@@ -1256,19 +1230,11 @@ def elabora_offerta(offerta):
         f"{len(carte_che_diamo)}"
     )
 
-    # ========================================================
-    # KULENOVIC
-    # ========================================================
-
     kulenovic_presente = (
         controlla_kulenovic(
             carte_che_diamo
         )
     )
-
-    # ========================================================
-    # ASSET ID CARTE RICEVUTE
-    # ========================================================
 
     asset_ids = [
         carta.get("assetId")
@@ -1298,10 +1264,6 @@ def elabora_offerta(offerta):
 
         return
 
-    # ========================================================
-    # DETTAGLI
-    # ========================================================
-
     dettagli = recupera_dettagli_carte(
         asset_ids
     )
@@ -1318,10 +1280,6 @@ def elabora_offerta(offerta):
         )
 
         return
-
-    # ========================================================
-    # ANALISI
-    # ========================================================
 
     carte_idonee = []
 
@@ -1373,10 +1331,6 @@ def elabora_offerta(offerta):
         f"{numero_non_idonee}"
     )
 
-    # ========================================================
-    # NESSUNA IDONEA
-    # ========================================================
-
     if numero_idonee == 0:
 
         print("")
@@ -1400,10 +1354,6 @@ def elabora_offerta(offerta):
         )
 
         return
-
-    # ========================================================
-    # CONTROPROPOSTA
-    # ========================================================
 
     pagamento_centesimi = (
         numero_idonee
@@ -1568,6 +1518,16 @@ def monitor_offerte():
 
     print("")
 
+    # ========================================================
+    # TEST CHIAVE
+    # ========================================================
+
+    verifica_chiave_stark()
+
+    # ========================================================
+    # AUTENTICAZIONE SORARE
+    # ========================================================
+
     if not verifica_account():
 
         print(
@@ -1603,9 +1563,7 @@ def monitor_offerte():
                 f"⚠️ Errore nel ciclo: {e}"
             )
 
-        # ====================================================
-        # MODIFICA: controllo ogni 10 secondi
-        # ====================================================
+        # Controllo ogni 10 secondi.
 
         time.sleep(10)
 
