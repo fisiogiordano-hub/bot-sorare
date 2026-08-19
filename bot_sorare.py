@@ -1,12 +1,18 @@
 import os
 import time
 import threading
-import requests
 import hashlib
+import importlib
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Set
 
-from decimal import Decimal
+import requests
 from flask import Flask
 
+
+# ============================================================
+# FLASK
+# ============================================================
 
 app = Flask(__name__)
 
@@ -15,24 +21,26 @@ app = Flask(__name__)
 # CONFIGURAZIONE
 # ============================================================
 
+SORARE_API_URL = "https://api.sorare.com/graphql"
+
 SORARE_TOKEN = os.getenv(
     "SORARE_JWT_TOKEN",
-    ""
+    "",
 ).strip()
 
 SORARE_JWT_AUD = os.getenv(
     "SORARE_JWT_AUD",
-    ""
+    "",
 ).strip()
 
 KULENOVIC_ID = os.getenv(
     "KULENOVIC_ID",
-    ""
+    "",
 ).strip()
 
 SORARE_STARK_PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
-    ""
+    "",
 ).strip()
 
 
@@ -42,12 +50,16 @@ SORARE_STARK_PRIVATE_KEY = os.getenv(
 
 # IMPORTANTE:
 #
-# Il bot rimane SEMPRE in DRY RUN.
+# Il bot è SEMPRE in DRY RUN.
 #
-# Nessun rifiuto reale.
-# Nessuna controproposta reale.
-# Nessuna transazione reale.
-
+# NON vengono mai eseguite:
+#
+# - rejectTokenOffer
+# - counterTokenOffer
+# - acceptTokenOffer
+# - transazioni
+# - mutation Sorare
+#
 DRY_RUN = True
 
 
@@ -60,32 +72,17 @@ PREZZO_MASSIMO_CENTESIMI = 80
 
 PAGAMENTO_PER_CARTA_CENTESIMI = 20
 
+INTERVALLO_CONTROLLO_SECONDI = 10
+
+HTTP_TIMEOUT_SECONDI = 30
+
+MAX_OFFERTE_PER_RICHIESTA = 50
+
+MAX_RETRY_HTTP = 2
+
 
 # ============================================================
 # CAMPIONATI COPERTI
-# ============================================================
-#
-# Lista DEFINITIVA.
-#
-# Sono 26 campionati LOGICI.
-#
-# Gli slug Sorare possono avere varianti diverse.
-# Per questo la verifica utilizza una funzione di
-# normalizzazione e degli alias.
-#
-# REGOLA FONDAMENTALE:
-#
-# 1. Il giocatore deve avere una squadra ATTIVA.
-# 2. Solo la squadra ATTIVA viene analizzata.
-# 3. La squadra deve avere almeno una competizione
-#    attiva compatibile con uno dei 26 campionati.
-#
-# Se activeClub è assente:
-#
-#       -> CARTA NON IDONEA
-#
-# Anche se Sorare dovesse restituire vecchie competizioni
-# nella scheda del giocatore.
 # ============================================================
 
 CAMPIONATI_COPERTI = {
@@ -323,31 +320,14 @@ CAMPIONATI_COPERTI = {
 }
 
 
-# ============================================================
-# CONTROLLO NUMERO CAMPIONATI
-# ============================================================
-
-NUMERO_CAMPIONATI = len(
-    CAMPIONATI_COPERTI
-)
-
-
-# ============================================================
-# SORARE API
-# ============================================================
-
-SORARE_API_URL = (
-    "https://api.sorare.com/graphql"
-)
+NUMERO_CAMPIONATI = len(CAMPIONATI_COPERTI)
 
 
 # ============================================================
 # KULENOVIC
 # ============================================================
 
-KULENOVIC_SLUG = (
-    "sandro-kulenovic-2025-limited-385"
-)
+KULENOVIC_SLUG = "sandro-kulenovic-2025-limited-385"
 
 KULENOVIC_ASSET_ID = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
@@ -356,55 +336,50 @@ KULENOVIC_ASSET_ID = (
 
 
 # ============================================================
-# STATO
+# STATO GLOBALE
 # ============================================================
 
-offerte_gia_analizzate = set()
+offerte_gia_analizzate: Set[str] = set()
 
 monitoraggio_avviato = False
 
+monitor_thread: Optional[threading.Thread] = None
+
+stop_event = threading.Event()
+
 lock_avvio = threading.Lock()
 
+session = requests.Session()
+
 
 # ============================================================
-# NORMALIZZAZIONE SLUG
+# NORMALIZZAZIONE
 # ============================================================
 
-def normalizza_slug(valore):
-
+def normalizza_slug(valore: Any) -> str:
     if valore is None:
         return ""
 
-    valore = str(valore).strip().lower()
-
-    return valore
+    return str(valore).strip().lower()
 
 
 # ============================================================
-# TROVA CAMPIONATO COPERTO
+# TROVA CAMPIONATO
 # ============================================================
 
-def trova_campionato_coperto(slug):
+def trova_campionato_coperto(slug: Any) -> Optional[str]:
 
-    slug_normalizzato = normalizza_slug(
-        slug
-    )
+    slug_normalizzato = normalizza_slug(slug)
 
     if not slug_normalizzato:
         return None
 
     for dati in CAMPIONATI_COPERTI.values():
 
-        alias = dati.get(
-            "alias",
-            set()
-        )
+        alias = dati.get("alias", set())
 
         if slug_normalizzato in alias:
-
-            return dati.get(
-                "nome"
-            )
+            return dati.get("nome")
 
     return None
 
@@ -413,37 +388,85 @@ def trova_campionato_coperto(slug):
 # STAMPA CAMPIONATI
 # ============================================================
 
-def stampa_campionati_coperti():
+def stampa_campionati_coperti() -> None:
 
-    print(
-        "🏆 REGOLA CAMPIONATI:"
-    )
-
+    print("🏆 REGOLA CAMPIONATI:")
     print(
         f"   {NUMERO_CAMPIONATI} campionati coperti."
     )
 
     for dati in CAMPIONATI_COPERTI.values():
-
         print(
             f"   • {dati['nome']}"
         )
 
 
 # ============================================================
-# TEST LOCALE FIRMA STARK
-# ============================================================
-#
-# Questo test NON esegue nessuna mutation Sorare.
-#
-# Se la versione di starknet-py installata non espone
-# il vecchio modulo interno, NON facciamo fallire
-# l'intero bot.
-#
-# La modalità DRY RUN rimane comunque attiva.
+# TEST CONFIGURAZIONE
 # ============================================================
 
-def test_firma_stark():
+def verifica_configurazione() -> bool:
+
+    print("")
+    print("========================================")
+    print("🔧 VERIFICA CONFIGURAZIONE")
+    print("========================================")
+
+    ok = True
+
+    if SORARE_TOKEN:
+        print("✅ SORARE_JWT_TOKEN presente.")
+    else:
+        print(
+            "❌ SORARE_JWT_TOKEN NON configurato."
+        )
+        ok = False
+
+    if SORARE_JWT_AUD:
+        print("✅ SORARE_JWT_AUD presente.")
+    else:
+        print(
+            "⚠️ SORARE_JWT_AUD non configurato."
+        )
+
+    if KULENOVIC_ID:
+        print("✅ KULENOVIC_ID presente.")
+    else:
+        print(
+            "⚠️ KULENOVIC_ID non configurato."
+        )
+
+    if SORARE_STARK_PRIVATE_KEY:
+        print(
+            "✅ SORARE_STARK_PRIVATE_KEY presente."
+        )
+    else:
+        print(
+            "⚠️ SORARE_STARK_PRIVATE_KEY non configurata."
+        )
+
+    print("")
+    print(
+        f"🟡 DRY_RUN = {DRY_RUN}"
+    )
+
+    if not DRY_RUN:
+        print(
+            "❌ BLOCCO DI SICUREZZA: "
+            "DRY_RUN deve essere True."
+        )
+        ok = False
+
+    print("========================================")
+
+    return ok
+
+
+# ============================================================
+# TEST FIRMA STARK
+# ============================================================
+
+def test_firma_stark() -> bool:
 
     print("")
     print("========================================")
@@ -453,7 +476,12 @@ def test_firma_stark():
     if not SORARE_STARK_PRIVATE_KEY:
 
         print(
-            "❌ SORARE_STARK_PRIVATE_KEY non configurata."
+            "⚠️ SORARE_STARK_PRIVATE_KEY "
+            "non configurata."
+        )
+
+        print(
+            "🟡 Test Stark saltato."
         )
 
         return False
@@ -465,11 +493,8 @@ def test_firma_stark():
     chiave = SORARE_STARK_PRIVATE_KEY.strip()
 
     if chiave.lower().startswith("0x"):
-
         chiave_hex = chiave[2:]
-
     else:
-
         chiave_hex = chiave
 
     if not chiave_hex:
@@ -484,13 +509,14 @@ def test_firma_stark():
 
         private_key_int = int(
             chiave_hex,
-            16
+            16,
         )
 
     except ValueError:
 
         print(
-            "❌ La chiave non è un valore esadecimale valido."
+            "❌ La chiave non è "
+            "esadecimale valida."
         )
 
         return False
@@ -498,7 +524,8 @@ def test_firma_stark():
     if private_key_int <= 0:
 
         print(
-            "❌ La chiave privata non è valida."
+            "❌ La chiave privata "
+            "non è valida."
         )
 
         return False
@@ -511,87 +538,65 @@ def test_firma_stark():
     # IMPORT COMPATIBILE
     # --------------------------------------------------------
 
-    PrivateKey = None
-    message_signature = None
+    try:
 
-    import_error = None
+        modulo = importlib.import_module(
+            "starknet_py.net.signer.stark_curve"
+        )
 
-    possibili_import = [
+    except Exception as e:
 
-        (
-            "starknet_py.net.signer.stark_curve",
-            "PrivateKey",
-            "message_signature",
-        ),
+        print(
+            "⚠️ starknet-py non disponibile "
+            "o API incompatibile."
+        )
 
-        (
-            "starknet_py.net.signer.stark_curve",
-            "PrivateKey",
-            None,
-        ),
-    ]
+        print(
+            f"   Dettaglio: {e}"
+        )
 
-    for (
+        print(
+            "🟡 Il bot continua in DRY RUN."
+        )
+
+        return False
+
+    PrivateKey = getattr(
         modulo,
-        nome_private_key,
-        nome_signature,
-    ) in possibili_import:
+        "PrivateKey",
+        None,
+    )
 
-        try:
-
-            import importlib
-
-            mod = importlib.import_module(
-                modulo
-            )
-
-            PrivateKey = getattr(
-                mod,
-                nome_private_key,
-                None
-            )
-
-            if nome_signature:
-
-                message_signature = getattr(
-                    mod,
-                    nome_signature,
-                    None
-                )
-
-            if PrivateKey is not None:
-
-                break
-
-        except Exception as e:
-
-            import_error = e
+    message_signature = getattr(
+        modulo,
+        "message_signature",
+        None,
+    )
 
     if PrivateKey is None:
 
         print(
-            "⚠️ API locale starknet-py non compatibile "
-            "con questo test."
+            "⚠️ PrivateKey non disponibile "
+            "nella versione installata."
         )
 
-        if import_error:
+        return False
 
-            print(
-                f"   Dettaglio: {import_error}"
-            )
+    if message_signature is None:
 
         print(
-            "🟡 Il bot rimane in DRY RUN."
+            "⚠️ message_signature non disponibile "
+            "nella versione installata."
         )
 
         print(
-            "🟡 Nessuna operazione reale verrà eseguita."
+            "🟡 Test firma saltato."
         )
 
         return False
 
     print(
-        "✅ API Starknet importate correttamente."
+        "✅ API Starknet importate."
     )
 
     # --------------------------------------------------------
@@ -608,7 +613,7 @@ def test_firma_stark():
 
         print(
             "❌ Impossibile inizializzare "
-            "la chiave Stark."
+            "la private key Stark."
         )
 
         print(
@@ -632,7 +637,8 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "❌ Impossibile derivare la public key."
+            "❌ Impossibile derivare "
+            "la public key."
         )
 
         print(
@@ -646,36 +652,39 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # HASH TEST
+    # HASH
     # --------------------------------------------------------
 
     try:
 
-        messaggio_testo = (
+        messaggio = (
             "SORARE_LOCAL_SIGNATURE_TEST"
         )
 
         digest = hashlib.sha256(
-            messaggio_testo.encode("utf-8")
+            messaggio.encode("utf-8")
         ).digest()
 
         messaggio_hash = int.from_bytes(
             digest,
-            byteorder="big"
+            byteorder="big",
         )
 
-        STARK_FIELD_PRIME = (
+        stark_field_prime = (
             (2 ** 251)
             + (17 * (2 ** 192))
             + 1
         )
 
-        messaggio_hash %= STARK_FIELD_PRIME
+        messaggio_hash %= (
+            stark_field_prime
+        )
 
     except Exception as e:
 
         print(
-            "❌ Impossibile creare l'hash di test."
+            "❌ Impossibile creare "
+            "l'hash di test."
         )
 
         print(
@@ -685,35 +694,18 @@ def test_firma_stark():
         return False
 
     print(
-        "✅ Hash di test Stark preparato."
+        "✅ Hash di test preparato."
     )
 
     # --------------------------------------------------------
     # FIRMA
     # --------------------------------------------------------
 
-    if message_signature is None:
-
-        print(
-            "⚠️ Funzione message_signature "
-            "non disponibile nella versione installata."
-        )
-
-        print(
-            "🟡 Il test locale della firma viene saltato."
-        )
-
-        print(
-            "🟡 Il bot rimane in DRY RUN."
-        )
-
-        return False
-
     try:
 
         firma = message_signature(
             private_key,
-            messaggio_hash
+            messaggio_hash,
         )
 
     except Exception as e:
@@ -736,14 +728,6 @@ def test_firma_stark():
 
         return False
 
-    print(
-        "✅ Firma Stark generata."
-    )
-
-    # --------------------------------------------------------
-    # R / S
-    # --------------------------------------------------------
-
     try:
 
         r = firma[0]
@@ -752,7 +736,7 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "❌ Struttura della firma inattesa."
+            "❌ Struttura firma inattesa."
         )
 
         print(
@@ -764,13 +748,13 @@ def test_firma_stark():
     if r is None or s is None:
 
         print(
-            "❌ Firma priva dei valori r/s."
+            "❌ Firma priva di r/s."
         )
 
         return False
 
     print(
-        "✅ Firma contiene r e s."
+        "✅ Firma Stark generata."
     )
 
     # --------------------------------------------------------
@@ -781,13 +765,13 @@ def test_firma_stark():
 
         verificata = public_key.verify(
             messaggio_hash,
-            firma
+            firma,
         )
 
     except Exception as e:
 
         print(
-            "❌ Errore durante la verifica locale."
+            "❌ Verifica locale fallita."
         )
 
         print(
@@ -799,7 +783,7 @@ def test_firma_stark():
     if not verificata:
 
         print(
-            "❌ VERIFICA FIRMA FALLITA."
+            "❌ FIRMA NON VERIFICATA."
         )
 
         return False
@@ -809,19 +793,7 @@ def test_firma_stark():
     )
 
     print(
-        "🟢 Private key funzionante."
-    )
-
-    print(
-        "🟢 Public key derivata correttamente."
-    )
-
-    print(
-        "🟢 Coppia firma/verifica funzionante."
-    )
-
-    print(
-        "🟡 Questo NON è un test di una mutation Sorare."
+        "🟢 Test Stark superato."
     )
 
     print(
@@ -830,10 +802,6 @@ def test_firma_stark():
 
     print(
         "🟡 Nessuna transazione eseguita."
-    )
-
-    print(
-        "🟡 Nessuna offerta modificata."
     )
 
     print(
@@ -847,7 +815,7 @@ def test_firma_stark():
 # HEADERS
 # ============================================================
 
-def crea_headers():
+def crea_headers() -> Dict[str, str]:
 
     if not SORARE_TOKEN:
 
@@ -857,19 +825,15 @@ def crea_headers():
 
     token = SORARE_TOKEN
 
-    if not token.lower().startswith(
-        "bearer "
-    ):
+    if not token.lower().startswith("bearer "):
 
         token = f"Bearer {token}"
 
     headers = {
-
         "Content-Type": "application/json",
-
         "Accept": "application/json",
-
         "Authorization": token,
+        "User-Agent": "Sorare-Dry-Run-Bot/1.0",
     }
 
     if SORARE_JWT_AUD:
@@ -886,142 +850,237 @@ def crea_headers():
 # ============================================================
 
 def esegui_query(
-    query,
-    variables=None
-):
+    query: str,
+    variables: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
 
     payload = {
-
         "query": query,
-
         "variables": variables or {},
     }
 
-    try:
-
-        response = requests.post(
-
-            SORARE_API_URL,
-
-            json=payload,
-
-            headers=crea_headers(),
-
-            timeout=30,
-        )
-
-        print(
-            f"🌐 Sorare HTTP: "
-            f"{response.status_code}"
-        )
-
-        if response.status_code != 200:
-
-            print(
-                "❌ Risposta HTTP non valida:"
-            )
-
-            print(
-                response.text[:3000]
-            )
-
-            return None
+    for tentativo in range(
+        MAX_RETRY_HTTP + 1
+    ):
 
         try:
 
-            risultato = response.json()
-
-        except ValueError:
-
-            print(
-                "❌ Risposta Sorare non JSON."
+            response = session.post(
+                SORARE_API_URL,
+                json=payload,
+                headers=crea_headers(),
+                timeout=HTTP_TIMEOUT_SECONDI,
             )
 
             print(
-                response.text[:3000]
+                f"🌐 Sorare HTTP: "
+                f"{response.status_code}"
             )
 
-            return None
+            # ------------------------------------------------
+            # RATE LIMIT
+            # ------------------------------------------------
 
-        errori = risultato.get(
-            "errors"
-        )
+            if response.status_code == 429:
 
-        if errori:
+                if tentativo >= MAX_RETRY_HTTP:
 
-            print(
-                "❌ Errori GraphQL:"
-            )
+                    print(
+                        "❌ Rate limit persistente."
+                    )
 
-            for errore in errori:
+                    return None
+
+                attesa = 2 ** tentativo
 
                 print(
-                    "- "
-                    + str(
-                        errore.get(
+                    f"⏳ Rate limit. "
+                    f"Attendo {attesa}s..."
+                )
+
+                time.sleep(attesa)
+
+                continue
+
+            # ------------------------------------------------
+            # ERRORI SERVER
+            # ------------------------------------------------
+
+            if response.status_code >= 500:
+
+                if tentativo >= MAX_RETRY_HTTP:
+
+                    print(
+                        "❌ Errore server Sorare."
+                    )
+
+                    print(
+                        response.text[:2000]
+                    )
+
+                    return None
+
+                attesa = 2 ** tentativo
+
+                print(
+                    f"⏳ Errore server. "
+                    f"Retry tra {attesa}s..."
+                )
+
+                time.sleep(attesa)
+
+                continue
+
+            # ------------------------------------------------
+            # HTTP NON VALIDO
+            # ------------------------------------------------
+
+            if response.status_code != 200:
+
+                print(
+                    "❌ Risposta HTTP non valida:"
+                )
+
+                print(
+                    response.text[:3000]
+                )
+
+                return None
+
+            # ------------------------------------------------
+            # JSON
+            # ------------------------------------------------
+
+            try:
+
+                risultato = response.json()
+
+            except ValueError:
+
+                print(
+                    "❌ Risposta Sorare non JSON."
+                )
+
+                print(
+                    response.text[:3000]
+                )
+
+                return None
+
+            if not isinstance(
+                risultato,
+                dict,
+            ):
+
+                print(
+                    "❌ Risposta GraphQL inattesa."
+                )
+
+                return None
+
+            # ------------------------------------------------
+            # GRAPHQL ERRORS
+            # ------------------------------------------------
+
+            errori = risultato.get(
+                "errors"
+            )
+
+            if errori:
+
+                print(
+                    "❌ Errori GraphQL:"
+                )
+
+                for errore in errori:
+
+                    if isinstance(
+                        errore,
+                        dict,
+                    ):
+
+                        messaggio = errore.get(
                             "message",
                             "Errore sconosciuto",
                         )
+
+                    else:
+
+                        messaggio = str(
+                            errore
+                        )
+
+                    print(
+                        f"   - {messaggio}"
                     )
+
+                return None
+
+            return risultato
+
+        except requests.RequestException as e:
+
+            if tentativo >= MAX_RETRY_HTTP:
+
+                print(
+                    f"❌ Errore HTTP Sorare: {e}"
                 )
+
+                return None
+
+            attesa = 2 ** tentativo
+
+            print(
+                f"⏳ Errore HTTP. "
+                f"Retry tra {attesa}s..."
+            )
+
+            time.sleep(attesa)
+
+        except Exception as e:
+
+            print(
+                f"❌ Errore richiesta Sorare: {e}"
+            )
 
             return None
 
-        return risultato
-
-    except requests.RequestException as e:
-
-        print(
-            f"❌ Errore HTTP Sorare: {e}"
-        )
-
-        return None
-
-    except Exception as e:
-
-        print(
-            f"❌ Errore richiesta Sorare: {e}"
-        )
-
-        return None
+    return None
 
 
 # ============================================================
 # ACCOUNT
 # ============================================================
 
-def verifica_account():
+def verifica_account() -> bool:
 
     query = """
-
     query CurrentUserTest {
-
         currentUser {
-
             slug
-
             nickname
-
         }
     }
-
     """
 
-    risultato = esegui_query(
-        query
-    )
+    risultato = esegui_query(query)
 
     if not risultato:
-
         return False
 
-    user = (
-        risultato
-        .get("data", {})
-        .get("currentUser")
+    data = risultato.get("data")
+
+    if not isinstance(data, dict):
+        print(
+            "❌ Campo data assente."
+        )
+        return False
+
+    user = data.get(
+        "currentUser"
     )
 
-    if not user:
+    if not isinstance(user, dict):
 
         print(
             "❌ Sorare non ha restituito currentUser."
@@ -1053,54 +1112,37 @@ def verifica_account():
 # OFFERTE PENDING
 # ============================================================
 
-def recupera_offerte():
+def recupera_offerte() -> List[Dict[str, Any]]:
 
     query = """
-
-    query PendingOffers {
-
+    query PendingOffers($first: Int!) {
         currentUser {
-
             pendingTokenOffersReceived(
-                first: 50
+                first: $first
             ) {
-
                 nodes {
-
                     id
-
                     status
 
                     sender {
-
                         ... on User {
-
                             slug
-
                             nickname
                         }
                     }
 
                     senderSide {
-
                         anyCards {
-
                             assetId
-
                             slug
-
                             collection
                         }
                     }
 
                     receiverSide {
-
                         anyCards {
-
                             assetId
-
                             slug
-
                             collection
                         }
                     }
@@ -1108,44 +1150,101 @@ def recupera_offerte():
             }
         }
     }
-
     """
 
     risultato = esegui_query(
-        query
+        query,
+        {
+            "first": MAX_OFFERTE_PER_RICHIESTA,
+        },
     )
 
     if not risultato:
+        return []
+
+    data = risultato.get("data")
+
+    if not isinstance(data, dict):
+        return []
+
+    user = data.get(
+        "currentUser"
+    )
+
+    if not isinstance(user, dict):
+        return []
+
+    connessione = user.get(
+        "pendingTokenOffersReceived"
+    )
+
+    if not isinstance(
+        connessione,
+        dict,
+    ):
 
         return []
 
-    user = (
-        risultato
-        .get("data", {})
-        .get("currentUser")
+    nodes = connessione.get(
+        "nodes"
     )
 
-    if not user:
-
-        print(
-            "❌ currentUser assente."
-        )
+    if not isinstance(
+        nodes,
+        list,
+    ):
 
         return []
 
-    connessione = (
-        user.get(
-            "pendingTokenOffersReceived"
-        )
-        or {}
-    )
+    return [
+        offerta
+        for offerta in nodes
+        if isinstance(offerta, dict)
+    ]
 
-    return (
-        connessione.get(
-            "nodes"
+
+# ============================================================
+# ESTRAI ASSET ID UNICI
+# ============================================================
+
+def estrai_asset_ids(
+    carte: List[Dict[str, Any]]
+) -> List[str]:
+
+    risultati = []
+
+    gia_presenti = set()
+
+    for carta in carte:
+
+        if not isinstance(
+            carta,
+            dict,
+        ):
+            continue
+
+        asset_id = str(
+            carta.get(
+                "assetId"
+            )
+            or ""
+        ).strip()
+
+        if not asset_id:
+            continue
+
+        chiave = asset_id.lower()
+
+        if chiave in gia_presenti:
+            continue
+
+        gia_presenti.add(chiave)
+
+        risultati.append(
+            asset_id
         )
-        or []
-    )
+
+    return risultati
 
 
 # ============================================================
@@ -1153,47 +1252,45 @@ def recupera_offerte():
 # ============================================================
 
 def recupera_dettagli_carte(
-    asset_ids
-):
+    asset_ids: List[str]
+) -> List[Dict[str, Any]]:
+
+    asset_ids = estrai_asset_ids(
+        [
+            {
+                "assetId": asset_id
+            }
+            for asset_id in asset_ids
+        ]
+    )
 
     if not asset_ids:
-
         return []
 
     query = """
-
-    query CardDetails(
-        $assetIds: [String!]
-    ) {
+    query CardDetails($assetIds: [String!]) {
 
         anyCards(
             assetIds: $assetIds
         ) {
 
             assetId
-
             slug
-
             name
-
             rarityTyped
-
             collection
 
             anyPlayer {
 
                 displayName
-
                 slug
 
                 activeClub {
 
                     slug
-
                     name
 
                     activeCompetitions {
-
                         slug
                     }
                 }
@@ -1204,7 +1301,6 @@ def recupera_dettagli_carte(
                 name
 
                 activeCompetitions {
-
                     slug
                 }
             }
@@ -1212,13 +1308,9 @@ def recupera_dettagli_carte(
             lowestPriceCard {
 
                 assetId
-
                 slug
-
                 name
-
                 rarityTyped
-
                 seasonYear
 
                 liveSingleSaleOffer {
@@ -1226,14 +1318,12 @@ def recupera_dettagli_carte(
                     receiverSide {
 
                         amounts {
-
                             eurCents
                         }
                     }
                 }
 
                 publicMinPrices {
-
                     eurCents
                 }
             }
@@ -1241,13 +1331,9 @@ def recupera_dettagli_carte(
             lowestPriceCardAnySeason {
 
                 assetId
-
                 slug
-
                 name
-
                 rarityTyped
-
                 seasonYear
 
                 liveSingleSaleOffer {
@@ -1255,55 +1341,68 @@ def recupera_dettagli_carte(
                     receiverSide {
 
                         amounts {
-
                             eurCents
                         }
                     }
                 }
 
                 publicMinPrices {
-
                     eurCents
                 }
             }
         }
     }
-
     """
 
     risultato = esegui_query(
-
         query,
-
         {
             "assetIds": asset_ids
-        }
+        },
     )
 
     if not risultato:
-
         return []
 
-    carte = (
-        risultato
-        .get("data", {})
-        .get("anyCards")
-        or []
+    data = risultato.get(
+        "data"
     )
 
-    return carte
+    if not isinstance(
+        data,
+        dict,
+    ):
+        return []
+
+    carte = data.get(
+        "anyCards"
+    )
+
+    if not isinstance(
+        carte,
+        list,
+    ):
+        return []
+
+    return [
+        carta
+        for carta in carte
+        if isinstance(carta, dict)
+    ]
 
 
 # ============================================================
-# LETTURA EUR CENTS
+# EUR CENTS
 # ============================================================
 
 def leggi_eur_cents(
-    amounts
-):
+    amounts: Any
+) -> Optional[int]:
 
-    if not amounts:
-
+    if not isinstance(
+        amounts,
+        dict,
+    ):
         return None
 
     valore = amounts.get(
@@ -1311,12 +1410,11 @@ def leggi_eur_cents(
     )
 
     if valore is None:
-
         return None
 
     try:
 
-        valore = int(
+        valore_int = int(
             valore
         )
 
@@ -1327,44 +1425,48 @@ def leggi_eur_cents(
 
         return None
 
-    if valore <= 0:
-
+    if valore_int <= 0:
         return None
 
-    return valore
+    return valore_int
 
 
 # ============================================================
-# PREZZO LIVE SALE
+# PREZZO DA LIVE SALE
 # ============================================================
 
 def prezzo_da_live_sale(
-    carta
-):
+    carta: Any
+) -> Optional[Decimal]:
 
-    if not carta:
-
+    if not isinstance(
+        carta,
+        dict,
+    ):
         return None
 
-    offerta = (
-        carta.get(
-            "liveSingleSaleOffer"
-        )
-        or {}
+    offerta = carta.get(
+        "liveSingleSaleOffer"
     )
 
-    receiver_side = (
-        offerta.get(
-            "receiverSide"
-        )
-        or {}
+    if not isinstance(
+        offerta,
+        dict,
+    ):
+        return None
+
+    receiver_side = offerta.get(
+        "receiverSide"
     )
 
-    amounts = (
-        receiver_side.get(
-            "amounts"
-        )
-        or {}
+    if not isinstance(
+        receiver_side,
+        dict,
+    ):
+        return None
+
+    amounts = receiver_side.get(
+        "amounts"
     )
 
     eur_cents = leggi_eur_cents(
@@ -1372,7 +1474,6 @@ def prezzo_da_live_sale(
     )
 
     if eur_cents is None:
-
         return None
 
     return (
@@ -1382,36 +1483,74 @@ def prezzo_da_live_sale(
 
 
 # ============================================================
-# PREZZO PUBLIC MIN
+# PUBLIC MIN PRICE
 # ============================================================
 
 def prezzo_da_public_min_price(
-    carta
-):
+    carta: Any
+) -> Optional[Decimal]:
 
-    if not carta:
-
+    if not isinstance(
+        carta,
+        dict,
+    ):
         return None
 
-    amounts = (
-        carta.get(
-            "publicMinPrices"
+    public_min = carta.get(
+        "publicMinPrices"
+    )
+
+    # Sorare può restituire:
+    #
+    #   dict
+    #
+    # oppure:
+    #
+    #   list
+    #
+    if isinstance(
+        public_min,
+        dict,
+    ):
+
+        eur_cents = leggi_eur_cents(
+            public_min
         )
-        or {}
-    )
 
-    eur_cents = leggi_eur_cents(
-        amounts
-    )
+        if eur_cents is not None:
 
-    if eur_cents is None:
+            return (
+                Decimal(eur_cents)
+                / Decimal("100")
+            )
 
-        return None
+    elif isinstance(
+        public_min,
+        list,
+    ):
 
-    return (
-        Decimal(eur_cents)
-        / Decimal("100")
-    )
+        valori = []
+
+        for elemento in public_min:
+
+            eur_cents = leggi_eur_cents(
+                elemento
+            )
+
+            if eur_cents is not None:
+
+                valori.append(
+                    eur_cents
+                )
+
+        if valori:
+
+            return (
+                Decimal(min(valori))
+                / Decimal("100")
+            )
+
+    return None
 
 
 # ============================================================
@@ -1419,8 +1558,8 @@ def prezzo_da_public_min_price(
 # ============================================================
 
 def recupera_prezzo_floor(
-    carta
-):
+    carta: Dict[str, Any]
+) -> Optional[Decimal]:
 
     slug = str(
         carta.get("slug")
@@ -1446,108 +1585,146 @@ def recupera_prezzo_floor(
         f"{slug}"
     )
 
-    lowest_price_card = (
-        carta.get(
-            "lowestPriceCard"
-        )
-        or {}
-    )
-
-    lowest_slug = str(
-        lowest_price_card.get(
-            "slug"
-        )
-        or ""
-    ).strip()
-
-    if lowest_slug:
-
-        print(
-            f"      🎯 Carta floor trovata: "
-            f"{lowest_slug}"
-        )
-
-    else:
-
-        print(
-            "      ⚠️ lowestPriceCard "
-            "non disponibile."
-        )
-
-    valori = []
-
-    prezzo_live = (
-        prezzo_da_live_sale(
-            lowest_price_card
-        )
-    )
-
-    if prezzo_live is not None:
-
-        valori.append(
-            prezzo_live
-        )
-
-        print(
-            f"      💰 Offerta vendita: "
-            f"€{prezzo_live:.2f}"
-        )
-
-    prezzo_public = (
-        prezzo_da_public_min_price(
-            lowest_price_card
-        )
-    )
-
-    if prezzo_public is not None:
-
-        valori.append(
-            prezzo_public
-        )
-
-        print(
-            f"      💰 Public min price: "
-            f"€{prezzo_public:.2f}"
-        )
+    valori: List[Decimal] = []
 
     # --------------------------------------------------------
-    # FALLBACK
+    # STAGIONE CORRENTE
+    # --------------------------------------------------------
+
+    lowest_price_card = carta.get(
+        "lowestPriceCard"
+    )
+
+    if isinstance(
+        lowest_price_card,
+        dict,
+    ):
+
+        lowest_slug = str(
+            lowest_price_card.get(
+                "slug"
+            )
+            or ""
+        ).strip()
+
+        if lowest_slug:
+
+            print(
+                f"      🎯 Carta floor: "
+                f"{lowest_slug}"
+            )
+
+        prezzo_live = (
+            prezzo_da_live_sale(
+                lowest_price_card
+            )
+        )
+
+        if prezzo_live is not None:
+
+            valori.append(
+                prezzo_live
+            )
+
+            print(
+                f"      💰 Live sale: "
+                f"€{prezzo_live:.2f}"
+            )
+
+        prezzo_public = (
+            prezzo_da_public_min_price(
+                lowest_price_card
+            )
+        )
+
+        if prezzo_public is not None:
+
+            valori.append(
+                prezzo_public
+            )
+
+            print(
+                f"      💰 Public min: "
+                f"€{prezzo_public:.2f}"
+            )
+
+    # --------------------------------------------------------
+    # QUALSIASI STAGIONE
+    # --------------------------------------------------------
+
+    lowest_any_season = carta.get(
+        "lowestPriceCardAnySeason"
+    )
+
+    if isinstance(
+        lowest_any_season,
+        dict,
+    ):
+
+        prezzo_live = (
+            prezzo_da_live_sale(
+                lowest_any_season
+            )
+        )
+
+        if prezzo_live is not None:
+
+            valori.append(
+                prezzo_live
+            )
+
+            print(
+                f"      💰 Live sale "
+                f"(any season): "
+                f"€{prezzo_live:.2f}"
+            )
+
+        prezzo_public = (
+            prezzo_da_public_min_price(
+                lowest_any_season
+            )
+        )
+
+        if prezzo_public is not None:
+
+            valori.append(
+                prezzo_public
+            )
+
+            print(
+                f"      💰 Public min "
+                f"(any season): "
+                f"€{prezzo_public:.2f}"
+            )
+
+    # --------------------------------------------------------
+    # FALLBACK CARTA ORIGINALE
     # --------------------------------------------------------
 
     if not valori:
 
-        prezzo_live_carta = (
+        prezzo_live = (
             prezzo_da_live_sale(
                 carta
             )
         )
 
-        if prezzo_live_carta is not None:
+        if prezzo_live is not None:
 
             valori.append(
-                prezzo_live_carta
+                prezzo_live
             )
 
-            print(
-                f"      💰 Offerta carta: "
-                f"€{prezzo_live_carta:.2f}"
-            )
-
-        prezzo_public_carta = (
+        prezzo_public = (
             prezzo_da_public_min_price(
                 carta
             )
         )
 
-        if prezzo_public_carta is not None:
+        if prezzo_public is not None:
 
             valori.append(
-                prezzo_public_carta
-            )
-
-            print(
-                f"      💰 Public min carta: "
-                f"€{prezzo_public_carta:.2f}"
+                prezzo_public
             )
 
     if not valori:
@@ -1572,69 +1749,50 @@ def recupera_prezzo_floor(
 
 
 # ============================================================
-# CONTROLLO SQUADRA E CAMPIONATO
-# ============================================================
-#
-# REGOLA CRITICA:
-#
-# activeClub mancante:
-#
-#       SEMPRE NON IDONEO
-#
-# Non vengono considerate:
-#
-# - vecchie squadre
-# - vecchie competizioni
-# - competizioni generiche del giocatore
-#
-# Viene considerata ESCLUSIVAMENTE:
-#
-#       anyPlayer.activeClub
-#
-# e le sue:
-#
-#       activeCompetitions
-#
+# CONTROLLO SQUADRA / CAMPIONATO
 # ============================================================
 
 def controlla_squadra_e_campionato(
-    carta
-):
+    carta: Dict[str, Any]
+) -> bool:
 
-    player = (
-        carta.get(
-            "anyPlayer"
-        )
-        or {}
+    player = carta.get(
+        "anyPlayer"
     )
 
+    if not isinstance(
+        player,
+        dict,
+    ):
+
+        print(
+            "      🔴 Giocatore non disponibile."
+        )
+
+        return False
+
     player_name = (
-        player.get(
-            "displayName"
-        )
-        or player.get(
-            "slug"
-        )
-        or carta.get(
-            "name"
-        )
+        player.get("displayName")
+        or player.get("slug")
+        or carta.get("name")
         or "Giocatore sconosciuto"
     )
 
-    active_club = (
-        player.get(
-            "activeClub"
-        )
+    active_club = player.get(
+        "activeClub"
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # NESSUNA SQUADRA ATTIVA
-    # ========================================================
+    # --------------------------------------------------------
 
-    if not active_club:
+    if not isinstance(
+        active_club,
+        dict,
+    ):
 
         print(
-            f"      🏟️ Squadra attiva: NESSUNA"
+            "      🏟️ Squadra attiva: NESSUNA"
         )
 
         print(
@@ -1652,24 +1810,14 @@ def controlla_squadra_e_campionato(
 
         return False
 
-    # ========================================================
-    # SQUADRA ATTIVA
-    # ========================================================
-
     club_name = str(
-        active_club.get(
-            "name"
-        )
-        or active_club.get(
-            "slug"
-        )
+        active_club.get("name")
+        or active_club.get("slug")
         or ""
     ).strip()
 
     club_slug = normalizza_slug(
-        active_club.get(
-            "slug"
-        )
+        active_club.get("slug")
     )
 
     print(
@@ -1684,22 +1832,16 @@ def controlla_squadra_e_campionato(
             f"{club_slug}"
         )
 
-    else:
-
-        print(
-            "      ⚠️ Slug squadra assente."
-        )
-
-    # ========================================================
-    # COMPETIZIONI DELLA SQUADRA ATTIVA
-    # ========================================================
-
-    competizioni = (
-        active_club.get(
-            "activeCompetitions"
-        )
-        or []
+    competizioni = active_club.get(
+        "activeCompetitions"
     )
+
+    if not isinstance(
+        competizioni,
+        list,
+    ):
+
+        competizioni = []
 
     if not competizioni:
 
@@ -1708,15 +1850,10 @@ def controlla_squadra_e_campionato(
             "attiva sulla squadra."
         )
 
-        print(
-            "      🔴 CAMPIONATO NON COPERTO"
-        )
-
         return False
 
     print(
-        "      🏆 COMPETIZIONI ATTIVE "
-        "DELLA SQUADRA:"
+        "      🏆 COMPETIZIONI ATTIVE:"
     )
 
     campionati_trovati = []
@@ -1727,17 +1864,13 @@ def controlla_squadra_e_campionato(
             competizione,
             dict,
         ):
-
             continue
 
         slug = normalizza_slug(
-            competizione.get(
-                "slug"
-            )
+            competizione.get("slug")
         )
 
         if not slug:
-
             continue
 
         print(
@@ -1755,10 +1888,6 @@ def controlla_squadra_e_campionato(
             campionati_trovati.append(
                 nome_campionato
             )
-
-    # ========================================================
-    # CAMPIONATO COPERTO
-    # ========================================================
 
     if campionati_trovati:
 
@@ -1780,71 +1909,54 @@ def controlla_squadra_e_campionato(
 
         return True
 
-    # ========================================================
-    # NESSUN CAMPIONATO COPERTO
-    # ========================================================
-
     print(
         "      🔴 CAMPIONATO NON COPERTO"
-    )
-
-    print(
-        "      🔎 Nessuna delle competizioni "
-        "della squadra attiva è presente "
-        "nella lista dei campionati coperti."
     )
 
     return False
 
 
 # ============================================================
-# CONTROLLO CARTA
+# ANALISI CARTA
 # ============================================================
 
 def analizza_carta(
-    carta
-):
+    carta: Dict[str, Any]
+) -> bool:
 
-    asset_id = (
-        carta.get(
-            "assetId"
-        )
+    if not isinstance(
+        carta,
+        dict,
+    ):
+
+        return False
+
+    asset_id = carta.get(
+        "assetId"
     )
 
-    slug = (
-        carta.get(
-            "slug"
-        )
+    slug = carta.get(
+        "slug"
     )
 
     nome = (
-        carta.get(
-            "name"
-        )
+        carta.get("name")
         or slug
         or asset_id
         or "Carta sconosciuta"
     )
 
     rarita = str(
-        carta.get(
-            "rarityTyped"
-        )
+        carta.get("rarityTyped")
         or ""
-    ).upper()
+    ).strip().upper()
 
-    # ========================================================
+    # --------------------------------------------------------
     # PREZZO
-    # ========================================================
+    # --------------------------------------------------------
 
-    prezzo = (
-        recupera_prezzo_floor(
-            carta
-        )
-    )
-
-    prezzo_verificabile = (
-        prezzo is not None
+    prezzo = recupera_prezzo_floor(
+        carta
     )
 
     prezzo_minimo = (
@@ -1862,52 +1974,47 @@ def analizza_carta(
     )
 
     prezzo_ok = (
-        prezzo_verificabile
+        prezzo is not None
         and prezzo >= prezzo_minimo
         and prezzo <= prezzo_massimo
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # RARITÀ
-    # ========================================================
+    # --------------------------------------------------------
 
     rarita_ok = (
         rarita == "LIMITED"
     )
 
-    # ========================================================
-    # SQUADRA + CAMPIONATO
-    # ========================================================
+    # --------------------------------------------------------
+    # CAMPIONATO
+    # --------------------------------------------------------
 
-    campionato_coperto = (
+    campionato_ok = (
         controlla_squadra_e_campionato(
             carta
         )
     )
 
-    # ========================================================
-    # IDONEITÀ
-    # ========================================================
-
     idonea = (
-        rarita_ok
-        and prezzo_ok
-        and campionato_coperto
+        prezzo_ok
+        and rarita_ok
+        and campionato_ok
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # LOG
-    # ========================================================
+    # --------------------------------------------------------
 
     print("")
-
     print(
         f"   📄 {nome}"
     )
 
     print(
         f"      Asset ID: "
-        f"{asset_id}"
+        f"{asset_id or 'N/D'}"
     )
 
     print(
@@ -1920,7 +2027,13 @@ def analizza_carta(
         f"{rarita or 'N/D'}"
     )
 
-    if prezzo is not None:
+    if prezzo is None:
+
+        print(
+            "      🔴 Prezzo NON verificabile"
+        )
+
+    else:
 
         print(
             f"      Prezzo floor: "
@@ -1930,33 +2043,20 @@ def analizza_carta(
         if prezzo < prezzo_minimo:
 
             print(
-                "      🔴 Prezzo inferiore "
-                "al minimo di €0,30"
+                "      🔴 Prezzo sotto €0,30"
             )
 
-        elif prezzo <= prezzo_massimo:
+        elif prezzo > prezzo_massimo:
 
             print(
-                "      🟢 Prezzo tra "
-                "€0,30 e €0,80"
+                "      🔴 Prezzo sopra €0,80"
             )
 
         else:
 
             print(
-                "      🔴 Prezzo superiore "
-                "al massimo di €0,80"
+                "      🟢 Prezzo tra €0,30 e €0,80"
             )
-
-    else:
-
-        print(
-            "      Prezzo floor: N/D"
-        )
-
-        print(
-            "      🔴 Prezzo NON verificabile"
-        )
 
     if rarita_ok:
 
@@ -1969,10 +2069,6 @@ def analizza_carta(
         print(
             "      🔴 Rarità NON valida"
         )
-
-    print(
-        "      =================================="
-    )
 
     if idonea:
 
@@ -1998,17 +2094,13 @@ def analizza_carta(
 # ============================================================
 
 def controlla_kulenovic(
-    carte_richieste
-):
+    carte_richieste: List[Dict[str, Any]]
+) -> bool:
 
     print("")
-
     print(
-        "🔎 CARTA/E RICHIESTA/E "
-        "DAL MANAGER:"
+        "🔎 CARTE RICHIESTE DAL MANAGER:"
     )
-
-    kulenovic_presente = False
 
     configurato = (
         KULENOVIC_ID.strip()
@@ -2018,24 +2110,24 @@ def controlla_kulenovic(
 
     for carta in carte_richieste:
 
+        if not isinstance(
+            carta,
+            dict,
+        ):
+            continue
+
         asset_id = str(
-            carta.get(
-                "assetId"
-            )
+            carta.get("assetId")
             or ""
         ).strip()
 
         slug = str(
-            carta.get(
-                "slug"
-            )
+            carta.get("slug")
             or ""
         ).strip()
 
         collection = str(
-            carta.get(
-                "collection"
-            )
+            carta.get("collection")
             or ""
         ).strip()
 
@@ -2051,24 +2143,26 @@ def controlla_kulenovic(
             f"   Collection: {collection}"
         )
 
+        asset_lower = asset_id.lower()
+        slug_lower = slug.lower()
+
         match_configurazione = (
             bool(configurato)
             and (
-                asset_id.lower()
+                asset_lower
                 == configurato.lower()
-                or
-                slug.lower()
+                or slug_lower
                 == configurato.lower()
             )
         )
 
         match_slug = (
-            slug.lower()
+            slug_lower
             == KULENOVIC_SLUG.lower()
         )
 
         match_asset = (
-            asset_id.lower()
+            asset_lower
             == KULENOVIC_ASSET_ID.lower()
         )
 
@@ -2078,31 +2172,17 @@ def controlla_kulenovic(
             or match_asset
         ):
 
-            kulenovic_presente = True
-
             print(
                 "   🎯 KULENOVIC RICONOSCIUTO"
             )
 
-    if kulenovic_presente:
+            return True
 
-        print(
-            "🎯 KULENOVIC RICONOSCIUTO!"
-        )
+    print(
+        "ℹ️ Kulenovic non riconosciuto."
+    )
 
-    else:
-
-        print(
-            "ℹ️ Kulenovic non riconosciuto "
-            "nell'offerta."
-        )
-
-        print(
-            "ℹ️ L'offerta viene comunque "
-            "analizzata in DRY RUN."
-        )
-
-    return kulenovic_presente
+    return False
 
 
 # ============================================================
@@ -2110,95 +2190,106 @@ def controlla_kulenovic(
 # ============================================================
 
 def elabora_offerta(
-    offerta
-):
+    offerta: Dict[str, Any]
+) -> None:
 
-    offerta_id = (
-        offerta.get(
-            "id"
-        )
-    )
+    if not isinstance(
+        offerta,
+        dict,
+    ):
+        return
+
+    offerta_id = str(
+        offerta.get("id")
+        or ""
+    ).strip()
 
     if not offerta_id:
-
         return
+
+    # --------------------------------------------------------
+    # NON RIELABORARE
+    # --------------------------------------------------------
 
     if offerta_id in offerte_gia_analizzate:
-
         return
 
-    offerte_gia_analizzate.add(
-        offerta_id
-    )
-
     print("")
-
     print(
         "========================================"
     )
-
     print(
         "📨 NUOVA OFFERTA"
     )
-
     print(
         f"🆔 ID: {offerta_id}"
     )
-
     print(
         f"📌 Stato: "
-        f"{offerta.get('status')}"
+        f"{offerta.get('status') or 'N/D'}"
     )
 
-    sender = (
-        offerta.get(
-            "sender"
-        )
-        or {}
+    sender = offerta.get(
+        "sender"
     )
+
+    if not isinstance(
+        sender,
+        dict,
+    ):
+        sender = {}
 
     nickname = (
-        sender.get(
-            "nickname"
-        )
-        or sender.get(
-            "slug"
-        )
+        sender.get("nickname")
+        or sender.get("slug")
         or "Sconosciuto"
     )
 
     print(
-        f"👤 Manager: "
-        f"{nickname}"
+        f"👤 Manager: {nickname}"
     )
 
-    sender_side = (
-        offerta.get(
-            "senderSide"
-        )
-        or {}
+    sender_side = offerta.get(
+        "senderSide"
     )
 
-    receiver_side = (
-        offerta.get(
-            "receiverSide"
-        )
-        or {}
+    if not isinstance(
+        sender_side,
+        dict,
+    ):
+        sender_side = {}
+
+    receiver_side = offerta.get(
+        "receiverSide"
     )
+
+    if not isinstance(
+        receiver_side,
+        dict,
+    ):
+        receiver_side = {}
 
     carte_offerte = (
-        sender_side.get(
-            "anyCards"
-        )
+        sender_side.get("anyCards")
         or []
     )
 
     carte_che_diamo = (
-        receiver_side.get(
-            "anyCards"
-        )
+        receiver_side.get("anyCards")
         or []
     )
+
+    if not isinstance(
+        carte_offerte,
+        list,
+    ):
+        carte_offerte = []
+
+    if not isinstance(
+        carte_che_diamo,
+        list,
+    ):
+        carte_che_diamo = []
 
     print(
         f"📦 Carte offerte: "
@@ -2216,25 +2307,19 @@ def elabora_offerta(
         )
     )
 
-    asset_ids = [
+    asset_ids = estrai_asset_ids(
+        carte_offerte
+    )
 
-        carta.get(
-            "assetId"
-        )
-
-        for carta in carte_offerte
-
-        if carta.get(
-            "assetId"
-        )
-    ]
+    # --------------------------------------------------------
+    # NESSUNA CARTA
+    # --------------------------------------------------------
 
     if not asset_ids:
 
         print("")
-
         print(
-            "🔴 DECISIONE: RIFIUTARE"
+            "🔴 DECISIONE TEORICA: RIFIUTARE"
         )
 
         print(
@@ -2242,20 +2327,26 @@ def elabora_offerta(
         )
 
         print(
-            "🟡 DRY RUN: nessuna operazione "
-            "eseguita."
+            "🟡 DRY RUN: nessun rifiuto eseguito."
         )
 
         print(
             "----------------------------------------"
         )
 
+        # Ora la lavorazione è conclusa.
+        offerte_gia_analizzate.add(
+            offerta_id
+        )
+
         return
 
-    dettagli = (
-        recupera_dettagli_carte(
-            asset_ids
-        )
+    # --------------------------------------------------------
+    # DETTAGLI
+    # --------------------------------------------------------
+
+    dettagli = recupera_dettagli_carte(
+        asset_ids
     )
 
     if not dettagli:
@@ -2266,20 +2357,71 @@ def elabora_offerta(
         )
 
         print(
+            "⚠️ Offerta NON marcata come analizzata."
+        )
+
+        print(
             "----------------------------------------"
         )
 
         return
 
+    # --------------------------------------------------------
+    # MAPPA DETTAGLI
+    # --------------------------------------------------------
+
+    dettagli_per_asset = {}
+
+    for carta in dettagli:
+
+        asset_id = str(
+            carta.get("assetId")
+            or ""
+        ).strip()
+
+        if asset_id:
+
+            dettagli_per_asset[
+                asset_id.lower()
+            ] = carta
+
     carte_idonee = []
 
-    print("")
+    carte_mancanti = []
 
+    print("")
     print(
         "🔎 ANALISI DELLE CARTE RICEVUTE:"
     )
 
-    for carta in dettagli:
+    # --------------------------------------------------------
+    # IMPORTANTE:
+    #
+    # Analizziamo tutte le carte richieste.
+    #
+    # Se Sorare non restituisce il dettaglio di una carta,
+    # quella carta NON può essere considerata idonea.
+    # --------------------------------------------------------
+
+    for asset_id in asset_ids:
+
+        carta = dettagli_per_asset.get(
+            asset_id.lower()
+        )
+
+        if carta is None:
+
+            print("")
+            print(
+                f"   ❌ Dettagli mancanti per "
+                f"asset {asset_id}"
+            )
+
+            carte_mancanti.append(
+                asset_id
+            )
+
+            continue
 
         if analizza_carta(
             carta
@@ -2303,7 +2445,6 @@ def elabora_offerta(
     )
 
     print("")
-
     print(
         "----------------------------------------"
     )
@@ -2323,24 +2464,22 @@ def elabora_offerta(
         f"{numero_non_idonee}"
     )
 
-    # ========================================================
-    # NESSUNA CARTA IDONEA
-    # ========================================================
+    # --------------------------------------------------------
+    # NESSUNA IDONEA
+    # --------------------------------------------------------
 
     if numero_idonee == 0:
 
         print("")
-
         print(
-            "🔴 DECISIONE: RIFIUTARE L'OFFERTA"
+            "🔴 DECISIONE TEORICA: "
+            "RIFIUTARE L'OFFERTA"
         )
 
         print(
             "   Motivo: nessuna carta ricevuta "
             "è idonea."
         )
-
-        print("")
 
         print(
             "🟡 DRY RUN: nessun rifiuto eseguito."
@@ -2350,11 +2489,15 @@ def elabora_offerta(
             "----------------------------------------"
         )
 
+        offerte_gia_analizzate.add(
+            offerta_id
+        )
+
         return
 
-    # ========================================================
+    # --------------------------------------------------------
     # PAGAMENTO
-    # ========================================================
+    # --------------------------------------------------------
 
     pagamento_centesimi = (
         numero_idonee
@@ -2369,15 +2512,15 @@ def elabora_offerta(
     )
 
     print("")
-
     print(
-        "🟢 DECISIONE: CONTROPROPOSTA"
+        "🟢 DECISIONE TEORICA: "
+        "CONTROPROPOSTA"
     )
 
     print("")
 
     print(
-        "📤 DALLA PROPOSTA VIENE RIMOSSA:"
+        "📤 DALLA PROPOSTA VERREBBE RIMOSSO:"
     )
 
     if kulenovic_presente:
@@ -2395,7 +2538,7 @@ def elabora_offerta(
     print("")
 
     print(
-        "🗑️ VENGONO ELIMINATE "
+        "🗑️ VERREBBERO ELIMINATE "
         "LE CARTE NON IDONEE:"
     )
 
@@ -2414,18 +2557,15 @@ def elabora_offerta(
     print("")
 
     print(
-        "📥 RIMANGONO SOLO LE CARTE IDONEE:"
+        "📥 RIMARREBBERO SOLO "
+        "LE CARTE IDONEE:"
     )
 
     for carta in carte_idonee:
 
         nome_carta = (
-            carta.get(
-                "name"
-            )
-            or carta.get(
-                "slug"
-            )
+            carta.get("name")
+            or carta.get("slug")
             or "Carta sconosciuta"
         )
 
@@ -2436,7 +2576,7 @@ def elabora_offerta(
     print("")
 
     print(
-        f"💰 PAGAMENTO AL MANAGER: "
+        f"💰 PAGAMENTO TEORICO: "
         f"€{pagamento_euro:.2f}"
     )
 
@@ -2445,24 +2585,27 @@ def elabora_offerta(
     )
 
     print("")
-
     print(
-        "📋 CONTROPROPOSTA PREVISTA:"
+        "📋 CONTROPROPOSTA TEORICA:"
     )
 
-    print(
-        "   ❌ Noi NON cediamo Kulenovic"
-    )
+    if kulenovic_presente:
+
+        print(
+            "   ❌ Noi NON cediamo Kulenovic"
+        )
+
+    else:
+
+        print(
+            "   ℹ️ Kulenovic non era richiesto."
+        )
 
     for carta in carte_idonee:
 
         nome_carta = (
-            carta.get(
-                "name"
-            )
-            or carta.get(
-                "slug"
-            )
+            carta.get("name")
+            or carta.get("slug")
             or "Carta sconosciuta"
         )
 
@@ -2472,7 +2615,7 @@ def elabora_offerta(
         )
 
     print(
-        f"   💰 Noi paghiamo: "
+        f"   💰 Noi pagheremmo: "
         f"€{pagamento_euro:.2f}"
     )
 
@@ -2489,18 +2632,35 @@ def elabora_offerta(
             "è stata inviata."
         )
 
+        print(
+            "   Nessun rifiuto è stato eseguito."
+        )
+
+        print(
+            "   Nessuna mutation Sorare "
+            "è stata eseguita."
+        )
+
     print(
         "----------------------------------------"
     )
 
     print("")
 
+    # --------------------------------------------------------
+    # SOLO DOPO ELABORAZIONE COMPLETA
+    # --------------------------------------------------------
+
+    offerte_gia_analizzate.add(
+        offerta_id
+    )
+
 
 # ============================================================
-# MONITORAGGIO
+# MONITOR
 # ============================================================
 
-def monitor_offerte():
+def monitor_offerte() -> None:
 
     print(
         "🤖 BOT SORARE AVVIATO"
@@ -2527,44 +2687,52 @@ def monitor_offerte():
         "€0,20 per ogni carta idonea"
     )
 
+    print("")
+
     stampa_campionati_coperti()
 
     print("")
 
+    if not verifica_configurazione():
+
+        print(
+            "❌ Configurazione non valida."
+        )
+
+        print(
+            "❌ Monitoraggio NON avviato."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # TEST STARK
+    # --------------------------------------------------------
+
     firma_ok = test_firma_stark()
 
-    if not firma_ok:
-
-        print(
-            "⚠️ TEST FIRMA STARK "
-            "NON SUPERATO."
-        )
-
-        print(
-            "⚠️ Il bot continua in DRY RUN."
-        )
-
-        print(
-            "⚠️ Nessuna operazione reale "
-            "verrà eseguita."
-        )
-
-    else:
+    if firma_ok:
 
         print(
             "🟢 TEST FIRMA STARK SUPERATO."
         )
 
+    else:
+
         print(
-            "🟡 Il bot rimane comunque "
-            "in DRY RUN."
+            "🟡 TEST FIRMA STARK NON SUPERATO "
+            "O NON DISPONIBILE."
         )
+
+    print(
+        "🟡 Il bot rimane comunque in DRY RUN."
+    )
 
     print("")
 
-    # ========================================================
+    # --------------------------------------------------------
     # AUTENTICAZIONE
-    # ========================================================
+    # --------------------------------------------------------
 
     if not verifica_account():
 
@@ -2573,13 +2741,17 @@ def monitor_offerte():
             "a Sorare."
         )
 
+        print(
+            "❌ Monitoraggio terminato."
+        )
+
         return
 
-    # ========================================================
+    # --------------------------------------------------------
     # LOOP
-    # ========================================================
+    # --------------------------------------------------------
 
-    while True:
+    while not stop_event.is_set():
 
         try:
 
@@ -2587,9 +2759,7 @@ def monitor_offerte():
                 "🔎 Controllo offerte..."
             )
 
-            offerte = (
-                recupera_offerte()
-            )
+            offerte = recupera_offerte()
 
             print(
                 f"📨 Offerte pending ricevute: "
@@ -2598,72 +2768,176 @@ def monitor_offerte():
 
             for offerta in offerte:
 
-                elabora_offerta(
-                    offerta
-                )
+                if stop_event.is_set():
+                    break
+
+                try:
+
+                    elabora_offerta(
+                        offerta
+                    )
+
+                except Exception as e:
+
+                    print(
+                        "❌ Errore elaborando "
+                        "una singola offerta:"
+                    )
+
+                    print(
+                        f"   {e}"
+                    )
+
+            # ------------------------------------------------
+            # ATTESA INTERRUTTIBILE
+            # ------------------------------------------------
+
+            stop_event.wait(
+                INTERVALLO_CONTROLLO_SECONDI
+            )
 
         except Exception as e:
 
             print(
-                f"⚠️ Errore nel ciclo: "
-                f"{e}"
+                "⚠️ Errore nel ciclo monitor:"
             )
 
-        time.sleep(
-            10
-        )
+            print(
+                f"   {e}"
+            )
+
+            stop_event.wait(
+                INTERVALLO_CONTROLLO_SECONDI
+            )
+
+    print(
+        "🛑 Monitor Sorare terminato."
+    )
 
 
 # ============================================================
-# FLASK
+# AVVIO MONITOR
+# ============================================================
+
+def avvia_monitoraggio() -> bool:
+
+    global monitoraggio_avviato
+    global monitor_thread
+
+    with lock_avvio:
+
+        # ----------------------------------------------------
+        # THREAD GIÀ ATTIVO
+        # ----------------------------------------------------
+
+        if (
+            monitor_thread is not None
+            and monitor_thread.is_alive()
+        ):
+
+            monitoraggio_avviato = True
+
+            return False
+
+        # ----------------------------------------------------
+        # RESET EVENT
+        # ----------------------------------------------------
+
+        stop_event.clear()
+
+        monitor_thread = threading.Thread(
+            target=monitor_offerte,
+            name="sorare-monitor",
+            daemon=True,
+        )
+
+        monitor_thread.start()
+
+        monitoraggio_avviato = True
+
+        return True
+
+
+# ============================================================
+# HEALTH CHECK
 # ============================================================
 
 @app.route("/")
 def home():
 
+    avviato = avvia_monitoraggio()
+
+    if avviato:
+
+        return (
+            "Bot Sorare avviato "
+            "in modalità DRY RUN.",
+            200,
+        )
+
+    return (
+        "Bot Sorare già attivo.",
+        200,
+    )
+
+
+@app.route("/health")
+def health():
+
+    thread_attivo = (
+        monitor_thread is not None
+        and monitor_thread.is_alive()
+    )
+
+    return {
+        "status": "ok",
+        "dry_run": DRY_RUN,
+        "monitor_attivo": thread_attivo,
+    }, 200
+
+
+# ============================================================
+# STOP
+# ============================================================
+
+def ferma_monitoraggio() -> None:
+
     global monitoraggio_avviato
 
     with lock_avvio:
 
-        if not monitoraggio_avviato:
+        stop_event.set()
 
-            monitoraggio_avviato = True
-
-            thread = threading.Thread(
-
-                target=monitor_offerte,
-
-                daemon=True,
-            )
-
-            thread.start()
-
-            return (
-                "Bot Sorare avviato "
-                "in modalità DRY RUN."
-            )
-
-    return (
-        "Bot Sorare già attivo."
-    )
+        monitoraggio_avviato = False
 
 
 # ============================================================
-# AVVIO
+# AVVIO LOCALE
 # ============================================================
 
 if __name__ == "__main__":
 
-    port = int(
-        os.environ.get(
-            "PORT",
-            5000,
+    port_string = os.environ.get(
+        "PORT",
+        "5000",
+    )
+
+    try:
+
+        port = int(
+            port_string
         )
+
+    except ValueError:
+
+        port = 5000
+
+    print(
+        f"🚀 Flask in ascolto sulla porta {port}"
     )
 
     app.run(
-
         host="0.0.0.0",
-
         port=port,
+        threaded=True,
     )
