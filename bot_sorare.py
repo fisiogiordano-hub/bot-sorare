@@ -3,7 +3,8 @@ import time
 import threading
 import requests
 import hashlib
-import importlib
+import unicodedata
+import re
 
 from decimal import Decimal
 from flask import Flask
@@ -26,11 +27,14 @@ SORARE_JWT_AUD = os.getenv(
     ""
 ).strip()
 
+# Può essere asset ID, slug oppure vuota.
 KULENOVIC_ID = os.getenv(
     "KULENOVIC_ID",
     ""
 ).strip()
 
+# Chiave privata Stark.
+# NON viene mai stampata nei log.
 SORARE_STARK_PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
     ""
@@ -43,8 +47,8 @@ SORARE_STARK_PRIVATE_KEY = os.getenv(
 
 # SEMPRE DRY RUN.
 #
-# Nessun rifiuto reale.
-# Nessuna controproposta reale.
+# Nessun rifiuto.
+# Nessuna controproposta.
 # Nessuna transazione reale.
 DRY_RUN = True
 
@@ -84,6 +88,267 @@ KULENOVIC_ASSET_ID = (
 
 
 # ============================================================
+# CAMPIONATI COPERTI
+# ============================================================
+
+# Lista confermata dall'utente.
+#
+# IMPORTANTE:
+# Sorare normalmente restituisce lo slug della competizione.
+# Per questo ogni campionato ha uno o più alias/slug possibili.
+#
+# Il controllo viene fatto sullo slug restituito dall'API.
+#
+# Non viene più utilizzato:
+#
+#     len(competizioni) > 0
+#
+# perché avere una competizione attiva NON significa
+# automaticamente che sia un campionato coperto.
+# ============================================================
+
+CAMPIONATI_COPERTI = {
+
+    "English League": [
+        "premier-league",
+        "english-premier-league",
+        "premier-league-players",
+        "english-league",
+    ],
+
+    "Ligue 1": [
+        "ligue-1",
+        "ligue-1-uber-eats",
+        "ligue-1-mcdonalds",
+    ],
+
+    "LALIGA EA SPORTS": [
+        "laliga-ea-sports",
+        "laliga",
+        "la-liga",
+        "laliga-santander",
+    ],
+
+    "Bundesliga": [
+        "bundesliga",
+        "bundesliga-players",
+    ],
+
+    "Liga Portugal": [
+        "liga-portugal",
+        "primeira-liga",
+        "portuguese-primeira-liga",
+    ],
+
+    "Eredivisie": [
+        "eredivisie",
+        "eredivisie-players",
+    ],
+
+    "Jupiler Pro League": [
+        "jupiler-pro-league",
+        "belgian-pro-league",
+        "pro-league",
+    ],
+
+    "Scottish Premiership": [
+        "scottish-premiership",
+        "scottish-premiership-players",
+    ],
+
+    "J.League": [
+        "j-league",
+        "j1-league",
+        "j-league-1",
+        "j1",
+    ],
+
+    "Seconda divisione inglese": [
+        "championship",
+        "english-championship",
+        "efl-championship",
+        "english-second-division",
+        "second-division",
+    ],
+
+    "Austrian Bundesliga": [
+        "austrian-bundesliga",
+        "bundesliga-austria",
+        "austria-bundesliga",
+    ],
+
+    "Croatian HNL": [
+        "croatian-hnl",
+        "hnl",
+        "1-hnl",
+        "croatian-first-football-league",
+    ],
+
+    "2. Bundesliga": [
+        "2-bundesliga",
+        "2.-bundesliga",
+        "bundesliga-2",
+        "german-2-bundesliga",
+    ],
+
+    "Ligue 2": [
+        "ligue-2",
+        "ligue-2-bkt",
+        "ligue-2-bkt-players",
+    ],
+
+    "MLS": [
+        "major-league-soccer",
+        "mls",
+        "major-league-soccer-players",
+    ],
+
+    "K League": [
+        "k-league",
+        "k-league-1",
+        "k-league-1-players",
+        "kleague-1",
+    ],
+
+    "Turchia": [
+        "super-lig",
+        "turkish-super-lig",
+        "turkey-super-lig",
+        "super-lig-players",
+    ],
+
+    "Danimarca": [
+        "superliga",
+        "danish-superliga",
+        "denmark-superliga",
+        "superligaen",
+    ],
+
+    "Serie A": [
+        "serie-a",
+        "serie-a-players",
+        "italian-serie-a",
+    ],
+
+    "Brasile": [
+        "brasileirao-serie-a",
+        "brasileirao",
+        "brazilian-serie-a",
+        "brazil-serie-a",
+        "serie-a-brazil",
+    ],
+
+    "Russia": [
+        "russian-premier-league",
+        "russia-premier-league",
+        "premier-liga",
+        "russian-premier-liga",
+    ],
+
+    "Serie B": [
+        "serie-b",
+        "serie-b-players",
+        "italian-serie-b",
+    ],
+
+    "Perù": [
+        "liga-1",
+        "liga-1-peru",
+        "peruvian-liga-1",
+        "peru-liga-1",
+    ],
+
+    "Colombia": [
+        "primera-a",
+        "primera-a-colombia",
+        "colombian-primera-a",
+        "liga-betplay",
+    ],
+
+    "Messico": [
+        "liga-mx",
+        "mexican-liga-mx",
+        "liga-mx-players",
+    ],
+
+    "LALIGA 2": [
+        "laliga-2",
+        "la-liga-2",
+        "segunda-division",
+        "segunda-division-players",
+        "laliga-hypermotion",
+    ],
+}
+
+
+# ============================================================
+# COSTRUZIONE INDICE CAMPIONATI
+# ============================================================
+
+def normalizza_testo(valore):
+
+    if valore is None:
+
+        return ""
+
+    testo = str(
+        valore
+    ).strip().lower()
+
+    testo = unicodedata.normalize(
+        "NFKD",
+        testo
+    )
+
+    testo = "".join(
+        carattere
+        for carattere in testo
+        if not unicodedata.combining(carattere)
+    )
+
+    testo = testo.replace(
+        "’",
+        "'"
+    )
+
+    testo = testo.replace(
+        "_",
+        "-"
+    )
+
+    testo = re.sub(
+        r"[^a-z0-9]+",
+        "-",
+        testo
+    )
+
+    testo = re.sub(
+        r"-+",
+        "-",
+        testo
+    )
+
+    return testo.strip("-")
+
+
+CAMPIONATI_COPERTI_NORMALIZZATI = {}
+
+for nome_campionato, alias in CAMPIONATI_COPERTI.items():
+
+    for valore in alias:
+
+        valore_normalizzato = normalizza_testo(
+            valore
+        )
+
+        if valore_normalizzato:
+
+            CAMPIONATI_COPERTI_NORMALIZZATI[
+                valore_normalizzato
+            ] = nome_campionato
+
+
+# ============================================================
 # STATO
 # ============================================================
 
@@ -92,6 +357,57 @@ offerte_gia_analizzate = set()
 monitoraggio_avviato = False
 
 lock_avvio = threading.Lock()
+
+
+# ============================================================
+# CONTROLLO CAMPIONATO
+# ============================================================
+
+def trova_campionato_coperto(competizioni):
+
+    """
+    Riceve le competizioni attive restituite da Sorare.
+
+    Restituisce il nome del campionato coperto trovato
+    oppure None.
+
+    Il confronto viene effettuato sullo slug.
+    """
+
+    if not competizioni:
+
+        return None
+
+    for competizione in competizioni:
+
+        if not competizione:
+
+            continue
+
+        slug = str(
+            competizione.get("slug")
+            or ""
+        ).strip()
+
+        slug_normalizzato = normalizza_testo(
+            slug
+        )
+
+        if not slug_normalizzato:
+
+            continue
+
+        campionato = (
+            CAMPIONATI_COPERTI_NORMALIZZATI.get(
+                slug_normalizzato
+            )
+        )
+
+        if campionato:
+
+            return campionato
+
+    return None
 
 
 # ============================================================
@@ -112,11 +428,7 @@ def test_firma_stark():
     if not SORARE_STARK_PRIVATE_KEY:
 
         print(
-            "⚠️ SORARE_STARK_PRIVATE_KEY non configurata."
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
+            "❌ SORARE_STARK_PRIVATE_KEY non configurata."
         )
 
         print(
@@ -130,10 +442,12 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Normalizzazione
+    # Normalizzazione chiave
     # --------------------------------------------------------
 
-    chiave = SORARE_STARK_PRIVATE_KEY.strip()
+    chiave = (
+        SORARE_STARK_PRIVATE_KEY.strip()
+    )
 
     if chiave.lower().startswith("0x"):
 
@@ -146,13 +460,13 @@ def test_firma_stark():
     if not chiave_hex:
 
         print(
-            "⚠️ Chiave Stark vuota."
+            "❌ Chiave Stark vuota."
         )
 
         return False
 
     # --------------------------------------------------------
-    # Controllo formato
+    # Controllo esadecimale
     # --------------------------------------------------------
 
     try:
@@ -183,113 +497,34 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # IMPORT DINAMICO
-    #
-    # Non assumiamo più che:
-    #
-    # starknet_py.net.signer.stark_curve
-    #
-    # esista nella versione installata.
+    # Import Starknet
     # --------------------------------------------------------
 
-    moduli_da_provare = [
+    try:
 
-        "starknet_py.net.signer.stark_curve",
-
-        "starknet_py.net.signer",
-
-    ]
-
-    modulo = None
-
-    for nome_modulo in moduli_da_provare:
-
-        print(
-            f"🔎 Controllo API Stark: {nome_modulo}"
-        )
-
-        try:
-
-            candidato = importlib.import_module(
-                nome_modulo
-            )
-
-            modulo = candidato
-
-            print(
-                f"✅ Modulo disponibile: {nome_modulo}"
-            )
-
-            break
-
-        except Exception as e:
-
-            print(
-                f"   ⚠️ Modulo non disponibile: "
-                f"{e}"
-            )
-
-    # --------------------------------------------------------
-    # Se l'API non è disponibile:
-    #
-    # NON blocchiamo il bot.
-    # --------------------------------------------------------
-
-    if modulo is None:
-
-        print("")
-        print(
-            "⚠️ API firma Stark non disponibile "
-            "con questa versione di starknet-py."
+        from starknet_py.net.signer.stark_curve import (
+            PrivateKey,
+            message_signature,
         )
 
         print(
-            "🟡 Questo non impedisce il DRY RUN."
+            "✅ API Starknet importate correttamente."
+        )
+
+    except Exception as e:
+
+        print(
+            "❌ Impossibile importare starknet-py."
         )
 
         print(
-            "🟡 Nessuna operazione reale verrà eseguita."
-        )
-
-        print(
-            "🟢 Il bot continua verso Sorare API."
-        )
-
-        print(
-            "========================================"
+            f"   Dettaglio: {e}"
         )
 
         return False
 
     # --------------------------------------------------------
-    # Ricerca PrivateKey
-    # --------------------------------------------------------
-
-    PrivateKey = getattr(
-        modulo,
-        "PrivateKey",
-        None
-    )
-
-    if PrivateKey is None:
-
-        print(
-            "⚠️ PrivateKey non disponibile "
-            "nell'API rilevata."
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
-        )
-
-        return False
-
-    print(
-        "✅ Classe PrivateKey disponibile."
-    )
-
-    # --------------------------------------------------------
-    # Inizializzazione
+    # Inizializzazione private key
     # --------------------------------------------------------
 
     try:
@@ -301,16 +536,11 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "⚠️ Impossibile inizializzare "
-            "la PrivateKey Stark."
+            "❌ Impossibile inizializzare la chiave Stark."
         )
 
         print(
             f"   Dettaglio: {e}"
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -320,7 +550,7 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Public key
+    # Derivazione public key
     # --------------------------------------------------------
 
     try:
@@ -330,15 +560,11 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "⚠️ Impossibile derivare la public key."
+            "❌ Impossibile derivare la public key."
         )
 
         print(
             f"   Dettaglio: {e}"
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -349,13 +575,15 @@ def test_firma_stark():
 
     # --------------------------------------------------------
     # Messaggio di test
-    #
-    # ESCLUSIVAMENTE LOCALE.
     # --------------------------------------------------------
 
     messaggio_testo = (
         "SORARE_LOCAL_SIGNATURE_TEST"
     )
+
+    # --------------------------------------------------------
+    # Hash SHA-256
+    # --------------------------------------------------------
 
     try:
 
@@ -371,7 +599,7 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "⚠️ Impossibile creare hash di test."
+            "❌ Impossibile creare l'hash di test."
         )
 
         print(
@@ -381,7 +609,7 @@ def test_firma_stark():
         return False
 
     # --------------------------------------------------------
-    # Stark field prime
+    # Campo primo Stark
     # --------------------------------------------------------
 
     STARK_FIELD_PRIME = (
@@ -397,62 +625,10 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Ricerca funzione firma
-    # --------------------------------------------------------
-
-    message_signature = getattr(
-        modulo,
-        "message_signature",
-        None
-    )
-
-    # Alcune versioni possono esporre la funzione
-    # direttamente nel modulo signer.
-
-    if message_signature is None:
-
-        try:
-
-            signer_module = importlib.import_module(
-                "starknet_py.net.signer"
-            )
-
-            message_signature = getattr(
-                signer_module,
-                "message_signature",
-                None
-            )
-
-        except Exception:
-
-            message_signature = None
-
-    if message_signature is None:
-
-        print(
-            "⚠️ Funzione message_signature "
-            "non disponibile."
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
-        )
-
-        return False
-
-    print(
-        "✅ Funzione message_signature disponibile."
-    )
-
-    # --------------------------------------------------------
     # Generazione firma
     # --------------------------------------------------------
 
     try:
-
-        print(
-            "🔐 Generazione firma locale..."
-        )
 
         firma = message_signature(
             private_key,
@@ -462,15 +638,11 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "⚠️ Generazione firma locale fallita."
+            "❌ Generazione firma fallita."
         )
 
         print(
             f"   Dettaglio: {e}"
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -478,11 +650,7 @@ def test_firma_stark():
     if not firma:
 
         print(
-            "⚠️ Firma non generata."
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
+            "❌ Firma non generata."
         )
 
         return False
@@ -492,7 +660,7 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Controllo r/s
+    # Controllo struttura firma
     # --------------------------------------------------------
 
     try:
@@ -500,24 +668,22 @@ def test_firma_stark():
         r = firma[0]
         s = firma[1]
 
-        if r is None or s is None:
-
-            raise ValueError(
-                "r oppure s assente"
-            )
-
     except Exception as e:
 
         print(
-            "⚠️ Struttura firma inattesa."
+            "❌ Struttura della firma inattesa."
         )
 
         print(
             f"   Dettaglio: {e}"
         )
 
+        return False
+
+    if r is None or s is None:
+
         print(
-            "🟡 Il bot continua in DRY RUN."
+            "❌ Firma priva dei valori r/s."
         )
 
         return False
@@ -527,7 +693,7 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Verifica
+    # Verifica firma
     # --------------------------------------------------------
 
     try:
@@ -540,20 +706,11 @@ def test_firma_stark():
     except Exception as e:
 
         print(
-            "⚠️ Verifica locale non disponibile."
+            "❌ Errore durante la verifica locale."
         )
 
         print(
             f"   Dettaglio: {e}"
-        )
-
-        print(
-            "🟡 Firma generata, ma verifica "
-            "locale non disponibile."
-        )
-
-        print(
-            "🟡 Il bot continua in DRY RUN."
         )
 
         return False
@@ -565,13 +722,13 @@ def test_firma_stark():
         )
 
         print(
-            "🟡 Il bot rimane in DRY RUN."
+            "========================================"
         )
 
         return False
 
     # --------------------------------------------------------
-    # SUCCESSO
+    # RISULTATO POSITIVO
     # --------------------------------------------------------
 
     print(
@@ -588,6 +745,10 @@ def test_firma_stark():
 
     print(
         "🟢 Coppia firma/verifica funzionante."
+    )
+
+    print(
+        "🟡 Questo NON è un test di una mutation Sorare."
     )
 
     print(
@@ -755,7 +916,9 @@ def verifica_account():
     }
     """
 
-    risultato = esegui_query(query)
+    risultato = esegui_query(
+        query
+    )
 
     if not risultato:
 
@@ -852,7 +1015,9 @@ def recupera_offerte():
     }
     """
 
-    risultato = esegui_query(query)
+    risultato = esegui_query(
+        query
+    )
 
     if not risultato:
 
@@ -918,6 +1083,7 @@ def recupera_dettagli_carte(asset_ids):
                 activeClub {
 
                     slug
+                    name
 
                     activeCompetitions {
 
@@ -1036,7 +1202,9 @@ def leggi_eur_cents(amounts):
 
     try:
 
-        valore = int(valore)
+        valore = int(
+            valore
+        )
 
     except (
         ValueError,
@@ -1275,17 +1443,103 @@ def recupera_prezzo_floor(carta):
 
 
 # ============================================================
+# COMPETIZIONI CARTA
+# ============================================================
+
+def recupera_competizioni_carta(carta):
+
+    competizioni = []
+
+    player = (
+        carta.get("anyPlayer")
+        or {}
+    )
+
+    club = (
+        player.get("activeClub")
+        or {}
+    )
+
+    competizioni_player = (
+        club.get("activeCompetitions")
+        or []
+    )
+
+    for competizione in competizioni_player:
+
+        if competizione:
+
+            competizioni.append(
+                competizione
+            )
+
+    team = (
+        carta.get("anyTeam")
+        or {}
+    )
+
+    competizioni_team = (
+        team.get("activeCompetitions")
+        or []
+    )
+
+    for competizione in competizioni_team:
+
+        if competizione:
+
+            competizioni.append(
+                competizione
+            )
+
+    # Rimuove duplicati per slug.
+    risultati = []
+
+    slug_visti = set()
+
+    for competizione in competizioni:
+
+        slug = str(
+            competizione.get("slug")
+            or ""
+        ).strip()
+
+        slug_norm = normalizza_testo(
+            slug
+        )
+
+        if not slug_norm:
+
+            continue
+
+        if slug_norm in slug_visti:
+
+            continue
+
+        slug_visti.add(
+            slug_norm
+        )
+
+        risultati.append(
+            {
+                "slug": slug
+            }
+        )
+
+    return risultati
+
+
+# ============================================================
 # CONTROLLO CARTA
 # ============================================================
 
 def analizza_carta(carta):
 
-    asset_id = carta.get(
-        "assetId"
+    asset_id = (
+        carta.get("assetId")
     )
 
-    slug = carta.get(
-        "slug"
+    slug = (
+        carta.get("slug")
     )
 
     nome = (
@@ -1300,20 +1554,17 @@ def analizza_carta(carta):
         or ""
     ).upper()
 
-    player = (
-        carta.get("anyPlayer")
-        or {}
+    # --------------------------------------------------------
+    # COMPETIZIONI
+    # --------------------------------------------------------
+
+    competizioni = recupera_competizioni_carta(
+        carta
     )
 
-    club = (
-        player.get("activeClub")
-        or {}
-    )
-
-    competizioni = (
-        club.get("activeCompetitions")
-        or []
-    )
+    # --------------------------------------------------------
+    # PREZZO
+    # --------------------------------------------------------
 
     prezzo = recupera_prezzo_floor(
         carta
@@ -1343,19 +1594,37 @@ def analizza_carta(carta):
         and prezzo <= prezzo_massimo
     )
 
+    # --------------------------------------------------------
+    # CAMPIONATO COPERTO
+    # --------------------------------------------------------
+
     campionato_coperto = (
-        len(competizioni) > 0
+        trova_campionato_coperto(
+            competizioni
+        )
     )
+
+    # --------------------------------------------------------
+    # RARITÀ
+    # --------------------------------------------------------
 
     rarita_ok = (
         rarita == "LIMITED"
     )
 
+    # --------------------------------------------------------
+    # IDONEITÀ FINALE
+    # --------------------------------------------------------
+
     idonea = (
         rarita_ok
         and prezzo_ok
-        and campionato_coperto
+        and campionato_coperto is not None
     )
+
+    # ========================================================
+    # LOG
+    # ========================================================
 
     print("")
 
@@ -1374,6 +1643,10 @@ def analizza_carta(carta):
     print(
         f"      Rarità: {rarita or 'N/D'}"
     )
+
+    # --------------------------------------------------------
+    # PREZZO
+    # --------------------------------------------------------
 
     if prezzo is not None:
 
@@ -1412,22 +1685,58 @@ def analizza_carta(carta):
             "      🔴 Prezzo NON verificabile"
         )
 
+    # --------------------------------------------------------
+    # COMPETIZIONI
+    # --------------------------------------------------------
+
+    print("")
+
     print(
-        f"      Competizioni attive: "
-        f"{len(competizioni)}"
+        "      🏆 COMPETIZIONI ATTIVE:"
     )
 
-    if competizioni:
+    if not competizioni:
 
         print(
-            "      🟢 Campionato coperto"
+            "         Nessuna competizione attiva."
+        )
+
+    else:
+
+        for competizione in competizioni:
+
+            slug_competizione = str(
+                competizione.get("slug")
+                or ""
+            ).strip()
+
+            print(
+                f"         • {slug_competizione}"
+            )
+
+    if campionato_coperto:
+
+        print(
+            f"      🟢 CAMPIONATO COPERTO: "
+            f"{campionato_coperto}"
         )
 
     else:
 
         print(
-            "      🔴 Campionato NON coperto"
+            "      🔴 CAMPIONATO NON COPERTO"
         )
+
+        if competizioni:
+
+            print(
+                "      🔎 Nessuno degli slug trovati "
+                "è presente nella lista dei campionati coperti."
+            )
+
+    # --------------------------------------------------------
+    # RARITÀ
+    # --------------------------------------------------------
 
     if rarita_ok:
 
@@ -1441,16 +1750,36 @@ def analizza_carta(carta):
             "      🔴 Rarità NON valida"
         )
 
+    # --------------------------------------------------------
+    # RISULTATO FINALE
+    # --------------------------------------------------------
+
     if idonea:
+
+        print(
+            "      =================================="
+        )
 
         print(
             "      ✅ CARTA IDONEA"
         )
 
+        print(
+            "      =================================="
+        )
+
     else:
 
         print(
+            "      =================================="
+        )
+
+        print(
             "      ❌ CARTA NON IDONEA"
+        )
+
+        print(
+            "      =================================="
         )
 
     return idonea
@@ -1651,6 +1980,7 @@ def elabora_offerta(offerta):
     if not asset_ids:
 
         print("")
+
         print(
             "🔴 DECISIONE: RIFIUTARE"
         )
@@ -1689,6 +2019,7 @@ def elabora_offerta(offerta):
     carte_idonee = []
 
     print("")
+
     print(
         "🔎 ANALISI DELLE CARTE RICEVUTE:"
     )
@@ -1715,6 +2046,7 @@ def elabora_offerta(offerta):
     )
 
     print("")
+
     print(
         "----------------------------------------"
     )
@@ -1737,6 +2069,7 @@ def elabora_offerta(offerta):
     if numero_idonee == 0:
 
         print("")
+
         print(
             "🔴 DECISIONE: RIFIUTARE L'OFFERTA"
         )
@@ -1746,6 +2079,7 @@ def elabora_offerta(offerta):
         )
 
         print("")
+
         print(
             "🟡 DRY RUN: nessun rifiuto eseguito."
         )
@@ -1755,6 +2089,10 @@ def elabora_offerta(offerta):
         )
 
         return
+
+    # ========================================================
+    # PAGAMENTO
+    # ========================================================
 
     pagamento_centesimi = (
         numero_idonee
@@ -1769,11 +2107,13 @@ def elabora_offerta(offerta):
     )
 
     print("")
+
     print(
         "🟢 DECISIONE: CONTROPROPOSTA"
     )
 
     print("")
+
     print(
         "📤 DALLA PROPOSTA VIENE RIMOSSA:"
     )
@@ -1791,6 +2131,7 @@ def elabora_offerta(offerta):
         )
 
     print("")
+
     print(
         "🗑️ VENGONO ELIMINATE "
         "LE CARTE NON IDONEE:"
@@ -1809,6 +2150,7 @@ def elabora_offerta(offerta):
         )
 
     print("")
+
     print(
         "📥 RIMANGONO SOLO LE CARTE IDONEE:"
     )
@@ -1837,6 +2179,7 @@ def elabora_offerta(offerta):
     )
 
     print("")
+
     print(
         "📋 CONTROPROPOSTA PREVISTA:"
     )
@@ -1914,25 +2257,27 @@ def monitor_offerte():
 
     print("")
 
+    print(
+        "🏆 REGOLA CAMPIONATI:"
+    )
+
+    print(
+        f"   {len(CAMPIONATI_COPERTI)} campionati coperti."
+    )
+
+    for nome_campionato in CAMPIONATI_COPERTI:
+
+        print(
+            f"   • {nome_campionato}"
+        )
+
+    print("")
+
     # ========================================================
     # TEST LOCALE FIRMA
     # ========================================================
 
-    try:
-
-        firma_ok = test_firma_stark()
-
-    except Exception as e:
-
-        print(
-            "⚠️ Errore inatteso nel test Stark."
-        )
-
-        print(
-            f"   Dettaglio: {e}"
-        )
-
-        firma_ok = False
+    firma_ok = test_firma_stark()
 
     if not firma_ok:
 
@@ -1941,11 +2286,11 @@ def monitor_offerte():
         )
 
         print(
-            "🟡 Il bot continua comunque in DRY RUN."
+            "⚠️ Il bot continua in DRY RUN."
         )
 
         print(
-            "🟡 Nessuna operazione reale verrà eseguita."
+            "⚠️ Nessuna operazione reale verrà eseguita."
         )
 
     else:
@@ -1959,9 +2304,6 @@ def monitor_offerte():
         )
 
     print("")
-    print(
-        "🔄 Passaggio alla verifica account Sorare..."
-    )
 
     if not verifica_account():
 
@@ -1970,16 +2312,6 @@ def monitor_offerte():
         )
 
         return
-
-    print(
-        "🟢 Monitoraggio offerte attivo."
-    )
-
-    print(
-        "⏱️ Controllo ogni 10 secondi."
-    )
-
-    print("")
 
     while True:
 
@@ -2007,6 +2339,10 @@ def monitor_offerte():
             print(
                 f"⚠️ Errore nel ciclo: {e}"
             )
+
+        # ====================================================
+        # CONTROLLO OGNI 10 SECONDI
+        # ====================================================
 
         time.sleep(10)
 
