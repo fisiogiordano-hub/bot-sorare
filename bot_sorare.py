@@ -181,42 +181,73 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Import Starknet
+    # Import compatibile con starknet-py attuale
+    # --------------------------------------------------------
+    #
+    # Nelle versioni attuali:
+    #
+    #   KeyPair
+    #       -> starknet_py.net.signer.key_pair
+    #
+    #   message_signature
+    #       -> starknet_py.hash.utils
+    #
+    #   verify_message_signature
+    #       -> starknet_py.hash.utils
+    #
+    # Il vecchio:
+    #
+    #   starknet_py.net.signer.stark_curve
+    #
+    # non viene più utilizzato.
     # --------------------------------------------------------
 
     try:
 
-        from starknet_py.net.signer.stark_curve import (
-            PrivateKey,
+        from starknet_py.net.signer.key_pair import (
+            KeyPair,
+        )
+
+        from starknet_py.hash.utils import (
             message_signature,
+            verify_message_signature,
         )
 
     except Exception as e:
 
         print(
-            "❌ Impossibile importare starknet-py."
+            "❌ Impossibile importare le API Starknet."
         )
 
         print(
             f"   Dettaglio: {e}"
         )
 
+        print(
+            "   Verifica che starknet-py sia installato "
+            "nel requirements.txt."
+        )
+
         return False
 
+    print(
+        "✅ API Starknet importate correttamente."
+    )
+
     # --------------------------------------------------------
-    # Inizializzazione private key
+    # Creazione KeyPair
     # --------------------------------------------------------
 
     try:
 
-        private_key = PrivateKey(
+        key_pair = KeyPair.from_private_key(
             private_key_int
         )
 
     except Exception as e:
 
         print(
-            "❌ Impossibile inizializzare la chiave Stark."
+            "❌ Impossibile inizializzare la KeyPair Stark."
         )
 
         print(
@@ -230,12 +261,12 @@ def test_firma_stark():
     )
 
     # --------------------------------------------------------
-    # Derivazione public key
+    # Public key
     # --------------------------------------------------------
 
     try:
 
-        public_key = private_key.public_key
+        public_key = key_pair.public_key
 
     except Exception as e:
 
@@ -249,6 +280,14 @@ def test_firma_stark():
 
         return False
 
+    if not public_key:
+
+        print(
+            "❌ Public key non generata."
+        )
+
+        return False
+
     print(
         "✅ Public key Stark derivata."
     )
@@ -256,7 +295,7 @@ def test_firma_stark():
     # --------------------------------------------------------
     # Messaggio di test
     #
-    # Questo messaggio è esclusivamente locale.
+    # ESCLUSIVAMENTE LOCALE.
     #
     # NON è una richiesta Sorare.
     # NON è una mutation.
@@ -297,8 +336,6 @@ def test_firma_stark():
 
     # --------------------------------------------------------
     # Campo primo Stark
-    #
-    # Il valore viene portato nel range del field Stark.
     # --------------------------------------------------------
 
     STARK_FIELD_PRIME = (
@@ -316,12 +353,20 @@ def test_firma_stark():
     # --------------------------------------------------------
     # Generazione firma
     # --------------------------------------------------------
+    #
+    # API attuale:
+    #
+    # message_signature(
+    #     msg_hash=...,
+    #     priv_key=...
+    # )
+    # --------------------------------------------------------
 
     try:
 
         firma = message_signature(
-            private_key,
-            messaggio_hash
+            msg_hash=messaggio_hash,
+            priv_key=key_pair.private_key,
         )
 
     except Exception as e:
@@ -384,12 +429,22 @@ def test_firma_stark():
     # --------------------------------------------------------
     # Verifica firma
     # --------------------------------------------------------
+    #
+    # API attuale:
+    #
+    # verify_message_signature(
+    #     msg_hash,
+    #     signature,
+    #     public_key
+    # )
+    # --------------------------------------------------------
 
     try:
 
-        verificata = public_key.verify(
+        verificata = verify_message_signature(
             messaggio_hash,
-            firma
+            firma,
+            key_pair.public_key,
         )
 
     except Exception as e:
