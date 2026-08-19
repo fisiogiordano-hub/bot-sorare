@@ -15,14 +15,23 @@ monitoraggio_avviato = False
 lock_avvio = threading.Lock()
 
 def esegui_query_sorare(query, variables=None):
-    auth_value = SORARE_JWT_TOKEN.strip()
-    if not auth_value.lower().startswith("bearer "):
-        auth_value = f"Bearer {auth_value}"
-        
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": auth_value
-    }
+    token = SORARE_JWT_TOKEN.strip()
+    
+    # Se la stringa è un cookie di sessione anziché un token JWT
+    if "pYy" in token or "=" in token:
+        cookie_value = token if "_sorare_session_id=" in token else f"_sorare_session_id={token}"
+        headers = {
+            "Content-Type": "application/json",
+            "Cookie": cookie_value
+        }
+    else:
+        if not token.lower().startswith("bearer "):
+            token = f"Bearer {token}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": token
+        }
+
     payload = {
         "query": query,
         "variables": variables or {}
