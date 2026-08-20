@@ -18,7 +18,7 @@ app = Flask(__name__)
 # CONFIGURAZIONE
 # ============================================================
 
-URL = "https://api.sorare.com/federation/graphql"
+URL = "https://api.sorare.com/graphql"
 
 TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
@@ -167,8 +167,6 @@ lock = threading.Lock()
 
 _started = False
 
-_schema_cache = {}
-
 
 # ============================================================
 # UTILITY
@@ -313,157 +311,63 @@ def graphql(query, variables=None):
 
 
 # ============================================================
-# SCHEMA GRAPHQL
+# PREPARE OFFER INPUT
 #
-# Questa parte è la correzione importante:
-# prima di prepareOffer leggiamo i campi realmente
-# disponibili nel prepareOfferInput di Sorare.
+# IMPORTANTE:
+# NON viene più usata __type.
+#
+# Sorare documenta direttamente la struttura di
+# prepareOfferInput per DIRECT_OFFER.
 # ============================================================
-
-def get_input_fields(type_name):
-    if type_name in _schema_cache:
-        return _schema_cache[type_name]
-
-    query = """
-        query InputFields($name: String!) {
-            __type(name: $name) {
-                inputFields {
-                    name
-                }
-            }
-        }
-    """
-
-    data = graphql(
-        query,
-        {
-            "name": type_name,
-        },
-    )
-
-    if not data:
-        return set()
-
-    type_data = (
-        data.get("data") or {}
-    ).get("__type")
-
-    if not type_data:
-        print(
-            f"⚠️ Schema GraphQL: "
-            f"{type_name} non trovato.",
-            flush=True,
-        )
-        return set()
-
-    fields = {
-        item.get("name")
-        for item in (
-            type_data.get("inputFields")
-            or []
-        )
-        if item.get("name")
-    }
-
-    _schema_cache[type_name] = fields
-
-    print(
-        f"🔎 Schema {type_name}: "
-        f"{', '.join(sorted(fields))}",
-        flush=True,
-    )
-
-    return fields
-
 
 def costruisci_prepare_input(
     receiver_slug,
     receive_asset_ids,
     amount_cents,
 ):
-    fields = get_input_fields(
-        "prepareOfferInput"
-    )
-
-    if not fields:
+    if not receiver_slug:
         print(
-            "❌ Impossibile leggere "
-            "prepareOfferInput.",
+            "❌ receiver_slug mancante.",
             flush=True,
         )
         return None
 
-    input_data = {}
+    if not receive_asset_ids:
+        print(
+            "❌ receive_asset_ids vuoto.",
+            flush=True,
+        )
+        return None
 
-    # Tipo dell'offerta
-    if "type" in fields:
-        input_data["type"] = "DIRECT_OFFER"
+    return {
+        "type": "DIRECT_OFFER",
 
-    # Carte che NOI cediamo.
-    # Deve rimanere vuoto: Kulenovic NON viene ceduto.
-    if "sendAssetIds" in fields:
-        input_data["sendAssetIds"] = []
+        # NOI NON CEDIAMO CARTE.
+        "sendAssetIds": [],
 
-    # Carte che NOI riceviamo.
-    if "receiveAssetIds" in fields:
-        input_data[
-            "receiveAssetIds"
-        ] = receive_asset_ids
+        # NOI RICEVIAMO LE CARTE IDONEE.
+        "receiveAssetIds": receive_asset_ids,
 
-    # Soldi che NOI paghiamo.
-    if "sendAmount" in fields:
-        input_data["sendAmount"] = {
+        # NOI PAGHIAMO.
+        #
+        # Sorare usa gli EUR come amount espresso
+        # nell'unità prevista dall'API.
+        "sendAmount": {
             "amount": str(amount_cents),
             "currency": "EUR",
-        }
+        },
 
-    # Alcune versioni dello schema richiedono
-    # anche le valute di regolamento.
-    if "settlementCurrencies" in fields:
-        input_data[
-            "settlementCurrencies"
-        ] = ["EUR"]
+        # Destinatario della Direct Offer.
+        "receiverSlug": receiver_slug,
 
-    # Destinatario della controproposta.
-    if "receiverSlug" in fields:
-        input_data[
-            "receiverSlug"
-        ] = receiver_slug
+        # ID univoco.
+        "clientMutationId": str(uuid.uuid4()),
+    }
 
-    # ID client.
-    if "clientMutationId" in fields:
-        input_data[
-            "clientMutationId"
-        ] = str(uuid.uuid4())
 
-    # Controllo esplicito dei campi essenziali.
-    required_logic = [
-        "sendAssetIds",
-        "receiveAssetIds",
-        "sendAmount",
-        "receiverSlug",
-    ]
-
-    missing = [
-        field
-        for field in required_logic
-        if field not in input_data
-    ]
-
-    if missing:
-        print(
-            "❌ prepareOfferInput incompatibile.",
-            flush=True,
-        )
-        print(
-            "   Campi mancanti: "
-            + ", ".join(missing),
-            flush=True,
-        )
-        return None
-
-    return input_data
-
+# ============================================================
+# CREATE DIRECT OFFER INPUT
+# ============================================================
 
 def costruisci_create_input(
     receiver_slug,
@@ -471,91 +375,50 @@ def costruisci_create_input(
     amount_cents,
     approvals,
 ):
-    fields = get_input_fields(
-        "createDirectOfferInput"
-    )
-
-    if not fields:
+    if not receiver_slug:
         print(
-            "❌ Impossibile leggere "
-            "createDirectOfferInput.",
+            "❌ receiver_slug mancante.",
             flush=True,
         )
         return None
 
-    input_data = {}
+    if not receive_asset_ids:
+        print(
+            "❌ receive_asset_ids vuoto.",
+            flush=True,
+        )
+        return None
 
-    if "approvals" in fields:
-        input_data[
-            "approvals"
-        ] = approvals
+    if not approvals:
+        print(
+            "❌ approvals vuote.",
+            flush=True,
+        )
+        return None
 
-    if "dealId" in fields:
-        input_data[
-            "dealId"
-        ] = str(uuid.uuid4())
+    return {
+        "approvals": approvals,
 
-    if "sendAssetIds" in fields:
-        input_data[
-            "sendAssetIds"
-        ] = []
+        "dealId": str(uuid.uuid4()),
 
-    if "receiveAssetIds" in fields:
-        input_data[
-            "receiveAssetIds"
-        ] = receive_asset_ids
+        # NOI NON CEDIAMO KULENOVIC.
+        "sendAssetIds": [],
 
-    if "sendAmount" in fields:
-        input_data[
-            "sendAmount"
-        ] = {
+        # NOI RICEVIAMO SOLO LE CARTE IDONEE.
+        "receiveAssetIds": receive_asset_ids,
+
+        # NOI PAGHIAMO.
+        "sendAmount": {
             "amount": str(amount_cents),
             "currency": "EUR",
-        }
+        },
 
-    if "settlementCurrencies" in fields:
-        input_data[
-            "settlementCurrencies"
-        ] = ["EUR"]
+        # DESTINATARIO.
+        "receiverSlug": receiver_slug,
 
-    if "receiverSlug" in fields:
-        input_data[
-            "receiverSlug"
-        ] = receiver_slug
-
-    if "clientMutationId" in fields:
-        input_data[
-            "clientMutationId"
-        ] = str(uuid.uuid4())
-
-    required_logic = [
-        "approvals",
-        "sendAssetIds",
-        "receiveAssetIds",
-        "sendAmount",
-        "receiverSlug",
-    ]
-
-    missing = [
-        field
-        for field in required_logic
-        if field not in input_data
-    ]
-
-    if missing:
-        print(
-            "❌ createDirectOfferInput "
-            "incompatibile.",
-            flush=True,
-        )
-        print(
-            "   Campi mancanti: "
-            + ", ".join(missing),
-            flush=True,
-        )
-        return None
-
-    return input_data
+        # ID UNIVOCO.
+        "clientMutationId": str(uuid.uuid4()),
+    }
 
 
 # ============================================================
@@ -1257,6 +1120,7 @@ def firma_con_sorare_crypto(
 
     signer_script = r"""
 const fs = require("fs");
+
 const {
   signAuthorizationRequest
 } = require("@sorare/crypto");
@@ -1614,8 +1478,16 @@ def crea_controproposta(
     )
 
     print(
-        "📦 Input prepareOffer costruito "
-        "con lo schema reale Sorare.",
+        "📦 Input prepareOffer:",
+        flush=True,
+    )
+
+    print(
+        json.dumps(
+            prepare_input,
+            indent=2,
+            ensure_ascii=False,
+        ),
         flush=True,
     )
 
@@ -2387,7 +2259,7 @@ def health():
                 "carte idonee -> "
                 "controproposta; "
                 "zero idonee -> rifiuto"
-            ),
+            )
         }
     )
 
