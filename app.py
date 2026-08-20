@@ -25,29 +25,18 @@ def crea_controproposta(offer, cards):
         )
         return False
 
-    send_amount = len(
-        receive_asset_ids
-    ) * PAY
+    send_amount = len(receive_asset_ids) * PAY
 
     print(
         "\n========================================",
         flush=True,
     )
-
-    print(
-        "🟢 CONTROPROPOSTA",
-        flush=True,
-    )
-
+    print("🟢 CONTROPROPOSTA", flush=True)
     print(
         f"👤 Destinatario: {receiver_slug}",
         flush=True,
     )
-
-    print(
-        "📥 Carte che riceviamo:",
-        flush=True,
-    )
+    print("📥 Carte che riceviamo:", flush=True)
 
     for card in cards:
         print(
@@ -60,16 +49,13 @@ def crea_controproposta(offer, cards):
         )
 
     print(
-        f"💰 Pagamento: "
-        f"€{send_amount / 100:.2f}",
+        f"💰 Pagamento: €{send_amount / 100:.2f}",
         flush=True,
     )
-
     print(
         "🎯 Kulenovic: NON viene ceduto",
         flush=True,
     )
-
     print(
         "========================================",
         flush=True,
@@ -93,21 +79,13 @@ def crea_controproposta(offer, cards):
 
     # ==========================================================
     # PREPARE OFFER
-    #
-    # IMPORTANTE:
-    # receiverSlug NON va più dentro prepareOfferInput.
-    # Sorare lo richiede come ARGOMENTO della mutation.
     # ==========================================================
 
     prepare_mutation = """
         mutation PrepareOffer(
             $input: prepareOfferInput!
-            $receiverSlug: String
         ) {
-            prepareOffer(
-                input: $input
-                receiverSlug: $receiverSlug
-            ) {
+            prepareOffer(input: $input) {
                 authorizations {
                     fingerprint
 
@@ -166,10 +144,6 @@ def crea_controproposta(offer, cards):
         }
     """
 
-    # ==========================================================
-    # QUI NON C'E' PIU' receiverSlug
-    # ==========================================================
-
     prepare_input = {
         "type": "DIRECT_OFFER",
 
@@ -185,9 +159,10 @@ def crea_controproposta(offer, cards):
             "currency": "EUR",
         },
 
-        "clientMutationId": str(
-            uuid.uuid4()
-        ),
+        # DESTINATARIO
+        "receiverSlug": receiver_slug,
+
+        "clientMutationId": str(uuid.uuid4()),
     }
 
     print(
@@ -195,13 +170,9 @@ def crea_controproposta(offer, cards):
         flush=True,
     )
 
-    # receiverSlug viene passato SEPARATAMENTE
     data = graphql(
         prepare_mutation,
-        {
-            "input": prepare_input,
-            "receiverSlug": receiver_slug,
-        },
+        {"input": prepare_input},
     )
 
     if not data:
@@ -245,8 +216,7 @@ def crea_controproposta(offer, cards):
         return False
 
     authorizations = (
-        result.get("authorizations")
-        or []
+        result.get("authorizations") or []
     )
 
     if not authorizations:
@@ -262,8 +232,7 @@ def crea_controproposta(offer, cards):
     )
 
     print(
-        f"🔐 Autorizzazioni: "
-        f"{len(authorizations)}",
+        f"🔐 Autorizzazioni: {len(authorizations)}",
         flush=True,
     )
 
@@ -290,8 +259,7 @@ def crea_controproposta(offer, cards):
         return False
 
     print(
-        f"✅ Approval firmate: "
-        f"{len(approvals)}",
+        f"✅ Approval firmate: {len(approvals)}",
         flush=True,
     )
 
@@ -320,16 +288,13 @@ def crea_controproposta(offer, cards):
     create_input = {
         "approvals": approvals,
 
-        "dealId": str(
-            uuid.uuid4()
-        ),
+        "dealId": str(uuid.uuid4()),
 
         # NOI NON CEDIAMO KULENOVIC
         "sendAssetIds": [],
 
         # NOI RICEVIAMO LE CARTE IDONEE
-        "receiveAssetIds":
-            receive_asset_ids,
+        "receiveAssetIds": receive_asset_ids,
 
         # NOI PAGHIAMO
         "sendAmount": {
@@ -339,9 +304,7 @@ def crea_controproposta(offer, cards):
 
         "receiverSlug": receiver_slug,
 
-        "clientMutationId": str(
-            uuid.uuid4()
-        ),
+        "clientMutationId": str(uuid.uuid4()),
     }
 
     print(
@@ -367,15 +330,13 @@ def crea_controproposta(offer, cards):
 
     if not create_result:
         print(
-            "❌ createDirectOffer: "
-            "risposta vuota.",
+            "❌ createDirectOffer: risposta vuota.",
             flush=True,
         )
         return False
 
     create_errors = (
-        create_result.get("errors")
-        or []
+        create_result.get("errors") or []
     )
 
     if create_errors:
@@ -400,8 +361,7 @@ def crea_controproposta(offer, cards):
         return False
 
     token_offer = (
-        create_result.get("tokenOffer")
-        or {}
+        create_result.get("tokenOffer") or {}
     )
 
     offer_id = token_offer.get("id")
@@ -418,33 +378,26 @@ def crea_controproposta(offer, cards):
         "\n========================================",
         flush=True,
     )
-
     print(
         "✅ CONTROPROPOSTA INVIATA REALMENTE",
         flush=True,
     )
-
     print(
         f"🆔 Offerta: {offer_id}",
         flush=True,
     )
-
     print(
         f"👤 Destinatario: {receiver_slug}",
         flush=True,
     )
-
     print(
-        f"💰 Pagamento: "
-        f"€{send_amount / 100:.2f}",
+        f"💰 Pagamento: €{send_amount / 100:.2f}",
         flush=True,
     )
-
     print(
         "🎯 Kulenovic NON è stato ceduto.",
         flush=True,
     )
-
     print(
         "========================================",
         flush=True,
