@@ -18,7 +18,7 @@ app = Flask(__name__)
 # CONFIGURAZIONE
 # ============================================================
 
-URL = "https://api.sorare.com/federation/graphql"
+URL = "https://api.sorare.com/graphql"
 
 TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
