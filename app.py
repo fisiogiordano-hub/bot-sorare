@@ -49,101 +49,76 @@ CAMPIONATI = {
     "english-league": "English League",
     "premier-league-eng": "English League",
     "premier-league": "English League",
-
     "ligue-1-fr": "Ligue 1",
     "ligue-1": "Ligue 1",
-
     "laliga-es": "LALIGA EA SPORTS",
     "laliga": "LALIGA EA SPORTS",
     "la-liga": "LALIGA EA SPORTS",
     "laliga-ea-sports": "LALIGA EA SPORTS",
-
     "bundesliga-de": "Bundesliga",
     "bundesliga": "Bundesliga",
-
     "liga-portugal": "Liga Portugal",
     "primeira-liga-pt": "Liga Portugal",
     "liga-portugal-pt": "Liga Portugal",
-
     "eredivisie-nl": "Eredivisie",
     "eredivisie": "Eredivisie",
-
     "jupiler-pro-league-be": "Jupiler Pro League",
     "jupiler-pro-league": "Jupiler Pro League",
-
     "scottish-premiership-sco": "Scottish Premiership",
     "scottish-premiership": "Scottish Premiership",
-
     "jleague-jp": "J.League",
     "j1-league-jp": "J.League",
     "j-league": "J.League",
     "j1-league": "J.League",
-
     "second-division-eng": "Seconda divisione inglese",
     "championship-eng": "Seconda divisione inglese",
     "english-championship": "Seconda divisione inglese",
     "championship": "Seconda divisione inglese",
-
     "austrian-bundesliga-at": "Austrian Bundesliga",
     "austrian-bundesliga": "Austrian Bundesliga",
     "bundesliga-at": "Austrian Bundesliga",
-
     "croatian-hnl-hr": "Croatian HNL",
     "croatian-first-league-hr": "Croatian HNL",
     "croatian-first-league": "Croatian HNL",
     "croatian-hnl": "Croatian HNL",
     "supersport-hnl": "Croatian HNL",
-
     "2-bundesliga-de": "2. Bundesliga",
     "2-bundesliga": "2. Bundesliga",
-
     "ligue-2-fr": "Ligue 2",
     "ligue-2": "Ligue 2",
-
     "mls-us": "MLS",
     "major-league-soccer-us": "MLS",
     "major-league-soccer": "MLS",
     "mls": "MLS",
-
     "k-league-1-kr": "K League",
     "k-league-1": "K League",
     "k-league": "K League",
-
     "super-lig-tr": "Turchia",
     "super-lig": "Turchia",
     "turkish-super-lig": "Turchia",
-
     "superliga-dk": "Danimarca",
     "superliga": "Danimarca",
     "danish-superliga": "Danimarca",
-
     "serie-a-it": "Serie A",
     "serie-a": "Serie A",
-
     "brasileirao-serie-a-br": "Brasile",
     "brasileirao-serie-a": "Brasile",
     "brasileirao": "Brasile",
     "serie-a-br": "Brasile",
-
     "premier-liga-ru": "Russia",
     "russian-premier-league": "Russia",
     "premier-liga": "Russia",
     "russia-premier-league": "Russia",
-
     "serie-b-it": "Serie B",
     "serie-b": "Serie B",
-
     "liga-1-peru": "Perù",
     "liga-1-pe": "Perù",
     "peruvian-primera-division": "Perù",
-
     "primera-a-colombia": "Colombia",
     "liga-betplay-col": "Colombia",
     "primera-a": "Colombia",
     "liga-betplay": "Colombia",
-
     "liga-mx": "Messico",
-
     "laliga-2-es": "LALIGA 2",
     "laliga-hypermotion": "LALIGA 2",
     "laliga-2": "LALIGA 2",
@@ -177,9 +152,7 @@ def slug(value):
 
 def headers():
     if not TOKEN:
-        raise RuntimeError(
-            "SORARE_JWT_TOKEN non configurato."
-        )
+        raise RuntimeError("SORARE_JWT_TOKEN non configurato.")
 
     token = TOKEN
 
@@ -190,7 +163,7 @@ def headers():
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Authorization": token,
-        "User-Agent": "Sorare-Python-Bot/6.0",
+        "User-Agent": "Sorare-Python-Bot/7.0",
     }
 
     if AUD:
@@ -255,17 +228,11 @@ def graphql(query, variables=None):
             try:
                 data = response.json()
             except Exception:
-                print(
-                    "❌ Risposta JSON non valida.",
-                    flush=True,
-                )
+                print("❌ Risposta JSON non valida.", flush=True)
                 return None
 
             if data.get("errors"):
-                print(
-                    "❌ Errore GraphQL:",
-                    flush=True,
-                )
+                print("❌ Errore GraphQL:", flush=True)
 
                 for error in data["errors"]:
                     print(
@@ -322,36 +289,20 @@ def verifica_account():
     )
 
     if not user:
-        print(
-            "❌ currentUser non disponibile.",
-            flush=True,
-        )
+        print("❌ currentUser non disponibile.", flush=True)
         return False
 
-    print(
-        "========================================",
-        flush=True,
-    )
-
-    print(
-        "✅ AUTENTICAZIONE SORARE RIUSCITA",
-        flush=True,
-    )
-
+    print("========================================", flush=True)
+    print("✅ AUTENTICAZIONE SORARE RIUSCITA", flush=True)
     print(
         f"👤 Manager: {user.get('nickname') or 'N/D'}",
         flush=True,
     )
-
     print(
         f"🔗 Slug: {user.get('slug') or 'N/D'}",
         flush=True,
     )
-
-    print(
-        "========================================",
-        flush=True,
-    )
+    print("========================================", flush=True)
 
     return True
 
@@ -547,9 +498,7 @@ def public(card):
 
     for value in values:
         try:
-            cents = int(
-                value.get("eurCents")
-            )
+            cents = int(value.get("eurCents"))
 
             if cents > 0:
                 prices.append(cents)
@@ -608,21 +557,15 @@ def controlla_squadra(card):
     club = player.get("activeClub")
 
     if not isinstance(club, dict):
-        print(
-            "      🏟️ Squadra attiva: NESSUNA",
-            flush=True,
-        )
-
+        print("      🏟️ Squadra attiva: NESSUNA", flush=True)
         print(
             f"      👤 Giocatore: {player_name}",
             flush=True,
         )
-
         print(
             "      🔴 GIOCATORE SENZA SQUADRA",
             flush=True,
         )
-
         return False
 
     print(
@@ -631,10 +574,7 @@ def controlla_squadra(card):
         flush=True,
     )
 
-    competitions = (
-        club.get("activeCompetitions")
-        or []
-    )
+    competitions = club.get("activeCompetitions") or []
 
     if not competitions:
         print(
@@ -646,10 +586,7 @@ def controlla_squadra(card):
     found = []
 
     for competition in competitions:
-        if not isinstance(
-            competition,
-            dict,
-        ):
+        if not isinstance(competition, dict):
             continue
 
         competition_slug = slug(
@@ -668,10 +605,7 @@ def controlla_squadra(card):
         )
         return False
 
-    print(
-        "      🟢 CAMPIONATO COPERTO",
-        flush=True,
-    )
+    print("      🟢 CAMPIONATO COPERTO", flush=True)
 
     for championship in dict.fromkeys(found):
         print(
@@ -702,10 +636,7 @@ def analizza_carta(card):
 
     price = floor(card)
 
-    print(
-        f"\n   📄 {name}",
-        flush=True,
-    )
+    print(f"\n   📄 {name}", flush=True)
 
     print(
         f"      Asset ID: "
@@ -730,7 +661,6 @@ def analizza_carta(card):
             "      🔴 Prezzo floor NON verificabile",
             flush=True,
         )
-
         price_ok = False
 
     else:
@@ -740,9 +670,7 @@ def analizza_carta(card):
             flush=True,
         )
 
-        price_ok = (
-            MIN_PRICE <= price <= MAX_PRICE
-        )
+        price_ok = MIN_PRICE <= price <= MAX_PRICE
 
         print(
             "      🟢 Prezzo valido"
@@ -762,11 +690,7 @@ def analizza_carta(card):
 
     club_ok = controlla_squadra(card)
 
-    valid = (
-        price_ok
-        and rarity_ok
-        and club_ok
-    )
+    valid = price_ok and rarity_ok and club_ok
 
     print(
         "      🟢 CARTA IDONEA"
@@ -789,9 +713,7 @@ def kulenovic_richiesto(cards):
     }
 
     if KID:
-        wanted.add(
-            KID.lower()
-        )
+        wanted.add(KID.lower())
 
     for card in cards:
         if not isinstance(card, dict):
@@ -805,15 +727,11 @@ def kulenovic_richiesto(cards):
             card.get("slug") or ""
         ).lower()
 
-        if (
-            asset in wanted
-            or card_slug in wanted
-        ):
+        if asset in wanted or card_slug in wanted:
             print(
                 "🎯 KULENOVIC RICONOSCIUTO!",
                 flush=True,
             )
-
             return True
 
     return False
@@ -846,11 +764,9 @@ def rifiuta_offerta(offer):
 
     if not blockchain_id:
         print(
-            "❌ Rifiuto fallito: "
-            "blockchainId mancante.",
+            "❌ Rifiuto fallito: blockchainId mancante.",
             flush=True,
         )
-
         return False
 
     data = graphql(
@@ -874,9 +790,7 @@ def rifiuta_offerta(offer):
         {
             "input": {
                 "blockchainId": blockchain_id,
-                "clientMutationId": str(
-                    uuid.uuid4()
-                ),
+                "clientMutationId": str(uuid.uuid4()),
             }
         },
     )
@@ -904,13 +818,9 @@ def rifiuta_offerta(offer):
                 ),
                 flush=True,
             )
-
         return False
 
-    token_offer = (
-        result.get("tokenOffer")
-        or {}
-    )
+    token_offer = result.get("tokenOffer") or {}
 
     print(
         "✅ OFFERTA RIFIUTATA REALMENTE: "
@@ -936,9 +846,7 @@ def firma_con_sorare_crypto(authorizations):
     node = trova_node()
 
     if not node:
-        raise RuntimeError(
-            "Node.js non disponibile."
-        )
+        raise RuntimeError("Node.js non disponibile.")
 
     signer_script = r"""
 const fs = require("fs");
@@ -974,16 +882,12 @@ function buildApproval(
   }
 
   /*
-   * IMPORTANTISSIMO:
+   * Sorare restituisce "amount".
+   * NON usare amountAsNumber.
    *
-   * GraphQL restituisce il campo "amount".
-   * Python lo riceve attraverso l'alias
-   * amountAsNumber: amount.
-   *
-   * Prima della firma lo convertiamo in
-   * BigInt, perché @sorare/crypto richiede
-   * amount come BigInt per le Starkex
-   * transfer authorization.
+   * Per la firma StarkEx il valore viene
+   * convertito in BigInt solamente qui,
+   * prima di signAuthorizationRequest().
    */
 
   if (
@@ -991,14 +895,12 @@ function buildApproval(
       "StarkexTransferAuthorizationRequest"
   ) {
     if (
-      request.amountAsNumber !== undefined &&
-      request.amountAsNumber !== null
+      request.amount !== undefined &&
+      request.amount !== null
     ) {
       request.amount = BigInt(
-        request.amountAsNumber
+        request.amount
       );
-
-      delete request.amountAsNumber;
     }
   }
 
@@ -1101,9 +1003,7 @@ process.stdout.write(
         )
 
     try:
-        return json.loads(
-            process.stdout
-        )
+        return json.loads(process.stdout)
 
     except json.JSONDecodeError as error:
         raise RuntimeError(
@@ -1146,19 +1046,14 @@ def crea_controproposta(offer, cards):
         )
         return False
 
-    send_amount = (
-        len(receive_asset_ids) * PAY
-    )
+    send_amount = len(receive_asset_ids) * PAY
 
     print(
         "\n========================================",
         flush=True,
     )
 
-    print(
-        "🟢 CONTROPROPOSTA",
-        flush=True,
-    )
+    print("🟢 CONTROPROPOSTA", flush=True)
 
     print(
         f"👤 Destinatario: {receiver_slug}",
@@ -1181,8 +1076,7 @@ def crea_controproposta(offer, cards):
         )
 
     print(
-        f"💰 Pagamento: "
-        f"€{send_amount / 100:.2f}",
+        f"💰 Pagamento: €{send_amount / 100:.2f}",
         flush=True,
     )
 
@@ -1198,40 +1092,20 @@ def crea_controproposta(offer, cards):
 
     if DRY:
         print(
-            "🟡 DRY RUN: "
-            "controproposta NON inviata.",
+            "🟡 DRY RUN: controproposta NON inviata.",
             flush=True,
         )
-
         return True
 
     if not STARK:
         print(
-            "❌ SORARE_STARK_PRIVATE_KEY "
-            "non configurata.",
+            "❌ SORARE_STARK_PRIVATE_KEY non configurata.",
             flush=True,
         )
-
         return False
 
     # ========================================================
     # PREPARE OFFER
-    #
-    # DIRECT_OFFER:
-    #
-    # Noi:
-    #   sendAssetIds   = []
-    #
-    # Riceviamo:
-    #   receiveAssetIds = carte idonee
-    #
-    # Paghiamo:
-    #   sendAmount = EUR
-    #
-    # Destinatario:
-    #   receiverSlug
-    #
-    # NON aggiungere settlementCurrencies.
     # ========================================================
 
     prepare_mutation = """
@@ -1244,6 +1118,23 @@ def crea_controproposta(offer, cards):
 
                     request {
                         __typename
+
+                        ... on StarkexTransferAuthorizationRequest {
+                            amount
+                            condition
+                            expirationTimestamp
+                            nonce
+                            receiverPublicKey
+                            receiverVaultId
+                            senderVaultId
+                            token
+
+                            feeInfoUser {
+                                feeLimit
+                                sourceVaultId
+                                tokenId
+                            }
+                        }
 
                         ... on StarkexLimitOrderAuthorizationRequest {
                             vaultIdSell
@@ -1260,24 +1151,6 @@ def crea_controproposta(offer, cards):
                                 tokenId
                                 sourceVaultId
                             }
-                        }
-
-                        ... on StarkexTransferAuthorizationRequest {
-                            amountAsNumber: amount
-                            condition
-                            expirationTimestamp
-
-                            feeInfoUser {
-                                feeLimit
-                                sourceVaultId
-                                tokenId
-                            }
-
-                            nonce
-                            receiverPublicKey
-                            receiverVaultId
-                            senderVaultId
-                            token
                         }
 
                         ... on MangopayWalletTransferAuthorizationRequest {
@@ -1311,9 +1184,7 @@ def crea_controproposta(offer, cards):
 
         "receiverSlug": receiver_slug,
 
-        "clientMutationId": str(
-            uuid.uuid4()
-        ),
+        "clientMutationId": str(uuid.uuid4()),
     }
 
     print(
@@ -1322,14 +1193,12 @@ def crea_controproposta(offer, cards):
     )
 
     print(
-        f"📦 Riceviamo "
-        f"{len(receive_asset_ids)} carta/e",
+        f"📦 Riceviamo {len(receive_asset_ids)} carta/e",
         flush=True,
     )
 
     print(
-        f"💰 Paghiamo "
-        f"€{send_amount / 100:.2f}",
+        f"💰 Paghiamo €{send_amount / 100:.2f}",
         flush=True,
     )
 
@@ -1350,7 +1219,6 @@ def crea_controproposta(offer, cards):
             "❌ prepareOffer fallito.",
             flush=True,
         )
-
         return False
 
     result = (
@@ -1359,11 +1227,9 @@ def crea_controproposta(offer, cards):
 
     if not result:
         print(
-            "❌ prepareOffer: "
-            "risposta vuota.",
+            "❌ prepareOffer: risposta vuota.",
             flush=True,
         )
-
         return False
 
     errors = result.get("errors") or []
@@ -1394,11 +1260,9 @@ def crea_controproposta(offer, cards):
 
     if not authorizations:
         print(
-            "❌ Nessuna "
-            "AuthorizationRequest.",
+            "❌ Nessuna AuthorizationRequest.",
             flush=True,
         )
-
         return False
 
     print(
@@ -1407,8 +1271,7 @@ def crea_controproposta(offer, cards):
     )
 
     print(
-        f"🔐 Autorizzazioni: "
-        f"{len(authorizations)}",
+        f"🔐 Autorizzazioni: {len(authorizations)}",
         flush=True,
     )
 
@@ -1439,12 +1302,10 @@ def crea_controproposta(offer, cards):
             "❌ Nessuna approval generata.",
             flush=True,
         )
-
         return False
 
     print(
-        f"✅ Approval firmate: "
-        f"{len(approvals)}",
+        f"✅ Approval firmate: {len(approvals)}",
         flush=True,
     )
 
@@ -1473,9 +1334,7 @@ def crea_controproposta(offer, cards):
     create_input = {
         "approvals": approvals,
 
-        "dealId": str(
-            uuid.uuid4()
-        ),
+        "dealId": str(uuid.uuid4()),
 
         "sendAssetIds": [],
 
@@ -1488,9 +1347,7 @@ def crea_controproposta(offer, cards):
 
         "receiverSlug": receiver_slug,
 
-        "clientMutationId": str(
-            uuid.uuid4()
-        ),
+        "clientMutationId": str(uuid.uuid4()),
     }
 
     print(
@@ -1510,7 +1367,6 @@ def crea_controproposta(offer, cards):
             "❌ createDirectOffer fallito.",
             flush=True,
         )
-
         return False
 
     create_result = (
@@ -1519,11 +1375,9 @@ def crea_controproposta(offer, cards):
 
     if not create_result:
         print(
-            "❌ createDirectOffer: "
-            "risposta vuota.",
+            "❌ createDirectOffer: risposta vuota.",
             flush=True,
         )
-
         return False
 
     create_errors = (
@@ -1533,8 +1387,7 @@ def crea_controproposta(offer, cards):
 
     if create_errors:
         print(
-            "❌ Sorare ha rifiutato "
-            "la controproposta:",
+            "❌ Sorare ha rifiutato la controproposta:",
             flush=True,
         )
 
@@ -1560,12 +1413,9 @@ def crea_controproposta(offer, cards):
 
     if not offer_id:
         print(
-            "❌ createDirectOffer "
-            "non ha restituito "
-            "un'offerta.",
+            "❌ createDirectOffer non ha restituito un'offerta.",
             flush=True,
         )
-
         return False
 
     print(
@@ -1574,8 +1424,7 @@ def crea_controproposta(offer, cards):
     )
 
     print(
-        "✅ CONTROPROPOSTA "
-        "INVIATA REALMENTE",
+        "✅ CONTROPROPOSTA INVIATA REALMENTE",
         flush=True,
     )
 
@@ -1585,14 +1434,12 @@ def crea_controproposta(offer, cards):
     )
 
     print(
-        f"👤 Destinatario: "
-        f"{receiver_slug}",
+        f"👤 Destinatario: {receiver_slug}",
         flush=True,
     )
 
     print(
-        f"💰 Pagamento: "
-        f"€{send_amount / 100:.2f}",
+        f"💰 Pagamento: €{send_amount / 100:.2f}",
         flush=True,
     )
 
@@ -1628,47 +1475,24 @@ def elabora_offerta(offer):
         ):
             return
 
-        in_elaborazione.add(
-            offer_id
-        )
+        in_elaborazione.add(offer_id)
 
     done = False
 
     try:
-        sender = (
-            offer.get("sender")
-            or {}
-        )
+        sender = offer.get("sender") or {}
+        sender_side = offer.get("senderSide") or {}
+        receiver_side = offer.get("receiverSide") or {}
 
-        sender_side = (
-            offer.get("senderSide")
-            or {}
-        )
-
-        receiver_side = (
-            offer.get("receiverSide")
-            or {}
-        )
-
-        received = (
-            sender_side.get("anyCards")
-            or []
-        )
-
-        requested = (
-            receiver_side.get("anyCards")
-            or []
-        )
+        received = sender_side.get("anyCards") or []
+        requested = receiver_side.get("anyCards") or []
 
         print(
             "\n========================================",
             flush=True,
         )
 
-        print(
-            "📨 NUOVA OFFERTA",
-            flush=True,
-        )
+        print("📨 NUOVA OFFERTA", flush=True)
 
         print(
             f"🆔 ID: {offer_id}",
@@ -1682,8 +1506,7 @@ def elabora_offerta(offer):
         )
 
         print(
-            f"📌 Stato: "
-            f"{offer.get('status')}",
+            f"📌 Stato: {offer.get('status')}",
             flush=True,
         )
 
@@ -1694,38 +1517,23 @@ def elabora_offerta(offer):
         )
 
         print(
-            f"📦 Carte offerte: "
-            f"{len(received)}",
+            f"📦 Carte offerte: {len(received)}",
             flush=True,
         )
 
         print(
-            f"📦 Carte richieste: "
-            f"{len(requested)}",
+            f"📦 Carte richieste: {len(requested)}",
             flush=True,
         )
 
-        # ----------------------------------------------------
-        # KULENOVIC
-        # ----------------------------------------------------
-
-        if not kulenovic_richiesto(
-            requested
-        ):
+        if not kulenovic_richiesto(requested):
             print(
                 "❌ Kulenovic non richiesto.",
                 flush=True,
             )
 
-            done = rifiuta_offerta(
-                offer
-            )
-
+            done = rifiuta_offerta(offer)
             return
-
-        # ----------------------------------------------------
-        # CARTE RICEVUTE
-        # ----------------------------------------------------
 
         ids = [
             card.get("assetId")
@@ -1742,28 +1550,22 @@ def elabora_offerta(offer):
                 flush=True,
             )
 
-            done = rifiuta_offerta(
-                offer
-            )
-
+            done = rifiuta_offerta(offer)
             return
 
         cards = dettagli_carte(ids)
 
         if cards is None:
             print(
-                "⚠️ Dettagli carte "
-                "non disponibili.",
+                "⚠️ Dettagli carte non disponibili.",
                 flush=True,
             )
-
             return
 
         good = []
 
         print(
-            "\n🔎 ANALISI "
-            "DELLE CARTE RICEVUTE:",
+            "\n🔎 ANALISI DELLE CARTE RICEVUTE:",
             flush=True,
         )
 
@@ -1773,10 +1575,7 @@ def elabora_offerta(offer):
 
         total = len(ids)
         valid = len(good)
-        invalid = max(
-            0,
-            total - valid
-        )
+        invalid = max(0, total - valid)
 
         print(
             "\n----------------------------------------",
@@ -1798,10 +1597,6 @@ def elabora_offerta(offer):
             flush=True,
         )
 
-        # ----------------------------------------------------
-        # NESSUNA CARTA IDONEA
-        # ----------------------------------------------------
-
         if valid == 0:
             print(
                 "\n🔴 NESSUNA CARTA IDONEA",
@@ -1813,19 +1608,11 @@ def elabora_offerta(offer):
                 flush=True,
             )
 
-            done = rifiuta_offerta(
-                offer
-            )
-
+            done = rifiuta_offerta(offer)
             return
 
-        # ----------------------------------------------------
-        # CONTROPROPOSTA
-        # ----------------------------------------------------
-
         print(
-            "\n🟢 DECISIONE: "
-            "CONTROPROPOSTA",
+            "\n🟢 DECISIONE: CONTROPROPOSTA",
             flush=True,
         )
 
@@ -1835,8 +1622,7 @@ def elabora_offerta(offer):
         )
 
         print(
-            "📥 Noi riceviamo SOLO "
-            "le carte idonee:",
+            "📥 Noi riceviamo SOLO le carte idonee:",
             flush=True,
         )
 
@@ -1856,8 +1642,7 @@ def elabora_offerta(offer):
         )
 
         print(
-            f"💰 Pagamento: "
-            f"€{payment:.2f}",
+            f"💰 Pagamento: €{payment:.2f}",
             flush=True,
         )
 
@@ -1868,21 +1653,16 @@ def elabora_offerta(offer):
 
     except Exception as error:
         print(
-            f"❌ Errore offerta "
-            f"{offer_id}: {error}",
+            f"❌ Errore offerta {offer_id}: {error}",
             flush=True,
         )
 
     finally:
         with lock:
-            in_elaborazione.discard(
-                offer_id
-            )
+            in_elaborazione.discard(offer_id)
 
             if done:
-                analizzate.add(
-                    offer_id
-                )
+                analizzate.add(offer_id)
 
 
 # ============================================================
@@ -1892,11 +1672,9 @@ def elabora_offerta(offer):
 def verifica_signer():
     if not STARK:
         print(
-            "❌ SORARE_STARK_PRIVATE_KEY "
-            "non presente.",
+            "❌ SORARE_STARK_PRIVATE_KEY non presente.",
             flush=True,
         )
-
         return False
 
     node = trova_node()
@@ -1906,7 +1684,6 @@ def verifica_signer():
             "❌ Node.js non disponibile.",
             flush=True,
         )
-
         return False
 
     print(
@@ -1940,14 +1717,12 @@ def monitor():
     )
 
     print(
-        "💰 PAGAMENTO: €0,20 "
-        "per ogni carta idonea",
+        "💰 PAGAMENTO: €0,20 per ogni carta idonea",
         flush=True,
     )
 
     print(
-        f"🏆 {len(set(CAMPIONATI.values()))} "
-        "campionati coperti.",
+        f"🏆 {len(set(CAMPIONATI.values()))} campionati coperti.",
         flush=True,
     )
 
@@ -1970,34 +1745,28 @@ def monitor():
 
     if not KID:
         print(
-            "⚠️ KULENOVIC_ID "
-            "non configurato.",
+            "⚠️ KULENOVIC_ID non configurato.",
             flush=True,
         )
 
     if not STARK:
         print(
-            "❌ SORARE_STARK_PRIVATE_KEY "
-            "mancante.",
+            "❌ SORARE_STARK_PRIVATE_KEY mancante.",
             flush=True,
         )
 
     if not verifica_signer():
         print(
-            "❌ Signer Stark "
-            "non disponibile.",
+            "❌ Signer Stark non disponibile.",
             flush=True,
         )
-
         return
 
     if not verifica_account():
         print(
-            "❌ Autenticazione Sorare "
-            "fallita.",
+            "❌ Autenticazione Sorare fallita.",
             flush=True,
         )
-
         return
 
     print(
@@ -2022,20 +1791,16 @@ def monitor():
 
             else:
                 print(
-                    f"📨 Offerte pending ricevute: "
-                    f"{len(offers)}",
+                    f"📨 Offerte pending ricevute: {len(offers)}",
                     flush=True,
                 )
 
                 for offer in offers:
-                    elabora_offerta(
-                        offer
-                    )
+                    elabora_offerta(offer)
 
         except Exception as error:
             print(
-                f"⚠️ Errore monitor: "
-                f"{error}",
+                f"⚠️ Errore monitor: {error}",
                 flush=True,
             )
 
