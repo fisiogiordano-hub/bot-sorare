@@ -28,6 +28,7 @@ DRY_RUN = os.getenv("DRY_RUN", "false").strip().lower() == "true"
 MIN_PRICE = 30
 MAX_PRICE = 80
 PAY_PER_CARD = 20
+MAX_AGE = 28
 INTERVAL = 10
 TIMEOUT = 30
 
@@ -38,80 +39,109 @@ KASSET = (
     "6796b6c0ed10ba0a6"
 )
 
+# ============================================================
+# CAMPIONATI
+# ============================================================
+
 CAMPIONATI = {
     "english-league": "English League",
     "premier-league-eng": "English League",
     "premier-league": "English League",
+
     "ligue-1-fr": "Ligue 1",
     "ligue-1": "Ligue 1",
+
     "laliga-es": "LALIGA EA SPORTS",
     "laliga": "LALIGA EA SPORTS",
     "la-liga": "LALIGA EA SPORTS",
     "laliga-ea-sports": "LALIGA EA SPORTS",
+
     "bundesliga-de": "Bundesliga",
     "bundesliga": "Bundesliga",
+
     "liga-portugal": "Liga Portugal",
     "primeira-liga-pt": "Liga Portugal",
     "liga-portugal-pt": "Liga Portugal",
+
     "eredivisie-nl": "Eredivisie",
     "eredivisie": "Eredivisie",
+
     "jupiler-pro-league-be": "Jupiler Pro League",
     "jupiler-pro-league": "Jupiler Pro League",
+
     "scottish-premiership-sco": "Scottish Premiership",
     "scottish-premiership": "Scottish Premiership",
+
     "jleague-jp": "J.League",
     "j1-league-jp": "J.League",
     "j-league": "J.League",
     "j1-league": "J.League",
+
     "second-division-eng": "Seconda divisione inglese",
     "championship-eng": "Seconda divisione inglese",
     "english-championship": "Seconda divisione inglese",
     "championship": "Seconda divisione inglese",
+
     "austrian-bundesliga-at": "Austrian Bundesliga",
     "austrian-bundesliga": "Austrian Bundesliga",
     "bundesliga-at": "Austrian Bundesliga",
+
     "croatian-hnl-hr": "Croatian HNL",
     "croatian-first-league-hr": "Croatian HNL",
     "croatian-first-league": "Croatian HNL",
     "croatian-hnl": "Croatian HNL",
     "supersport-hnl": "Croatian HNL",
+
     "2-bundesliga-de": "2. Bundesliga",
     "2-bundesliga": "2. Bundesliga",
+
     "ligue-2-fr": "Ligue 2",
     "ligue-2": "Ligue 2",
+
     "mls-us": "MLS",
     "major-league-soccer-us": "MLS",
     "major-league-soccer": "MLS",
     "mls": "MLS",
+
     "k-league-1-kr": "K League",
     "k-league-1": "K League",
     "k-league": "K League",
+
     "super-lig-tr": "Turchia",
     "super-lig": "Turchia",
     "turkish-super-lig": "Turchia",
+
     "superliga-dk": "Danimarca",
     "superliga": "Danimarca",
     "danish-superliga": "Danimarca",
+
     "serie-a-it": "Serie A",
     "serie-a": "Serie A",
+
     "serie-b-it": "Serie B",
     "serie-b": "Serie B",
+
     "brasileirao-serie-a-br": "Brasile",
     "brasileirao-serie-a": "Brasile",
     "brasileirao": "Brasile",
     "serie-a-br": "Brasile",
+
     "premier-liga-ru": "Russia",
     "russian-premier-league": "Russia",
     "premier-liga": "Russia",
     "russia-premier-league": "Russia",
+
     "liga-1-peru": "Perù",
     "liga-1-pe": "Perù",
     "peruvian-primera-division": "Perù",
+
     "primera-a-colombia": "Colombia",
     "liga-betplay-col": "Colombia",
     "primera-a": "Colombia",
     "liga-betplay": "Colombia",
+
     "liga-mx": "Messico",
+
     "laliga-2-es": "LALIGA 2",
     "laliga-hypermotion": "LALIGA 2",
     "laliga-2": "LALIGA 2",
@@ -127,7 +157,6 @@ state_lock = threading.Lock()
 
 _worker_started = False
 _worker_lock = threading.Lock()
-
 
 # ============================================================
 # UTILITY
@@ -151,18 +180,17 @@ def auth_headers():
     if not token.lower().startswith("bearer "):
         token = "Bearer " + token
 
-    result = {
+    headers = {
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "Sorare-Bot/9.0",
+        "User-Agent": "Sorare-Bot/10.0",
     }
 
     if AUD:
-        result["JWT-AUD"] = AUD
+        headers["JWT-AUD"] = AUD
 
-    return result
-
+    return headers
 
 # ============================================================
 # GRAPHQL
@@ -213,7 +241,6 @@ def graphql(query, variables=None):
                     f"{response.text[:500]}",
                     flush=True,
                 )
-
                 time.sleep(attempt)
                 continue
 
@@ -232,27 +259,19 @@ def graphql(query, variables=None):
                         error.get("message", "Errore"),
                         flush=True,
                     )
-
                 return None
 
             return data
 
         except requests.RequestException as error:
-            print(
-                f"❌ HTTP: {error}",
-                flush=True,
-            )
+            print(f"❌ HTTP: {error}", flush=True)
             time.sleep(attempt)
 
         except Exception as error:
-            print(
-                f"❌ GraphQL: {error}",
-                flush=True,
-            )
+            print(f"❌ GraphQL: {error}", flush=True)
             return None
 
     return None
-
 
 # ============================================================
 # ACCOUNT
@@ -275,10 +294,7 @@ def check_account():
     )
 
     if not user:
-        print(
-            "❌ Account Sorare non verificato",
-            flush=True,
-        )
+        print("❌ Account Sorare non verificato", flush=True)
         return False
 
     print(
@@ -288,7 +304,6 @@ def check_account():
     )
 
     return True
-
 
 # ============================================================
 # OFFERTE
@@ -340,9 +355,8 @@ def get_offers():
         .get("pendingTokenOffersReceived") or {}
     ).get("nodes") or []
 
-
 # ============================================================
-# CARTE
+# DETTAGLI CARTE
 # ============================================================
 
 def card_details(asset_ids):
@@ -367,6 +381,7 @@ def card_details(asset_ids):
 
                 anyPlayer {
                     displayName
+                    age
 
                     activeClub {
                         slug
@@ -414,6 +429,9 @@ def card_details(asset_ids):
         .get("anyCards") or []
     )
 
+# ============================================================
+# PREZZO
+# ============================================================
 
 def card_price(card):
     values = []
@@ -456,7 +474,6 @@ def card_price(card):
 
     return min(values) if values else None
 
-
 # ============================================================
 # KULENOVIC
 # ============================================================
@@ -483,7 +500,6 @@ def is_kulenovic(card):
         or card_slug in wanted
     )
 
-
 # ============================================================
 # CONTROLLO CARTA
 # ============================================================
@@ -499,12 +515,52 @@ def valid_card(card):
         card.get("rarityTyped") or ""
     ).upper()
 
+    player = card.get("anyPlayer") or {}
+
+    age = player.get("age")
     price = card_price(card)
 
     print(
         f"   📄 {name}",
         flush=True,
     )
+
+    # --------------------------------------------------------
+    # ETÀ
+    # --------------------------------------------------------
+
+    if age is None:
+        print(
+            "      ❌ Età non disponibile",
+            flush=True,
+        )
+        return False
+
+    try:
+        age = int(age)
+    except (TypeError, ValueError):
+        print(
+            f"      ❌ Età non valida: {age}",
+            flush=True,
+        )
+        return False
+
+    print(
+        f"      🎂 Età: {age} anni",
+        flush=True,
+    )
+
+    if age >= MAX_AGE:
+        print(
+            f"      ❌ Età troppo alta "
+            f"(limite: meno di {MAX_AGE})",
+            flush=True,
+        )
+        return False
+
+    # --------------------------------------------------------
+    # PREZZO
+    # --------------------------------------------------------
 
     if price is None:
         print(
@@ -525,6 +581,10 @@ def valid_card(card):
         )
         return False
 
+    # --------------------------------------------------------
+    # RARITÀ
+    # --------------------------------------------------------
+
     if rarity != "LIMITED":
         print(
             f"      ❌ Rarità: {rarity}",
@@ -532,7 +592,10 @@ def valid_card(card):
         )
         return False
 
-    player = card.get("anyPlayer") or {}
+    # --------------------------------------------------------
+    # SQUADRA
+    # --------------------------------------------------------
+
     club = player.get("activeClub")
 
     if not isinstance(club, dict):
@@ -541,6 +604,10 @@ def valid_card(card):
             flush=True,
         )
         return False
+
+    # --------------------------------------------------------
+    # CAMPIONATO
+    # --------------------------------------------------------
 
     covered = []
 
@@ -567,16 +634,17 @@ def valid_card(card):
         return False
 
     print(
-        f"      ✅ LIMITED / €{price / 100:.2f} / "
+        f"      ✅ VALIDATA | "
+        f"{age} anni | "
+        f"€{price / 100:.2f} | "
         f"{', '.join(dict.fromkeys(covered))}",
         flush=True,
     )
 
     return True
 
-
 # ============================================================
-# RIFIUTO
+# RIFIUTO OFFERTA
 # ============================================================
 
 def reject_offer(offer):
@@ -639,7 +707,6 @@ def reject_offer(offer):
                 error.get("message", "Errore"),
                 flush=True,
             )
-
         return False
 
     print(
@@ -648,7 +715,6 @@ def reject_offer(offer):
     )
 
     return True
-
 
 # ============================================================
 # FIRMA SORARE
@@ -781,7 +847,6 @@ process.stdout.write(
             "Risposta firma non valida"
         ) from error
 
-
 # ============================================================
 # CONTROPROPOSTA
 # ============================================================
@@ -807,9 +872,7 @@ def counter_offer(offer, cards):
         )
         return False
 
-    amount = (
-        len(asset_ids) * PAY_PER_CARD
-    )
+    amount = len(asset_ids) * PAY_PER_CARD
 
     print(
         f"🟢 Controproposta: "
@@ -930,7 +993,6 @@ def counter_offer(offer, cards):
                 error.get("message", "Errore"),
                 flush=True,
             )
-
         return False
 
     authorizations = (
@@ -1005,7 +1067,6 @@ def counter_offer(offer, cards):
                 error.get("message", "Errore"),
                 flush=True,
             )
-
         return False
 
     token_offer = (
@@ -1033,7 +1094,6 @@ def counter_offer(offer, cards):
     )
 
     return True
-
 
 # ============================================================
 # ELABORAZIONE OFFERTA
@@ -1073,8 +1133,8 @@ def process_offer(offer):
         .get("anyCards") or []
     )
 
-    # Kulenovic deve essere tra le carte che
-    # l'offerta originale vuole ricevere.
+    # Kulenovic deve essere nella parte che
+    # l'altra persona vuole ricevere.
     if not any(
         is_kulenovic(card)
         for card in receiver_cards
@@ -1118,14 +1178,68 @@ def process_offer(offer):
         flush=True,
     )
 
+    # --------------------------------------------------------
+    # FILTRO CARTE
+    # --------------------------------------------------------
+
+    valid_cards = []
+
     for card in cards:
-        if not valid_card(card):
+        if valid_card(card):
+            valid_cards.append(card)
+
+    print(
+        f"📊 Carte valide: "
+        f"{len(valid_cards)}/{len(cards)}",
+        flush=True,
+    )
+
+    # --------------------------------------------------------
+    # NESSUNA CARTA VALIDA
+    # --------------------------------------------------------
+
+    if not valid_cards:
+        print(
+            "❌ Nessuna carta idonea.",
+            flush=True,
+        )
+
+        if all(
+            isinstance(card.get("anyPlayer"), dict)
+            and card.get("anyPlayer", {}).get("age") is not None
+            and int(card.get("anyPlayer", {}).get("age")) >= MAX_AGE
+            for card in cards
+        ):
             print(
-                "❌ Offerta non idonea",
+                f"🚫 Tutte le carte hanno "
+                f"{MAX_AGE} anni o più.",
                 flush=True,
             )
-            return
 
+        print(
+            "🔴 Rifiuto dell'offerta.",
+            flush=True,
+        )
+
+        reject_offer(offer)
+        return
+
+    # --------------------------------------------------------
+    # CI SONO CARTE VALIDE
+    # --------------------------------------------------------
+
+    rejected_count = len(cards) - len(valid_cards)
+
+    if rejected_count:
+        print(
+            f"⚠️ {rejected_count} carta/e "
+            f"esclusa/e dal limite di età/"
+            f"criteri.",
+            flush=True,
+        )
+
+    # Prima rifiutiamo l'offerta originale,
+    # perché contiene Kulenovic.
     if not reject_offer(offer):
         print(
             "❌ Impossibile rifiutare "
@@ -1134,11 +1248,11 @@ def process_offer(offer):
         )
         return
 
+    # Poi proponiamo solo le carte valide.
     counter_offer(
         offer,
-        cards,
+        valid_cards,
     )
-
 
 # ============================================================
 # WORKER
@@ -1160,6 +1274,12 @@ def worker():
         f"📊 Range floor: "
         f"€{MIN_PRICE / 100:.2f} - "
         f"€{MAX_PRICE / 100:.2f}",
+        flush=True,
+    )
+
+    print(
+        f"🎂 Età massima: "
+        f"meno di {MAX_AGE} anni",
         flush=True,
     )
 
@@ -1205,6 +1325,9 @@ def worker():
             )
             time.sleep(INTERVAL)
 
+# ============================================================
+# START WORKER
+# ============================================================
 
 def start_worker():
     global _worker_started
@@ -1232,7 +1355,6 @@ def start_worker():
             flush=True,
         )
 
-
 # ============================================================
 # FLASK / RENDER
 # ============================================================
@@ -1245,6 +1367,7 @@ def home():
         "dry_run": DRY_RUN,
         "pay_per_card_cents": PAY_PER_CARD,
         "interval_seconds": INTERVAL,
+        "max_age": MAX_AGE,
     })
 
 
