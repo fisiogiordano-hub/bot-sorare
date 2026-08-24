@@ -12,16 +12,32 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
+
 # ============================================================
 # CONFIG
 # ============================================================
 
 URL = "https://api.sorare.com/graphql"
 
-TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
-AUD = os.getenv("SORARE_JWT_AUD", "").strip()
-STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
-KID = os.getenv("KULENOVIC_ID", "").strip()
+TOKEN = os.getenv(
+    "SORARE_JWT_TOKEN",
+    ""
+).strip()
+
+AUD = os.getenv(
+    "SORARE_JWT_AUD",
+    ""
+).strip()
+
+STARK = os.getenv(
+    "SORARE_STARK_PRIVATE_KEY",
+    ""
+).strip()
+
+KID = os.getenv(
+    "KULENOVIC_ID",
+    ""
+).strip()
 
 DRY_RUN = (
     os.getenv("DRY_RUN", "false")
@@ -32,314 +48,24 @@ DRY_RUN = (
 
 MIN_PRICE = 30
 MAX_PRICE = 80
+
+# 20 centesimi = 20 EUR cents
 PAY_PER_CARD = 20
+
 MAX_AGE = 28
+
 INTERVAL = 10
 TIMEOUT = 30
 
-KSLUG = "sandro-kulenovic-2025-limited-385"
+
+KSLUG = (
+    "sandro-kulenovic-2025-limited-385"
+)
 
 KASSET = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
     "6796b6c0ed10ba0a6"
 )
-
-# ============================================================
-# CAMPIONATI / COMPETIZIONI CONOSCIUTE
-#
-# Queste servono soprattutto per dare un nome leggibile
-# alla competizione restituita da Sorare.
-#
-# IMPORTANTE:
-# il bot NON si limita più a questo dizionario.
-#
-# Se Sorare restituisce una nuova competizione attiva che
-# non è presente qui, la carta viene comunque considerata
-# coperta e lo slug viene mostrato nei log.
-# ============================================================
-
-CAMPIONATI = {
-
-    # --------------------------------------------------------
-    # INGHILTERRA
-    # --------------------------------------------------------
-
-    "english-league": "English League",
-    "premier-league-eng": "English League",
-    "premier-league": "English League",
-    "english-premier-league": "English League",
-
-    "second-division-eng": "English Second Division",
-    "championship-eng": "English Second Division",
-    "english-championship": "English Second Division",
-    "championship": "English Second Division",
-
-    # --------------------------------------------------------
-    # FRANCIA
-    # --------------------------------------------------------
-
-    "ligue-1-fr": "Ligue 1",
-    "ligue-1": "Ligue 1",
-    "ligue-1-mcdonalds": "Ligue 1",
-
-    "ligue-2-fr": "Ligue 2",
-    "ligue-2": "Ligue 2",
-    "ligue-2-bkt": "Ligue 2",
-
-    # --------------------------------------------------------
-    # SPAGNA
-    # --------------------------------------------------------
-
-    "laliga-es": "LALIGA EA SPORTS",
-    "laliga": "LALIGA EA SPORTS",
-    "la-liga": "LALIGA EA SPORTS",
-    "laliga-ea-sports": "LALIGA EA SPORTS",
-
-    "laliga-2-es": "LALIGA HYPERMOTION",
-    "laliga-hypermotion": "LALIGA HYPERMOTION",
-    "laliga-2": "LALIGA HYPERMOTION",
-    "segunda-division-spain": "LALIGA HYPERMOTION",
-
-    # --------------------------------------------------------
-    # GERMANIA
-    # --------------------------------------------------------
-
-    "bundesliga-de": "Bundesliga",
-    "bundesliga": "Bundesliga",
-
-    "2-bundesliga-de": "2. Bundesliga",
-    "2-bundesliga": "2. Bundesliga",
-
-    # --------------------------------------------------------
-    # ITALIA
-    # --------------------------------------------------------
-
-    "serie-a-it": "Serie A",
-    "serie-a": "Serie A",
-
-    "serie-b-it": "Serie B",
-    "serie-b": "Serie B",
-
-    # --------------------------------------------------------
-    # PORTOGALLO
-    # --------------------------------------------------------
-
-    "liga-portugal": "Primeira Liga",
-    "primeira-liga-pt": "Primeira Liga",
-    "liga-portugal-pt": "Primeira Liga",
-    "primeira-liga": "Primeira Liga",
-
-    # --------------------------------------------------------
-    # OLANDA
-    # --------------------------------------------------------
-
-    "eredivisie-nl": "Eredivisie",
-    "eredivisie": "Eredivisie",
-    "vriendenloterij-eredivisie": "Eredivisie",
-
-    # --------------------------------------------------------
-    # BELGIO
-    # --------------------------------------------------------
-
-    "jupiler-pro-league-be": "Jupiler Pro League",
-    "jupiler-pro-league": "Jupiler Pro League",
-
-    # --------------------------------------------------------
-    # SCOZIA
-    # --------------------------------------------------------
-
-    "scottish-premiership-sco": "Scottish Premiership",
-    "scottish-premiership": "Scottish Premiership",
-
-    # --------------------------------------------------------
-    # GIAPPONE
-    # --------------------------------------------------------
-
-    "jleague-jp": "J.League",
-    "j1-league-jp": "J.League",
-    "j-league": "J.League",
-    "j1-league": "J.League",
-    "j1-100-year-vision-league": "J1 100 Year Vision League",
-
-    # --------------------------------------------------------
-    # AUSTRIA
-    # --------------------------------------------------------
-
-    "austrian-bundesliga-at": "Austrian Bundesliga",
-    "austrian-bundesliga": "Austrian Bundesliga",
-    "bundesliga-at": "Austrian Bundesliga",
-
-    # --------------------------------------------------------
-    # CROAZIA
-    # --------------------------------------------------------
-
-    "croatian-hnl-hr": "SuperSport HNL",
-    "croatian-first-league-hr": "SuperSport HNL",
-    "croatian-first-league": "SuperSport HNL",
-    "croatian-hnl": "SuperSport HNL",
-    "supersport-hnl": "SuperSport HNL",
-    "super-sport-hnl": "SuperSport HNL",
-
-    # --------------------------------------------------------
-    # MLS
-    # --------------------------------------------------------
-
-    "mls-us": "Major League Soccer",
-    "major-league-soccer-us": "Major League Soccer",
-    "major-league-soccer": "Major League Soccer",
-    "mls": "Major League Soccer",
-
-    # --------------------------------------------------------
-    # COREA
-    # --------------------------------------------------------
-
-    "k-league-1-kr": "K League 1",
-    "k-league-1": "K League 1",
-    "k-league": "K League",
-
-    # --------------------------------------------------------
-    # TURCHIA
-    # --------------------------------------------------------
-
-    "super-lig-tr": "Süper Lig",
-    "super-lig": "Süper Lig",
-    "turkish-super-lig": "Süper Lig",
-    "super-lig-turkey": "Süper Lig",
-
-    # --------------------------------------------------------
-    # DANIMARCA
-    # --------------------------------------------------------
-
-    "superliga-dk": "Danish Superliga",
-    "superliga": "Danish Superliga",
-    "danish-superliga": "Danish Superliga",
-
-    # --------------------------------------------------------
-    # BRASILE
-    # --------------------------------------------------------
-
-    "brasileirao-serie-a-br": "Campeonato Brasileiro Série A",
-    "brasileirao-serie-a": "Campeonato Brasileiro Série A",
-    "brasileirao": "Campeonato Brasileiro Série A",
-    "serie-a-br": "Campeonato Brasileiro Série A",
-
-    # --------------------------------------------------------
-    # RUSSIA
-    # --------------------------------------------------------
-
-    "premier-liga-ru": "Russian Premier League",
-    "russian-premier-league": "Russian Premier League",
-    "premier-liga": "Russian Premier League",
-    "russia-premier-league": "Russian Premier League",
-
-    # --------------------------------------------------------
-    # PERÙ
-    # --------------------------------------------------------
-
-    "liga-1-peru": "Primera División del Perú",
-    "liga-1-pe": "Primera División del Perú",
-    "peruvian-primera-division": "Primera División del Perú",
-
-    # --------------------------------------------------------
-    # COLOMBIA
-    # --------------------------------------------------------
-
-    "primera-a-colombia": "Primera A",
-    "liga-betplay-col": "Primera A",
-    "primera-a": "Primera A",
-    "liga-betplay": "Primera A",
-
-    # --------------------------------------------------------
-    # MESSICO
-    # --------------------------------------------------------
-
-    "liga-mx": "Liga MX",
-
-    # --------------------------------------------------------
-    # CILE
-    # --------------------------------------------------------
-
-    "primera-division-chile": "Primera División de Chile",
-    "primera-division-cl": "Primera División de Chile",
-
-    # --------------------------------------------------------
-    # ECUADOR
-    # --------------------------------------------------------
-
-    "liga-pro": "Liga Pro",
-    "liga-pro-ecuador": "Liga Pro",
-
-    # --------------------------------------------------------
-    # NORVEGIA
-    # --------------------------------------------------------
-
-    "eliteserien": "Eliteserien",
-
-    # --------------------------------------------------------
-    # SVIZZERA
-    # --------------------------------------------------------
-
-    "super-league": "Super League",
-    "swiss-super-league": "Super League",
-
-    # --------------------------------------------------------
-    # ARGENTINA
-    # --------------------------------------------------------
-
-    "superliga-argentina": "Superliga Argentina de Fútbol",
-    "superliga-argentina-de-futbol":
-        "Superliga Argentina de Fútbol",
-
-    # --------------------------------------------------------
-    # COMPETIZIONI INTERNAZIONALI
-    # --------------------------------------------------------
-
-    "champions-league": "Champions League",
-    "uefa-champions-league": "Champions League",
-
-    "europa-league": "Europa League",
-    "uefa-europa-league": "Europa League",
-
-    "europa-conference-league":
-        "Europa Conference League",
-
-    "afc-champions-league-elite":
-        "AFC Champions League Elite",
-
-    "libertadores": "Libertadores",
-    "sudamericana": "Sudamericana",
-
-    "leagues-cup": "Leagues Cup",
-
-    "club-world-cup": "FIFA Club World Cup",
-
-    "world-cup": "World Cup",
-
-    "world-cup-qualifiers":
-        "World Cup Qualifiers",
-
-    "afc-world-cup-qualifiers":
-        "AFC World Cup Qualifiers",
-
-    "conmebol-world-cup-qualifiers":
-        "CONMEBOL World Cup Qualifiers",
-
-    "concacaf-world-cup-qualifiers":
-        "CONCACAF World Cup Qualifiers",
-
-    "nations-league": "Nations League",
-
-    "copa-america": "Copa America",
-
-    "africa-cup-of-nations":
-        "CAF Africa Cup of Nations",
-
-    "european-championship":
-        "European Championship",
-
-    "european-championship-qualifiers":
-        "European Championship Qualifiers",
-}
 
 
 # ============================================================
@@ -347,10 +73,14 @@ CAMPIONATI = {
 # ============================================================
 
 processed = set()
+
 state_lock = threading.Lock()
 
 _worker_started = False
 _worker_lock = threading.Lock()
+
+_schema_cache = {}
+_schema_lock = threading.Lock()
 
 
 # ============================================================
@@ -358,28 +88,13 @@ _worker_lock = threading.Lock()
 # ============================================================
 
 def slug(value):
-    """
-    Normalizza uno slug Sorare.
-
-    Esempio:
-        SuperSport HNL
-        supersport-hnl
-        SUPERSPORT_HNL
-
-    diventano una forma confrontabile.
-    """
 
     value = str(value or "").strip().lower()
 
-    replacements = {
-        "_": "-",
-        " ": "-",
-        "’": "",
-        "'": "",
-    }
-
-    for old, new in replacements.items():
-        value = value.replace(old, new)
+    value = value.replace("_", "-")
+    value = value.replace(" ", "-")
+    value = value.replace("’", "")
+    value = value.replace("'", "")
 
     while "--" in value:
         value = value.replace("--", "-")
@@ -388,6 +103,7 @@ def slug(value):
 
 
 def auth_headers():
+
     if not TOKEN:
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato"
@@ -402,7 +118,7 @@ def auth_headers():
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "Sorare-Bot/11.0",
+        "User-Agent": "Sorare-Bot/13.0",
     }
 
     if AUD:
@@ -434,7 +150,8 @@ def graphql(query, variables=None):
             )
 
             print(
-                f"🌐 Sorare HTTP {response.status_code}",
+                f"🌐 Sorare HTTP "
+                f"{response.status_code}",
                 flush=True,
             )
 
@@ -461,6 +178,7 @@ def graphql(query, variables=None):
                 )
 
                 time.sleep(wait)
+
                 continue
 
             if response.status_code != 200:
@@ -468,11 +186,12 @@ def graphql(query, variables=None):
                 print(
                     f"❌ HTTP "
                     f"{response.status_code}: "
-                    f"{response.text[:500]}",
+                    f"{response.text[:1000]}",
                     flush=True,
                 )
 
                 time.sleep(attempt)
+
                 continue
 
             try:
@@ -492,18 +211,22 @@ def graphql(query, variables=None):
 
             if errors:
 
+                print(
+                    "❌ GraphQL ERROR COMPLETO:",
+                    flush=True,
+                )
+
                 for error in errors:
 
                     print(
-                        "❌ GraphQL:",
-                        error.get(
-                            "message",
-                            "Errore",
+                        json.dumps(
+                            error,
+                            ensure_ascii=False,
                         ),
                         flush=True,
                     )
 
-                return None
+                return data
 
             return data
 
@@ -529,20 +252,211 @@ def graphql(query, variables=None):
 
 
 # ============================================================
+# SCHEMA INTROSPECTION
+#
+# Verifica dinamicamente i campi supportati da Sorare.
+# Questo evita di dipendere da uno schema GraphQL vecchio.
+# ============================================================
+
+def get_input_schema(type_name):
+
+    with _schema_lock:
+
+        if type_name in _schema_cache:
+            return _schema_cache[type_name]
+
+    data = graphql(
+        """
+        query InputSchema($name: String!) {
+
+            __type(name: $name) {
+
+                name
+
+                kind
+
+                inputFields {
+
+                    name
+
+                    type {
+                        kind
+                        name
+
+                        ofType {
+                            kind
+                            name
+
+                            ofType {
+                                kind
+                                name
+
+                                ofType {
+                                    kind
+                                    name
+                                }
+                            }
+                        }
+                    }
+
+                    defaultValue
+                }
+            }
+        }
+        """,
+        {
+            "name": type_name,
+        },
+    )
+
+    if not data:
+        return {}
+
+    result = (
+        ((data.get("data") or {})
+        .get("__type"))
+        or {}
+    )
+
+    fields = result.get(
+        "inputFields"
+    ) or []
+
+    field_map = {}
+
+    for field in fields:
+
+        name = field.get("name")
+
+        if not name:
+            continue
+
+        field_map[name] = field
+
+    with _schema_lock:
+        _schema_cache[type_name] = field_map
+
+    return field_map
+
+
+def print_input_schema(type_name):
+
+    fields = get_input_schema(
+        type_name
+    )
+
+    if not fields:
+
+        print(
+            f"⚠️ Impossibile leggere "
+            f"lo schema di {type_name}",
+            flush=True,
+        )
+
+        return
+
+    print(
+        f"🔧 Schema {type_name}:",
+        flush=True,
+    )
+
+    for name, field in fields.items():
+
+        field_type = field.get(
+            "type"
+        ) or {}
+
+        print(
+            f"   • {name}: "
+            f"{format_graphql_type(field_type)}",
+            flush=True,
+        )
+
+
+def format_graphql_type(type_info):
+
+    if not type_info:
+        return "?"
+
+    kind = type_info.get("kind")
+    name = type_info.get("name")
+
+    if kind == "NON_NULL":
+
+        return (
+            format_graphql_type(
+                type_info.get("ofType")
+            )
+            + "!"
+        )
+
+    if kind == "LIST":
+
+        return (
+            "["
+            + format_graphql_type(
+                type_info.get("ofType")
+            )
+            + "]"
+        )
+
+    return name or "?"
+
+
+def is_input_field_supported(
+    type_name,
+    field_name,
+):
+
+    fields = get_input_schema(
+        type_name
+    )
+
+    return field_name in fields
+
+
+def get_required_input_fields(
+    type_name,
+):
+
+    fields = get_input_schema(
+        type_name
+    )
+
+    required = []
+
+    for name, field in fields.items():
+
+        field_type = field.get(
+            "type"
+        ) or {}
+
+        if field_type.get("kind") == "NON_NULL":
+            required.append(name)
+
+    return required
+
+
+# ============================================================
 # ACCOUNT
 # ============================================================
 
 def check_account():
 
-    data = graphql("""
+    data = graphql(
+        """
         query CurrentUser {
+
             currentUser {
+
                 slug
                 nickname
                 starkKey
+
             }
         }
-    """)
+        """
+    )
 
     user = (
         ((data or {}).get("data") or {})
@@ -552,7 +466,8 @@ def check_account():
     if not user:
 
         print(
-            "❌ Account Sorare non verificato",
+            "❌ Account Sorare "
+            "non verificato",
             flush=True,
         )
 
@@ -573,49 +488,68 @@ def check_account():
 
 def get_offers():
 
-    data = graphql("""
+    data = graphql(
+        """
         query PendingOffers {
+
             currentUser {
-                pendingTokenOffersReceived(first: 50) {
+
+                pendingTokenOffersReceived(
+                    first: 50
+                ) {
+
                     nodes {
+
                         id
                         blockchainId
                         status
 
                         sender {
+
                             ... on User {
+
                                 slug
                                 nickname
+
                             }
                         }
 
                         senderSide {
+
                             anyCards {
+
                                 assetId
                                 slug
                                 collection
+
                             }
                         }
 
                         receiverSide {
+
                             anyCards {
+
                                 assetId
                                 slug
                                 collection
+
                             }
                         }
                     }
                 }
             }
         }
-    """)
+        """
+    )
 
     return (
         (
             ((data or {}).get("data") or {})
-            .get("currentUser") or {}
+            .get("currentUser")
+            or {}
         )
-        .get("pendingTokenOffersReceived") or {}
+        .get("pendingTokenOffersReceived")
+        or {}
     ).get("nodes") or []
 
 
@@ -636,10 +570,15 @@ def card_details(asset_ids):
     if not asset_ids:
         return []
 
-    data = graphql("""
-        query Cards($assetIds: [String!]) {
+    data = graphql(
+        """
+        query Cards(
+            $assetIds: [String!]
+        ) {
 
-            anyCards(assetIds: $assetIds) {
+            anyCards(
+                assetIds: $assetIds
+            ) {
 
                 assetId
                 slug
@@ -657,7 +596,9 @@ def card_details(asset_ids):
                         name
 
                         activeCompetitions {
+
                             slug
+
                         }
                     }
                 }
@@ -697,13 +638,16 @@ def card_details(asset_ids):
                 }
             }
         }
-    """, {
-        "assetIds": asset_ids
-    })
+        """,
+        {
+            "assetIds": asset_ids
+        },
+    )
 
     return (
         ((data or {}).get("data") or {})
-        .get("anyCards") or []
+        .get("anyCards")
+        or []
     )
 
 
@@ -720,20 +664,34 @@ def card_price(card):
         "lowestPriceCardAnySeason",
     ):
 
-        source = card.get(source_name) or {}
+        source = (
+            card.get(source_name)
+            or {}
+        )
 
         try:
 
             live = (
                 source
-                .get("liveSingleSaleOffer", {})
-                .get("receiverSide", {})
-                .get("amounts", {})
+                .get(
+                    "liveSingleSaleOffer",
+                    {},
+                )
+                .get(
+                    "receiverSide",
+                    {},
+                )
+                .get(
+                    "amounts",
+                    {},
+                )
                 .get("eurCents")
             )
 
             if live:
-                values.append(int(live))
+                values.append(
+                    int(live)
+                )
 
         except (
             TypeError,
@@ -743,7 +701,9 @@ def card_price(card):
             pass
 
         public = (
-            source.get("publicMinPrices")
+            source.get(
+                "publicMinPrices"
+            )
             or []
         )
 
@@ -755,11 +715,15 @@ def card_price(card):
             try:
 
                 value = int(
-                    item.get("eurCents")
+                    item.get(
+                        "eurCents"
+                    )
                 )
 
                 if value > 0:
-                    values.append(value)
+                    values.append(
+                        value
+                    )
 
             except (
                 TypeError,
@@ -768,7 +732,11 @@ def card_price(card):
             ):
                 pass
 
-    return min(values) if values else None
+    return (
+        min(values)
+        if values
+        else None
+    )
 
 
 # ============================================================
@@ -783,14 +751,18 @@ def is_kulenovic(card):
     }
 
     if KID:
-        wanted.add(KID.lower())
+        wanted.add(
+            KID.lower()
+        )
 
     asset_id = str(
-        card.get("assetId") or ""
+        card.get("assetId")
+        or ""
     ).lower()
 
     card_slug = str(
-        card.get("slug") or ""
+        card.get("slug")
+        or ""
     ).lower()
 
     return (
@@ -800,20 +772,30 @@ def is_kulenovic(card):
 
 
 # ============================================================
-# CONTROLLO COMPETIZIONE
+# COMPETIZIONI
 # ============================================================
 
 def get_competitions(card):
 
-    player = card.get("anyPlayer") or {}
+    player = (
+        card.get("anyPlayer")
+        or {}
+    )
 
-    club = player.get("activeClub")
+    club = player.get(
+        "activeClub"
+    )
 
-    if not isinstance(club, dict):
+    if not isinstance(
+        club,
+        dict,
+    ):
         return []
 
     competitions = (
-        club.get("activeCompetitions")
+        club.get(
+            "activeCompetitions"
+        )
         or []
     )
 
@@ -827,40 +809,42 @@ def get_competitions(card):
         ):
             continue
 
-        raw_slug = (
-            competition.get("slug")
+        raw = (
+            competition.get(
+                "slug"
+            )
             or ""
         )
 
-        normalized = slug(raw_slug)
+        normalized = slug(raw)
 
         if not normalized:
             continue
 
-        known_name = CAMPIONATI.get(
+        result.append(
             normalized
         )
 
-        result.append({
-            "slug": normalized,
-            "name": (
-                known_name
-                or raw_slug
-                or normalized
-            ),
-            "known": bool(known_name),
-        })
-
-    return result
+    return list(
+        dict.fromkeys(result)
+    )
 
 
 def check_competition(card):
 
-    player = card.get("anyPlayer") or {}
+    player = (
+        card.get("anyPlayer")
+        or {}
+    )
 
-    club = player.get("activeClub")
+    club = player.get(
+        "activeClub"
+    )
 
-    if not isinstance(club, dict):
+    if not isinstance(
+        club,
+        dict,
+    ):
 
         print(
             "      ❌ Nessuna squadra",
@@ -872,21 +856,24 @@ def check_competition(card):
     club_name = (
         club.get("name")
         or club.get("slug")
-        or "Squadra sconosciuta"
+        or "Sconosciuta"
     )
 
     print(
-        f"      🏟️ Squadra: {club_name}",
+        f"      🏟️ Squadra: "
+        f"{club_name}",
         flush=True,
     )
 
-    competitions = get_competitions(card)
+    competitions = (
+        get_competitions(card)
+    )
 
     if not competitions:
 
         print(
-            "      ❌ Nessuna competizione "
-            "attiva restituita da Sorare",
+            "      ❌ Nessuna "
+            "activeCompetition",
             flush=True,
         )
 
@@ -899,37 +886,12 @@ def check_competition(card):
 
     for competition in competitions:
 
-        if competition["known"]:
-
-            print(
-                f"         ✅ "
-                f"{competition['name']} "
-                f"({competition['slug']})",
-                flush=True,
-            )
-
-        else:
-
-            print(
-                f"         🆕 "
-                f"{competition['name']} "
-                f"({competition['slug']}) "
-                f"[NUOVO SLUG]",
-                flush=True,
-            )
-
-    # --------------------------------------------------------
-    # NUOVA LOGICA
-    #
-    # Non richiediamo più che lo slug sia presente nel
-    # dizionario CAMPIONATI.
-    #
-    # Se Sorare ci restituisce una activeCompetition,
-    # la consideriamo una competizione coperta.
-    #
-    # Questo evita falsi negativi quando Sorare introduce
-    # un nuovo slug o cambia il nome interno.
-    # --------------------------------------------------------
+        print(
+            f"         🆕 "
+            f"{competition} "
+            f"({competition})",
+            flush=True,
+        )
 
     print(
         "      ✅ COMPETIZIONE COPERTA",
@@ -952,10 +914,14 @@ def valid_card(card):
     )
 
     rarity = str(
-        card.get("rarityTyped") or ""
+        card.get("rarityTyped")
+        or ""
     ).upper()
 
-    player = card.get("anyPlayer") or {}
+    player = (
+        card.get("anyPlayer")
+        or {}
+    )
 
     age = player.get("age")
 
@@ -988,14 +954,16 @@ def valid_card(card):
     ):
 
         print(
-            f"      ❌ Età non valida: {age}",
+            f"      ❌ Età non valida: "
+            f"{age}",
             flush=True,
         )
 
         return False
 
     print(
-        f"      🎂 Età: {age} anni",
+        f"      🎂 Età: "
+        f"{age} anni",
         flush=True,
     )
 
@@ -1003,7 +971,8 @@ def valid_card(card):
 
         print(
             f"      ❌ Età troppo alta "
-            f"(limite: meno di {MAX_AGE})",
+            f"(limite: meno di "
+            f"{MAX_AGE})",
             flush=True,
         )
 
@@ -1016,21 +985,28 @@ def valid_card(card):
     if price is None:
 
         print(
-            "      ❌ Prezzo non disponibile",
+            "      ❌ Prezzo "
+            "non disponibile",
             flush=True,
         )
 
         return False
 
     print(
-        f"      💰 Floor €{price / 100:.2f}",
+        f"      💰 Floor "
+        f"€{price / 100:.2f}",
         flush=True,
     )
 
-    if not MIN_PRICE <= price <= MAX_PRICE:
+    if not (
+        MIN_PRICE
+        <= price
+        <= MAX_PRICE
+    ):
 
         print(
-            "      ❌ Prezzo fuori range",
+            "      ❌ Prezzo "
+            "fuori range",
             flush=True,
         )
 
@@ -1043,7 +1019,8 @@ def valid_card(card):
     if rarity != "LIMITED":
 
         print(
-            f"      ❌ Rarità: {rarity}",
+            f"      ❌ Rarità: "
+            f"{rarity}",
             flush=True,
         )
 
@@ -1054,29 +1031,21 @@ def valid_card(card):
     # --------------------------------------------------------
 
     if not check_competition(card):
-
         return False
 
     # --------------------------------------------------------
     # RISULTATO
     # --------------------------------------------------------
 
-    competitions = get_competitions(card)
-
-    names = []
-
-    for competition in competitions:
-
-        name = competition.get("name")
-
-        if name and name not in names:
-            names.append(name)
+    competitions = (
+        get_competitions(card)
+    )
 
     print(
         f"      ✅ VALIDATA | "
         f"{age} anni | "
         f"€{price / 100:.2f} | "
-        f"{', '.join(names)}",
+        f"{', '.join(competitions)}",
         flush=True,
     )
 
@@ -1084,13 +1053,16 @@ def valid_card(card):
 
 
 # ============================================================
-# RIFIUTO OFFERTA
+# RIFIUTO
 # ============================================================
 
 def reject_offer(offer):
 
     blockchain_id = str(
-        offer.get("blockchainId") or ""
+        offer.get(
+            "blockchainId"
+        )
+        or ""
     ).strip()
 
     if not blockchain_id:
@@ -1105,18 +1077,22 @@ def reject_offer(offer):
     if DRY_RUN:
 
         print(
-            "🟡 DRY RUN: rifiuto simulato",
+            "🟡 DRY RUN: "
+            "rifiuto simulato",
             flush=True,
         )
 
         return True
 
-    data = graphql("""
+    data = graphql(
+        """
         mutation Reject(
             $input: rejectOfferInput!
         ) {
 
-            rejectOffer(input: $input) {
+            rejectOffer(
+                input: $input
+            ) {
 
                 tokenOffer {
                     id
@@ -1128,14 +1104,17 @@ def reject_offer(offer):
                 }
             }
         }
-    """, {
-        "input": {
-            "blockchainId": blockchain_id,
-            "clientMutationId": str(
-                uuid.uuid4()
-            ),
-        }
-    })
+        """,
+        {
+            "input": {
+                "blockchainId":
+                    blockchain_id,
+
+                "clientMutationId":
+                    str(uuid.uuid4()),
+            }
+        },
+    )
 
     result = (
         ((data or {}).get("data") or {})
@@ -1145,13 +1124,17 @@ def reject_offer(offer):
     if not result:
 
         print(
-            "❌ Risposta rejectOffer vuota",
+            "❌ Risposta "
+            "rejectOffer vuota",
             flush=True,
         )
 
         return False
 
-    errors = result.get("errors") or []
+    errors = (
+        result.get("errors")
+        or []
+    )
 
     if errors:
 
@@ -1169,7 +1152,8 @@ def reject_offer(offer):
         return False
 
     print(
-        "✅ Offerta originale rifiutata",
+        "✅ Offerta originale "
+        "rifiutata",
         flush=True,
     )
 
@@ -1177,10 +1161,12 @@ def reject_offer(offer):
 
 
 # ============================================================
-# FIRMA SORARE
+# FIRMA
 # ============================================================
 
-def sign_authorizations(authorizations):
+def sign_authorizations(
+    authorizations
+):
 
     node = (
         shutil.which("node")
@@ -1216,11 +1202,16 @@ function build(a) {
 
     if (
         r.__typename ===
-        "StarkexTransferAuthorizationRequest" &&
-        r.amount !== undefined &&
+        "StarkexTransferAuthorizationRequest"
+        &&
+        r.amount !== undefined
+        &&
         r.amount !== null
     ) {
-        r.amount = BigInt(r.amount);
+
+        r.amount = BigInt(
+            r.amount
+        );
     }
 
     const signature =
@@ -1235,12 +1226,18 @@ function build(a) {
     ) {
 
         return {
-            fingerprint: a.fingerprint,
+
+            fingerprint:
+                a.fingerprint,
 
             starkexTransferApproval: {
-                nonce: r.nonce,
+
+                nonce:
+                    r.nonce,
+
                 expirationTimestamp:
                     r.expirationTimestamp,
+
                 signature
             }
         };
@@ -1252,12 +1249,18 @@ function build(a) {
     ) {
 
         return {
-            fingerprint: a.fingerprint,
+
+            fingerprint:
+                a.fingerprint,
 
             starkexLimitOrderApproval: {
-                nonce: r.nonce,
+
+                nonce:
+                    r.nonce,
+
                 expirationTimestamp:
                     r.expirationTimestamp,
+
                 signature
             }
         };
@@ -1269,18 +1272,23 @@ function build(a) {
     ) {
 
         return {
-            fingerprint: a.fingerprint,
+
+            fingerprint:
+                a.fingerprint,
 
             mangopayWalletTransferApproval: {
-                nonce: r.nonce,
+
+                nonce:
+                    r.nonce,
+
                 signature
             }
         };
     }
 
     throw new Error(
-        "Authorization non supportata: " +
-        r.__typename
+        "Authorization non supportata: "
+        + r.__typename
     );
 }
 
@@ -1298,8 +1306,11 @@ process.stdout.write(
             script,
         ],
         input=json.dumps({
-            "privateKey": STARK,
-            "authorizations": authorizations,
+            "privateKey":
+                STARK,
+
+            "authorizations":
+                authorizations,
         }),
         text=True,
         capture_output=True,
@@ -1322,33 +1333,310 @@ process.stdout.write(
     except json.JSONDecodeError as error:
 
         raise RuntimeError(
-            "Risposta firma non valida"
+            "Risposta firma "
+            "non valida"
         ) from error
+
+
+# ============================================================
+# PREPARE OFFER
+#
+# Questa è la parte modificata.
+#
+# Prima costruivamo manualmente l'input.
+# Ora leggiamo lo schema reale di Sorare
+# e includiamo solo campi effettivamente
+# supportati da prepareOfferInput.
+# ============================================================
+
+def build_prepare_direct_offer_input(
+    receiver,
+    asset_ids,
+    amount,
+):
+
+    input_type = (
+        "prepareOfferInput"
+    )
+
+    fields = get_input_schema(
+        input_type
+    )
+
+    if not fields:
+
+        raise RuntimeError(
+            "Impossibile leggere "
+            "prepareOfferInput "
+            "dallo schema Sorare"
+        )
+
+    print(
+        "🔧 Verifica schema "
+        "prepareOfferInput...",
+        flush=True,
+    )
+
+    print(
+        "   Campi disponibili:",
+        flush=True,
+    )
+
+    for field_name in fields:
+
+        print(
+            f"      • {field_name}",
+            flush=True,
+        )
+
+    required = (
+        get_required_input_fields(
+            input_type
+        )
+    )
+
+    print(
+        "   Campi obbligatori:",
+        flush=True,
+    )
+
+    for field in required:
+
+        print(
+            f"      🔒 {field}",
+            flush=True,
+        )
+
+    payload = {}
+
+    # --------------------------------------------------------
+    # TYPE
+    # --------------------------------------------------------
+
+    if "type" in fields:
+
+        payload["type"] = (
+            "DIRECT_OFFER"
+        )
+
+    else:
+
+        raise RuntimeError(
+            "prepareOfferInput "
+            "non contiene il campo "
+            "'type'"
+        )
+
+    # --------------------------------------------------------
+    # SEND ASSETS
+    # --------------------------------------------------------
+
+    if "sendAssetIds" in fields:
+
+        payload["sendAssetIds"] = []
+
+    elif "sendCardsSlugs" in fields:
+
+        # Non dovremmo arrivare qui,
+        # ma evitiamo di inviare un
+        # campo inesistente.
+        payload["sendCardsSlugs"] = []
+
+    else:
+
+        raise RuntimeError(
+            "prepareOfferInput non "
+            "supporta sendAssetIds"
+        )
+
+    # --------------------------------------------------------
+    # RECEIVE ASSETS
+    # --------------------------------------------------------
+
+    if "receiveAssetIds" in fields:
+
+        payload["receiveAssetIds"] = (
+            asset_ids
+        )
+
+    elif "receiveCardsSlugs" in fields:
+
+        raise RuntimeError(
+            "Sorare richiede "
+            "receiveCardsSlugs invece "
+            "di receiveAssetIds. "
+            "Serve adattamento dello "
+            "schema carte."
+        )
+
+    else:
+
+        raise RuntimeError(
+            "prepareOfferInput non "
+            "supporta receiveAssetIds"
+        )
+
+    # --------------------------------------------------------
+    # IMPORTO DA PAGARE
+    # --------------------------------------------------------
+
+    amount_input = {
+        "amount": str(amount),
+        "currency": "EUR",
+    }
+
+    if "sendAmount" in fields:
+
+        payload["sendAmount"] = (
+            amount_input
+        )
+
+        print(
+            "   💶 Campo usato: "
+            "sendAmount",
+            flush=True,
+        )
+
+    elif "receiveAmount" in fields:
+
+        raise RuntimeError(
+            "Lo schema espone "
+            "receiveAmount ma non "
+            "sendAmount per "
+            "prepareOfferInput. "
+            "Questo non corrisponde "
+            "a una DIRECT_OFFER "
+            "di controproposta."
+        )
+
+    else:
+
+        raise RuntimeError(
+            "prepareOfferInput non "
+            "supporta sendAmount. "
+            "Schema Sorare cambiato."
+        )
+
+    # --------------------------------------------------------
+    # RECEIVER
+    # --------------------------------------------------------
+
+    if "receiverSlug" in fields:
+
+        payload["receiverSlug"] = (
+            receiver
+        )
+
+    else:
+
+        raise RuntimeError(
+            "prepareOfferInput non "
+            "supporta receiverSlug"
+        )
+
+    # --------------------------------------------------------
+    # SETTLEMENT CURRENCIES
+    #
+    # Se il campo esiste nello schema
+    # lo includiamo.
+    # Se non esiste NON lo inviamo.
+    # --------------------------------------------------------
+
+    if (
+        "settlementCurrencies"
+        in fields
+    ):
+
+        payload[
+            "settlementCurrencies"
+        ] = ["EUR"]
+
+        print(
+            "   💱 settlementCurrencies: EUR",
+            flush=True,
+        )
+
+    # --------------------------------------------------------
+    # CLIENT MUTATION ID
+    # --------------------------------------------------------
+
+    if (
+        "clientMutationId"
+        in fields
+    ):
+
+        payload[
+            "clientMutationId"
+        ] = str(uuid.uuid4())
+
+    # --------------------------------------------------------
+    # DEBUG INPUT FINALE
+    # --------------------------------------------------------
+
+    print(
+        "📦 prepareOfferInput "
+        "finale:",
+        flush=True,
+    )
+
+    print(
+        json.dumps(
+            payload,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+
+    return payload
 
 
 # ============================================================
 # CONTROPROPOSTA
 # ============================================================
 
-def counter_offer(offer, cards):
+def counter_offer(
+    offer,
+    cards,
+):
 
-    sender = offer.get("sender") or {}
+    sender = (
+        offer.get("sender")
+        or {}
+    )
 
     receiver = str(
-        sender.get("slug") or ""
+        sender.get("slug")
+        or ""
     ).strip()
 
     asset_ids = [
-        str(card.get("assetId")).strip()
+        str(
+            card.get("assetId")
+        ).strip()
+
         for card in cards
-        if isinstance(card, dict)
-        and card.get("assetId")
+
+        if (
+            isinstance(card, dict)
+            and card.get("assetId")
+        )
     ]
 
-    if not receiver or not asset_ids:
+    if not receiver:
 
         print(
-            "❌ Dati controproposta mancanti",
+            "❌ receiverSlug mancante",
+            flush=True,
+        )
+
+        return False
+
+    if not asset_ids:
+
+        print(
+            "❌ Nessuna carta "
+            "da ricevere",
             flush=True,
         )
 
@@ -1367,9 +1655,19 @@ def counter_offer(offer, cards):
     )
 
     print(
+        f"👤 Receiver: "
+        f"{receiver}",
+        flush=True,
+    )
+
+    print(
         "🎯 Kulenovic NON viene ceduto",
         flush=True,
     )
+
+    # --------------------------------------------------------
+    # DRY RUN
+    # --------------------------------------------------------
 
     if DRY_RUN:
 
@@ -1392,32 +1690,44 @@ def counter_offer(offer, cards):
 
         return False
 
-    prepare_input = {
+    # --------------------------------------------------------
+    # PREPARE INPUT
+    # --------------------------------------------------------
 
-        "type": "DIRECT_OFFER",
+    try:
 
-        "sendAssetIds": [],
+        prepare_input = (
+            build_prepare_direct_offer_input(
+                receiver=receiver,
+                asset_ids=asset_ids,
+                amount=amount,
+            )
+        )
 
-        "receiveAssetIds": asset_ids,
+    except Exception as error:
 
-        "sendAmount": {
-            "amount": str(amount),
-            "currency": "EUR",
-        },
+        print(
+            f"❌ Impossibile costruire "
+            f"prepareOfferInput: "
+            f"{error}",
+            flush=True,
+        )
 
-        "receiverSlug": receiver,
+        return False
 
-        "clientMutationId": str(
-            uuid.uuid4()
-        ),
-    }
+    # --------------------------------------------------------
+    # PREPARE GRAPHQL
+    # --------------------------------------------------------
 
-    data = graphql("""
+    data = graphql(
+        """
         mutation Prepare(
             $input: prepareOfferInput!
         ) {
 
-            prepareOffer(input: $input) {
+            prepareOffer(
+                input: $input
+            ) {
 
                 authorizations {
 
@@ -1440,6 +1750,7 @@ def counter_offer(offer, cards):
                             token
 
                             feeInfoUser {
+
                                 feeLimit
                                 sourceVaultId
                                 tokenId
@@ -1451,14 +1762,18 @@ def counter_offer(offer, cards):
 
                             vaultIdSell
                             vaultIdBuy
+
                             amountSell
                             amountBuy
+
                             tokenSell
                             tokenBuy
+
                             nonce
                             expirationTimestamp
 
                             feeInfo {
+
                                 feeLimit
                                 tokenId
                                 sourceVaultId
@@ -1482,9 +1797,55 @@ def counter_offer(offer, cards):
                 }
             }
         }
-    """, {
-        "input": prepare_input
-    })
+        """,
+        {
+            "input":
+                prepare_input
+        },
+    )
+
+    # --------------------------------------------------------
+    # ERRORI GRAPHQL GLOBALI
+    # --------------------------------------------------------
+
+    if not data:
+
+        print(
+            "❌ Nessuna risposta "
+            "da prepareOffer",
+            flush=True,
+        )
+
+        return False
+
+    global_errors = (
+        data.get("errors")
+        or []
+    )
+
+    if global_errors:
+
+        print(
+            "❌ prepareOffer "
+            "GRAPHQL GLOBAL ERROR:",
+            flush=True,
+        )
+
+        for error in global_errors:
+
+            print(
+                json.dumps(
+                    error,
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+        return False
+
+    # --------------------------------------------------------
+    # RISULTATO
+    # --------------------------------------------------------
 
     result = (
         ((data or {}).get("data") or {})
@@ -1494,47 +1855,76 @@ def counter_offer(offer, cards):
     if not result:
 
         print(
-            "❌ prepareOffer fallito",
+            "❌ prepareOffer "
+            "ha restituito NULL",
             flush=True,
         )
 
         return False
 
-    errors = result.get("errors") or []
+    errors = (
+        result.get("errors")
+        or []
+    )
 
     if errors:
+
+        print(
+            "❌ prepareOffer "
+            "ERRORI:",
+            flush=True,
+        )
 
         for error in errors:
 
             print(
-                "❌ Prepare:",
-                error.get(
-                    "message",
-                    "Errore",
+                json.dumps(
+                    error,
+                    ensure_ascii=False,
                 ),
                 flush=True,
             )
 
         return False
 
+    # --------------------------------------------------------
+    # AUTORIZZAZIONI
+    # --------------------------------------------------------
+
     authorizations = (
-        result.get("authorizations")
+        result.get(
+            "authorizations"
+        )
         or []
     )
 
     if not authorizations:
 
         print(
-            "❌ Nessuna autorizzazione",
+            "❌ prepareOffer riuscito "
+            "ma nessuna autorizzazione "
+            "restituita",
             flush=True,
         )
 
         return False
 
+    print(
+        f"🔐 Autorizzazioni ricevute: "
+        f"{len(authorizations)}",
+        flush=True,
+    )
+
+    # --------------------------------------------------------
+    # FIRMA
+    # --------------------------------------------------------
+
     try:
 
-        approvals = sign_authorizations(
-            authorizations
+        approvals = (
+            sign_authorizations(
+                authorizations
+            )
         )
 
     except Exception as error:
@@ -1546,38 +1936,187 @@ def counter_offer(offer, cards):
 
         return False
 
-    create_input = {
+    if not approvals:
 
-        "approvals": approvals,
+        print(
+            "❌ Nessuna approval "
+            "prodotta",
+            flush=True,
+        )
 
-        "dealId": str(
-            uuid.uuid4()
-        ),
+        return False
 
-        "sendAssetIds": [],
+    print(
+        f"✍️ Autorizzazioni firmate: "
+        f"{len(approvals)}",
+        flush=True,
+    )
 
-        "receiveAssetIds": asset_ids,
+    # --------------------------------------------------------
+    # CREATE INPUT
+    #
+    # Anche qui leggiamo lo schema
+    # per evitare campi non supportati.
+    # --------------------------------------------------------
 
-        "sendAmount": {
+    create_fields = get_input_schema(
+        "createDirectOfferInput"
+    )
+
+    if not create_fields:
+
+        print(
+            "❌ Impossibile leggere "
+            "createDirectOfferInput",
+            flush=True,
+        )
+
+        return False
+
+    create_input = {}
+
+    # approvals
+
+    if "approvals" not in create_fields:
+
+        print(
+            "❌ createDirectOfferInput "
+            "non contiene approvals",
+            flush=True,
+        )
+
+        return False
+
+    create_input[
+        "approvals"
+    ] = approvals
+
+    # dealId
+
+    if "dealId" in create_fields:
+
+        create_input[
+            "dealId"
+        ] = str(uuid.uuid4())
+
+    # sendAssetIds
+
+    if "sendAssetIds" in create_fields:
+
+        create_input[
+            "sendAssetIds"
+        ] = []
+
+    # receiveAssetIds
+
+    if "receiveAssetIds" in create_fields:
+
+        create_input[
+            "receiveAssetIds"
+        ] = asset_ids
+
+    else:
+
+        print(
+            "❌ createDirectOfferInput "
+            "non contiene "
+            "receiveAssetIds",
+            flush=True,
+        )
+
+        return False
+
+    # sendAmount
+
+    if "sendAmount" in create_fields:
+
+        create_input[
+            "sendAmount"
+        ] = {
             "amount": str(amount),
             "currency": "EUR",
-        },
+        }
 
-        "receiverSlug": receiver,
+    else:
 
-        "clientMutationId": str(
-            uuid.uuid4()
+        print(
+            "❌ createDirectOfferInput "
+            "non contiene sendAmount",
+            flush=True,
+        )
+
+        return False
+
+    # receiverSlug
+
+    if "receiverSlug" in create_fields:
+
+        create_input[
+            "receiverSlug"
+        ] = receiver
+
+    else:
+
+        print(
+            "❌ createDirectOfferInput "
+            "non contiene receiverSlug",
+            flush=True,
+        )
+
+        return False
+
+    # settlementCurrencies
+
+    if (
+        "settlementCurrencies"
+        in create_fields
+    ):
+
+        create_input[
+            "settlementCurrencies"
+        ] = ["EUR"]
+
+    # clientMutationId
+
+    if (
+        "clientMutationId"
+        in create_fields
+    ):
+
+        create_input[
+            "clientMutationId"
+        ] = str(uuid.uuid4())
+
+    print(
+        "📦 createDirectOfferInput:",
+        flush=True,
+    )
+
+    print(
+        json.dumps(
+            create_input,
+            indent=2,
+            ensure_ascii=False,
         ),
-    }
+        flush=True,
+    )
 
-    data = graphql("""
+    # --------------------------------------------------------
+    # CREATE DIRECT OFFER
+    # --------------------------------------------------------
+
+    data = graphql(
+        """
         mutation Create(
             $input: createDirectOfferInput!
         ) {
 
-            createDirectOffer(input: $input) {
+            createDirectOffer(
+                input: $input
+            ) {
 
                 tokenOffer {
+
                     id
                     blockchainId
                     status
@@ -1588,9 +2127,55 @@ def counter_offer(offer, cards):
                 }
             }
         }
-    """, {
-        "input": create_input
-    })
+        """,
+        {
+            "input":
+                create_input
+        },
+    )
+
+    # --------------------------------------------------------
+    # GLOBAL ERRORS
+    # --------------------------------------------------------
+
+    if not data:
+
+        print(
+            "❌ Nessuna risposta "
+            "da createDirectOffer",
+            flush=True,
+        )
+
+        return False
+
+    global_errors = (
+        data.get("errors")
+        or []
+    )
+
+    if global_errors:
+
+        print(
+            "❌ createDirectOffer "
+            "GRAPHQL GLOBAL ERROR:",
+            flush=True,
+        )
+
+        for error in global_errors:
+
+            print(
+                json.dumps(
+                    error,
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+        return False
+
+    # --------------------------------------------------------
+    # RESULT
+    # --------------------------------------------------------
 
     result = (
         ((data or {}).get("data") or {})
@@ -1600,23 +2185,32 @@ def counter_offer(offer, cards):
     if not result:
 
         print(
-            "❌ createDirectOffer fallito",
+            "❌ createDirectOffer "
+            "ha restituito NULL",
             flush=True,
         )
 
         return False
 
-    errors = result.get("errors") or []
+    errors = (
+        result.get("errors")
+        or []
+    )
 
     if errors:
+
+        print(
+            "❌ createDirectOffer "
+            "ERRORI:",
+            flush=True,
+        )
 
         for error in errors:
 
             print(
-                "❌ Create:",
-                error.get(
-                    "message",
-                    "Errore",
+                json.dumps(
+                    error,
+                    ensure_ascii=False,
                 ),
                 flush=True,
             )
@@ -1624,20 +2218,34 @@ def counter_offer(offer, cards):
         return False
 
     token_offer = (
-        result.get("tokenOffer")
+        result.get(
+            "tokenOffer"
+        )
         or {}
     )
 
-    offer_id = token_offer.get("id")
+    offer_id = token_offer.get(
+        "id"
+    )
 
     if not offer_id:
 
         print(
-            "❌ Nessuna offerta creata",
+            "❌ Nessuna offerta "
+            "creata da Sorare",
             flush=True,
         )
 
         return False
+
+    # --------------------------------------------------------
+    # SUCCESS
+    # --------------------------------------------------------
+
+    print(
+        "========================================",
+        flush=True,
+    )
 
     print(
         f"✅ CONTROPROPOSTA INVIATA: "
@@ -1651,17 +2259,28 @@ def counter_offer(offer, cards):
         flush=True,
     )
 
+    print(
+        "🎯 Kulenovic NON ceduto",
+        flush=True,
+    )
+
+    print(
+        "========================================",
+        flush=True,
+    )
+
     return True
 
 
 # ============================================================
-# ELABORAZIONE OFFERTA
+# PROCESS OFFER
 # ============================================================
 
 def process_offer(offer):
 
     offer_id = str(
-        offer.get("id") or ""
+        offer.get("id")
+        or ""
     ).strip()
 
     if not offer_id:
@@ -1672,7 +2291,9 @@ def process_offer(offer):
         if offer_id in processed:
             return
 
-        processed.add(offer_id)
+        processed.add(
+            offer_id
+        )
 
     print(
         "\n========================================",
@@ -1685,18 +2306,29 @@ def process_offer(offer):
     )
 
     sender_cards = (
-        (offer.get("senderSide") or {})
-        .get("anyCards") or []
+        (
+            offer.get(
+                "senderSide"
+            )
+            or {}
+        )
+        .get("anyCards")
+        or []
     )
 
     receiver_cards = (
-        (offer.get("receiverSide") or {})
-        .get("anyCards") or []
+        (
+            offer.get(
+                "receiverSide"
+            )
+            or {}
+        )
+        .get("anyCards")
+        or []
     )
 
     # --------------------------------------------------------
-    # KULENOVIC DEVE ESSERE NELLA PARTE CHE
-    # L'ALTRA PERSONA VUOLE RICEVERE
+    # KULENOVIC
     # --------------------------------------------------------
 
     if not any(
@@ -1705,7 +2337,8 @@ def process_offer(offer):
     ):
 
         print(
-            "⏭️ Kulenovic non presente: ignoro",
+            "⏭️ Kulenovic non presente: "
+            "ignoro",
             flush=True,
         )
 
@@ -1715,6 +2348,10 @@ def process_offer(offer):
         "🎯 Kulenovic trovato",
         flush=True,
     )
+
+    # --------------------------------------------------------
+    # CARTE OFFERTE
+    # --------------------------------------------------------
 
     ids = [
         card.get("assetId")
@@ -1731,37 +2368,53 @@ def process_offer(offer):
 
         return
 
-    cards = card_details(ids)
+    cards = card_details(
+        ids
+    )
 
     if len(cards) != len(ids):
 
         print(
-            "❌ Impossibile verificare tutte "
-            "le carte",
+            "❌ Impossibile verificare "
+            "tutte le carte",
             flush=True,
         )
 
         return
 
     print(
-        f"🔎 Controllo {len(cards)} carta/e",
+        f"🔎 Controllo "
+        f"{len(cards)} carta/e",
         flush=True,
     )
 
     # --------------------------------------------------------
-    # FILTRO CARTE
+    # VALIDAZIONE
     # --------------------------------------------------------
 
     valid_cards = []
 
     for card in cards:
 
-        if valid_card(card):
-            valid_cards.append(card)
+        try:
+
+            if valid_card(card):
+                valid_cards.append(
+                    card
+                )
+
+        except Exception as error:
+
+            print(
+                f"❌ Errore controllo carta: "
+                f"{error}",
+                flush=True,
+            )
 
     print(
         f"📊 Carte valide: "
-        f"{len(valid_cards)}/{len(cards)}",
+        f"{len(valid_cards)}/"
+        f"{len(cards)}",
         flush=True,
     )
 
@@ -1776,57 +2429,23 @@ def process_offer(offer):
             flush=True,
         )
 
-        all_old = True
-
-        for card in cards:
-
-            player = (
-                card.get("anyPlayer")
-                or {}
-            )
-
-            age = player.get("age")
-
-            if age is None:
-
-                all_old = False
-                break
-
-            try:
-                age = int(age)
-
-            except (
-                TypeError,
-                ValueError,
-            ):
-
-                all_old = False
-                break
-
-            if age < MAX_AGE:
-
-                all_old = False
-                break
-
-        if all_old:
-
-            print(
-                f"🚫 Tutte le carte hanno "
-                f"{MAX_AGE} anni o più.",
-                flush=True,
-            )
-
         print(
             "🔴 Rifiuto dell'offerta.",
             flush=True,
         )
 
-        reject_offer(offer)
+        reject_offer(
+            offer
+        )
 
         return
 
     # --------------------------------------------------------
-    # CI SONO CARTE VALIDE
+    # CONTROPROPOSTA
+    #
+    # L'obiettivo principale è che
+    # Sorare riceva correttamente
+    # la controproposta.
     # --------------------------------------------------------
 
     rejected_count = (
@@ -1837,34 +2456,53 @@ def process_offer(offer):
     if rejected_count:
 
         print(
-            f"⚠️ {rejected_count} carta/e "
-            f"esclusa/e dal limite di età/"
-            f"criteri.",
+            f"⚠️ {rejected_count} "
+            f"carta/e esclusa/e",
             flush=True,
         )
 
-    # --------------------------------------------------------
-    # PRIMA RIFIUTIAMO L'OFFERTA ORIGINALE
-    # --------------------------------------------------------
+    counter_result = (
+        counter_offer(
+            offer,
+            valid_cards,
+        )
+    )
 
-    if not reject_offer(offer):
+    if counter_result:
 
         print(
-            "❌ Impossibile rifiutare "
-            "l'offerta originale",
+            "🟢 Controproposta "
+            "completata con successo.",
             flush=True,
         )
 
-        return
+    else:
+
+        print(
+            "🔴 Controproposta "
+            "NON creata.",
+            flush=True,
+        )
 
     # --------------------------------------------------------
-    # POI PROPONIAMO SOLO LE CARTE VALIDE
+    # MANTENIAMO IL COMPORTAMENTO
+    # ORIGINALE DEL TUO BOT:
+    # se vuoi rifiutare comunque
+    # l'offerta originale, lo facciamo.
+    #
+    # La controproposta è già stata
+    # tentata prima.
     # --------------------------------------------------------
 
-    counter_offer(
-        offer,
-        valid_cards,
-    )
+    if not reject_offer(
+        offer
+    ):
+
+        print(
+            "⚠️ Impossibile "
+            "rifiutare l'offerta originale",
+            flush=True,
+        )
 
 
 # ============================================================
@@ -1875,6 +2513,11 @@ def worker():
 
     print(
         "🤖 BOT AVVIATO",
+        flush=True,
+    )
+
+    print(
+        "📦 VERSIONE BOT: 13.0",
         flush=True,
     )
 
@@ -1900,8 +2543,13 @@ def worker():
 
     print(
         "🏆 COMPETIZIONI: "
-        "tutte le activeCompetitions "
-        "restituite da Sorare",
+        "activeCompetitions Sorare",
+        flush=True,
+    )
+
+    print(
+        "🔧 PREPARE: "
+        "schema GraphQL dinamico",
         flush=True,
     )
 
@@ -1909,6 +2557,10 @@ def worker():
         f"🧪 DRY_RUN={DRY_RUN}",
         flush=True,
     )
+
+    # --------------------------------------------------------
+    # ACCOUNT
+    # --------------------------------------------------------
 
     if not check_account():
 
@@ -1919,6 +2571,22 @@ def worker():
         )
 
         return
+
+    # --------------------------------------------------------
+    # SCHEMA DEBUG
+    # --------------------------------------------------------
+
+    print_input_schema(
+        "prepareOfferInput"
+    )
+
+    print_input_schema(
+        "createDirectOfferInput"
+    )
+
+    # --------------------------------------------------------
+    # LOOP
+    # --------------------------------------------------------
 
     while True:
 
@@ -1948,16 +2616,21 @@ def worker():
                         flush=True,
                     )
 
-            time.sleep(INTERVAL)
+            time.sleep(
+                INTERVAL
+            )
 
         except Exception as error:
 
             print(
-                f"❌ Worker: {error}",
+                f"❌ Worker: "
+                f"{error}",
                 flush=True,
             )
 
-            time.sleep(INTERVAL)
+            time.sleep(
+                INTERVAL
+            )
 
 
 # ============================================================
@@ -1996,7 +2669,7 @@ def start_worker():
 
 
 # ============================================================
-# FLASK / RENDER
+# FLASK
 # ============================================================
 
 @app.get("/")
@@ -2008,7 +2681,7 @@ def home():
 
         "bot": "sorare",
 
-        "version": "11.0",
+        "version": "13.0",
 
         "dry_run": DRY_RUN,
 
@@ -2023,6 +2696,9 @@ def home():
 
         "competition_mode":
             "ALL_ACTIVE_SORARE_COMPETITIONS",
+
+        "offer_mode":
+            "DYNAMIC_GRAPHQL_SCHEMA",
     })
 
 
@@ -2034,6 +2710,8 @@ def health():
         "status": "ok",
 
         "bot": "running",
+
+        "version": "13.0",
 
     })
 
