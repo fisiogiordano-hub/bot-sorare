@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@sorare/crypto": "3.0.1"
+  }
+}
