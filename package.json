@@ -1,4 +1,6 @@
 {
+  "name": "sorare-bot",
+  "private": true,
   "dependencies": {
     "@sorare/crypto": "3.0.1"
   }
