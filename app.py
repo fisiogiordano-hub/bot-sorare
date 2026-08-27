@@ -24,8 +24,8 @@ STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 KID = os.getenv("KULENOVIC_ID", "").strip()
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
-MIN_PRICE = 30
-MAX_PRICE = 80
+MIN_PRICE = 32
+MAX_PRICE = 70
 PAY_PER_CARD = 20
 MAX_AGE = 28
 INTERVAL = 10
