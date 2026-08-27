@@ -459,18 +459,6 @@ def card_details(asset_ids):
     if not asset_ids:
         return []
 
-    # ========================================================
-    # QUERY PREZZI ATTUALE
-    #
-    # NON usiamo:
-    #   - cards(slugs:)
-    #   - latestEnglishAuction
-    #   - tokens.nfts
-    #
-    # Usiamo esclusivamente i campi presenti
-    # nell'AnyCardInterface dello schema live.
-    # ========================================================
-
     data = graphql("""
         query Cards($assetIds: [String!]!) {
             anyCards(assetIds: $assetIds) {
@@ -493,10 +481,6 @@ def card_details(asset_ids):
                     }
                 }
 
-                # ------------------------------------------------
-                # LISTING DELLA CARTA SPECIFICA
-                # ------------------------------------------------
-
                 liveSingleSaleOffer {
                     receiverSide {
                         amounts {
@@ -504,10 +488,6 @@ def card_details(asset_ids):
                         }
                     }
                 }
-
-                # ------------------------------------------------
-                # FLOOR STESSO GIOCATORE + RARITÀ + STAGIONE
-                # ------------------------------------------------
 
                 lowestPriceCard {
                     assetId
@@ -526,11 +506,6 @@ def card_details(asset_ids):
                     }
                 }
 
-                # ------------------------------------------------
-                # FLOOR STESSO GIOCATORE + RARITÀ
-                # QUALSIASI STAGIONE
-                # ------------------------------------------------
-
                 lowestPriceCardAnySeason {
                     assetId
                     slug
@@ -547,10 +522,6 @@ def card_details(asset_ids):
                         eurCents
                     }
                 }
-
-                # ------------------------------------------------
-                # PUBLIC MIN PRICE DELLA CARTA
-                # ------------------------------------------------
 
                 publicMinPrices {
                     eurCents
@@ -600,10 +571,6 @@ def card_details(asset_ids):
 # ============================================================
 
 def extract_eur_cents(source):
-    """
-    Estrae eurCents da un oggetto MonetaryAmount.
-    """
-
     if not isinstance(source, dict):
         return None
 
@@ -628,11 +595,6 @@ def extract_eur_cents(source):
 
 
 def extract_live_sale_price(card):
-    """
-    Prezzo del listing attualmente live
-    della carta.
-    """
-
     if not isinstance(card, dict):
         return None
 
@@ -657,11 +619,6 @@ def extract_live_sale_price(card):
 
 
 def extract_public_min_price(card):
-    """
-    publicMinPrices è un MonetaryAmount
-    singolo nello schema live.
-    """
-
     if not isinstance(card, dict):
         return None
 
@@ -671,15 +628,6 @@ def extract_public_min_price(card):
 
 
 def extract_floor_from_card(card):
-    """
-    Cerca il prezzo minimo disponibile
-    dentro la struttura di una carta.
-
-    Ordine:
-    1. liveSingleSaleOffer
-    2. publicMinPrices
-    """
-
     if not isinstance(card, dict):
         return None
 
@@ -706,27 +654,6 @@ def extract_floor_from_card(card):
 
 
 def card_price(card):
-    """
-    Determina il floor da utilizzare per
-    la validazione della carta.
-
-    Ordine delle fonti:
-
-    1. liveSingleSaleOffer della carta richiesta
-    2. publicMinPrices della carta richiesta
-    3. lowestPriceCard
-       - liveSingleSaleOffer
-       - publicMinPrices
-    4. lowestPriceCardAnySeason
-       - liveSingleSaleOffer
-       - publicMinPrices
-
-    NON vengono utilizzati:
-        - latestEnglishAuction
-        - cards(slugs:)
-        - tokens.nfts
-    """
-
     if not isinstance(card, dict):
         return None
 
@@ -811,8 +738,6 @@ def card_price(card):
     # ========================================================
 
     if candidates:
-        # Il vero floor è il valore minimo
-        # tra le fonti disponibili.
         price, source = min(
             candidates,
             key=lambda x: x[0],
@@ -878,6 +803,10 @@ def card_price(card):
 
     return None
 
+
+# ============================================================
+# KULENOVIC
+# ============================================================
 
 def is_kulenovic(card):
     wanted = {
@@ -989,7 +918,31 @@ def check_competition(card):
     return True
 
 
-def valid_card(card):
+# ============================================================
+# VALIDATION RESULT
+# ============================================================
+
+VALID = "VALID"
+INVALID = "INVALID"
+PRICE_UNKNOWN = "PRICE_UNKNOWN"
+
+
+def validate_card(card):
+    """
+    Restituisce uno dei tre stati:
+
+    VALID
+        Carta completamente idonea.
+
+    INVALID
+        Carta verificata ma non idonea.
+
+    PRICE_UNKNOWN
+        Il prezzo/floor non è disponibile.
+        In questo caso NON bisogna rifiutare
+        l'offerta originale.
+    """
+
     name = (
         card.get("name")
         or card.get("slug")
@@ -1004,6 +957,11 @@ def valid_card(card):
         card.get("anyPlayer") or {}
     )
 
+    print(
+        f"   📄 {name}",
+        flush=True,
+    )
+
     try:
         age = int(
             player.get("age")
@@ -1014,21 +972,11 @@ def valid_card(card):
         ValueError,
     ):
         print(
-            f"   📄 {name}",
-            flush=True,
-        )
-
-        print(
             "      ❌ Età non disponibile",
             flush=True,
         )
 
-        return False
-
-    print(
-        f"   📄 {name}",
-        flush=True,
-    )
+        return INVALID
 
     print(
         f"      🎂 Età: {age} anni",
@@ -1042,7 +990,7 @@ def valid_card(card):
             flush=True,
         )
 
-        return False
+        return INVALID
 
     # ========================================================
     # PREZZO
@@ -1052,11 +1000,23 @@ def valid_card(card):
 
     if price is None:
         print(
-            "      ❌ Prezzo non disponibile",
+            "      ⚠️ FLOOR NON TROVATO",
             flush=True,
         )
 
-        return False
+        print(
+            "      🟡 Carta NON classificata "
+            "come non idonea",
+            flush=True,
+        )
+
+        print(
+            "      🟡 L'offerta verrà "
+            "lasciata IN SOSPESO",
+            flush=True,
+        )
+
+        return PRICE_UNKNOWN
 
     print(
         f"      💰 Floor €{price / 100:.2f}",
@@ -1069,7 +1029,7 @@ def valid_card(card):
             flush=True,
         )
 
-        return False
+        return INVALID
 
     # ========================================================
     # RARITÀ
@@ -1081,14 +1041,14 @@ def valid_card(card):
             flush=True,
         )
 
-        return False
+        return INVALID
 
     # ========================================================
     # COMPETIZIONE
     # ========================================================
 
     if not check_competition(card):
-        return False
+        return INVALID
 
     competitions = get_competitions(
         card
@@ -1101,7 +1061,25 @@ def valid_card(card):
         flush=True,
     )
 
-    return True
+    return VALID
+
+
+# ============================================================
+# COMPATIBILITÀ
+# ============================================================
+
+def valid_card(card):
+    """
+    Wrapper compatibile.
+
+    True solamente quando la carta è
+    completamente valida.
+    """
+
+    return (
+        validate_card(card)
+        == VALID
+    )
 
 
 # ============================================================
@@ -1892,11 +1870,19 @@ def process_offer(offer):
     if not offer_id:
         return
 
+    # --------------------------------------------------------
+    # IMPORTANTE:
+    # NON aggiungiamo subito l'offerta a "processed".
+    # Viene aggiunta solo quando il processo è concluso
+    # oppure quando l'offerta viene rifiutata/gestita.
+    #
+    # Se troviamo una carta senza floor, l'offerta resta
+    # pending e potrà essere riprocessata dopo.
+    # --------------------------------------------------------
+
     with state_lock:
         if offer_id in processed:
             return
-
-        processed.add(offer_id)
 
     print(
         "\n" + "=" * 40,
@@ -1930,6 +1916,12 @@ def process_offer(offer):
             flush=True,
         )
 
+        # Questa offerta non interessa al bot.
+        # Possiamo marcarla processed per evitare
+        # di ristamparla ogni 10 secondi.
+        with state_lock:
+            processed.add(offer_id)
+
         return
 
     print(
@@ -1949,14 +1941,22 @@ def process_offer(offer):
             flush=True,
         )
 
+        with state_lock:
+            processed.add(offer_id)
+
         return
 
     cards = card_details(ids)
 
     if len(cards) != len(ids):
         print(
-            "❌ Impossibile verificare "
-            "tutte le carte",
+            "⚠️ Impossibile verificare "
+            "tutte le carte.",
+            flush=True,
+        )
+
+        print(
+            "🟡 Offerta lasciata IN SOSPESO.",
             flush=True,
         )
 
@@ -1968,11 +1968,17 @@ def process_offer(offer):
     )
 
     valid_cards = []
+    price_unknown = False
 
     for card in cards:
         try:
-            if valid_card(card):
+            result = validate_card(card)
+
+            if result == VALID:
                 valid_cards.append(card)
+
+            elif result == PRICE_UNKNOWN:
+                price_unknown = True
 
         except Exception as e:
             print(
@@ -1980,6 +1986,52 @@ def process_offer(offer):
                 f"{e}",
                 flush=True,
             )
+
+            # In caso di errore durante la validazione
+            # del prezzo/carta, per sicurezza non
+            # rifiutiamo l'offerta.
+            price_unknown = True
+
+    # ========================================================
+    # PROTEZIONE FONDAMENTALE
+    # ========================================================
+
+    if price_unknown:
+        print(
+            "⚠️ ALMENO UNA CARTA NON HA "
+            "UN FLOOR DISPONIBILE.",
+            flush=True,
+        )
+
+        print(
+            "🟡 NESSUNA AZIONE AUTOMATICA.",
+            flush=True,
+        )
+
+        print(
+            "🟡 OFFERTA LASCIATA IN SOSPESO.",
+            flush=True,
+        )
+
+        print(
+            "🛑 Niente rifiuto.",
+            flush=True,
+        )
+
+        print(
+            "🛑 Niente controproposta.",
+            flush=True,
+        )
+
+        print(
+            "🔁 Potrà essere riprocessata "
+            "quando il prezzo sarà disponibile.",
+            flush=True,
+        )
+
+        # IMPORTANTISSIMO:
+        # NON aggiungere offer_id a processed.
+        return
 
     print(
         f"📊 Carte valide: "
@@ -1998,7 +2050,10 @@ def process_offer(offer):
             flush=True,
         )
 
-        reject_offer(offer)
+        if reject_offer(offer):
+            with state_lock:
+                processed.add(offer_id)
+
         return
 
     rejected = (
@@ -2023,7 +2078,11 @@ def process_offer(offer):
             flush=True,
         )
 
-        if not reject_offer(offer):
+        if reject_offer(offer):
+            with state_lock:
+                processed.add(offer_id)
+
+        else:
             print(
                 "⚠️ Impossibile rifiutare "
                 "l'offerta originale",
@@ -2122,6 +2181,12 @@ def worker():
     print(
         "🚫 FALLBACK tokens.nfts: "
         "DISABILITATO",
+        flush=True,
+    )
+
+    print(
+        "🛡️ PRICE UNKNOWN: "
+        "OFFERTA LASCIATA IN SOSPESO",
         flush=True,
     )
 
@@ -2229,6 +2294,8 @@ def home():
             False,
         "token_nfts_fallback":
             False,
+        "price_unknown_action":
+            "LEAVE_OFFER_PENDING",
     })
 
 
@@ -2238,6 +2305,8 @@ def health():
         "status": "ok",
         "bot": "running",
         "version": "16.2",
+        "price_unknown_action":
+            "LEAVE_OFFER_PENDING",
     })
 
 
