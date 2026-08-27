@@ -38,9 +38,12 @@ KASSET = (
 )
 
 processed = set()
+
 state_lock = threading.Lock()
+
 _worker_started = False
 _worker_lock = threading.Lock()
+
 _schema_lock = threading.Lock()
 _schema_text = None
 
@@ -154,6 +157,7 @@ def graphql(query, variables=None):
                     "❌ JSON Sorare non valido",
                     flush=True,
                 )
+
                 return None
 
             if data.get("errors"):
@@ -540,12 +544,33 @@ def card_details(asset_ids):
     return cards
 
 
+# ============================================================
+# PREZZO
+# ============================================================
+
 def card_price(card):
+    """
+    Recupera il prezzo ESCLUSIVAMENTE
+    dai dati di prezzo restituiti da anyCards().
+
+    NON esiste più alcun fallback.
+
+    Fonti considerate:
+
+    1. lowestPriceCard.liveSingleSaleOffer
+    2. lowestPriceCard.publicMinPrices
+    3. lowestPriceCardAnySeason.liveSingleSaleOffer
+    4. lowestPriceCardAnySeason.publicMinPrices
+
+    Se nessuna fonte contiene un prezzo valido,
+    ritorna None.
+    """
+
     values = []
 
-    # ========================================================
-    # PREZZO TRAMITE API SORARE
-    # ========================================================
+    # --------------------------------------------------------
+    # PREZZO PRINCIPALE
+    # --------------------------------------------------------
 
     for name in (
         "lowestPriceCard",
@@ -608,9 +633,9 @@ def card_price(card):
             ):
                 pass
 
-    # ========================================================
+    # --------------------------------------------------------
     # PREZZO TROVATO
-    # ========================================================
+    # --------------------------------------------------------
 
     if values:
         price = min(values)
@@ -623,12 +648,13 @@ def card_price(card):
 
         return price
 
-    # ========================================================
+    # --------------------------------------------------------
     # NESSUN PREZZO
-    # ========================================================
+    # --------------------------------------------------------
 
     print(
-        f"      ❌ Prezzo API non disponibile",
+        f"      ❌ Prezzo non disponibile "
+        f"dai dati API",
         flush=True,
     )
 
@@ -1890,9 +1916,8 @@ def worker():
     )
 
     print(
-        "💰 PREZZI: solo API "
-        "lowestPriceCard / "
-        "lowestPriceCardAnySeason",
+        "💰 PREZZI: solo dati "
+        "restituiti direttamente da anyCards",
         flush=True,
     )
 
@@ -1998,9 +2023,7 @@ def home():
         "exchange_rate_mode":
             "NOT_FORCED_IN_PREPARE",
         "price_mode":
-            "PRIMARY_API_ONLY",
-        "price_fallback":
-            "DISABLED",
+            "API_ONLY_NO_FALLBACK",
     })
 
 
@@ -2010,6 +2033,7 @@ def health():
         "status": "ok",
         "bot": "running",
         "version": "16.2",
+        "price_fallback": False,
     })
 
 
