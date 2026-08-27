@@ -540,167 +540,12 @@ def card_details(asset_ids):
     return cards
 
 
-# ============================================================
-# FALLBACK PREZZO TOKEN
-# ============================================================
-
-def token_price_fallback(asset_id):
-    """
-    FALLBACK 16.2
-
-    Quando anyCards() non restituisce:
-        lowestPriceCard
-        lowestPriceCardAnySeason
-
-    interroghiamo direttamente il token/NFT
-    e proviamo a recuperare il prezzo
-    dall'ultima English Auction disponibile.
-
-    Sorare espone:
-        latestEnglishAuction
-            -> bestBid
-                -> amountInFiat
-                    -> eur
-    """
-
-    asset_id = str(
-        asset_id or ""
-    ).strip()
-
-    if not asset_id:
-        return None
-
-    print(
-        f"      🔄 FALLBACK PREZZO TOKEN: "
-        f"{asset_id}",
-        flush=True,
-    )
-
-    data = graphql("""
-        query TokenPriceFallback(
-            $assetIds: [String!]!
-        ) {
-            tokens {
-                nfts(assetIds: $assetIds) {
-                    assetId
-
-                    latestEnglishAuction {
-                        bestBid {
-                            amountInFiat {
-                                eur
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    """, {
-        "assetIds": [asset_id],
-    })
-
-    if not data:
-        print(
-            "      ❌ FALLBACK: nessuna risposta",
-            flush=True,
-        )
-
-        return None
-
-    if data.get("errors"):
-        print(
-            "      ❌ FALLBACK GraphQL ERROR:",
-            flush=True,
-        )
-
-        for e in data["errors"]:
-            print(
-                "         "
-                + json.dumps(
-                    e,
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-
-        return None
-
-    nfts = (
-        ((data.get("data") or {})
-         .get("tokens") or {})
-        .get("nfts")
-        or []
-    )
-
-    for nft in nfts:
-        if not isinstance(nft, dict):
-            continue
-
-        returned_asset_id = str(
-            nft.get("assetId") or ""
-        ).strip()
-
-        if (
-            returned_asset_id
-            and returned_asset_id.lower()
-            != asset_id.lower()
-        ):
-            continue
-
-        auction = (
-            nft.get("latestEnglishAuction")
-            or {}
-        )
-
-        best_bid = (
-            auction.get("bestBid")
-            or {}
-        )
-
-        fiat = (
-            best_bid.get("amountInFiat")
-            or {}
-        )
-
-        eur = fiat.get("eur")
-
-        if eur is not None:
-            try:
-                value = float(eur)
-
-                if value > 0:
-                    cents = int(round(
-                        value * 100
-                    ))
-
-                    print(
-                        f"      💰 FALLBACK AUCTION: "
-                        f"€{cents / 100:.2f}",
-                        flush=True,
-                    )
-
-                    return cents
-
-            except (
-                TypeError,
-                ValueError,
-            ):
-                pass
-
-    print(
-        "      ❌ FALLBACK: prezzo "
-        "non disponibile",
-        flush=True,
-    )
-
-    return None
-
-
 def card_price(card):
     values = []
 
-    # --------------------------------------------------------
-    # PREZZO PRINCIPALE
-    # --------------------------------------------------------
+    # ========================================================
+    # PREZZO TRAMITE API SORARE
+    # ========================================================
 
     for name in (
         "lowestPriceCard",
@@ -763,9 +608,9 @@ def card_price(card):
             ):
                 pass
 
-    # --------------------------------------------------------
-    # PREZZO TROVATO NORMALMENTE
-    # --------------------------------------------------------
+    # ========================================================
+    # PREZZO TROVATO
+    # ========================================================
 
     if values:
         price = min(values)
@@ -778,28 +623,14 @@ def card_price(card):
 
         return price
 
-    # --------------------------------------------------------
-    # FALLBACK 16.2
-    # --------------------------------------------------------
+    # ========================================================
+    # NESSUN PREZZO
+    # ========================================================
 
-    asset_id = card.get("assetId")
-
-    fallback = token_price_fallback(
-        asset_id
+    print(
+        f"      ❌ Prezzo API non disponibile",
+        flush=True,
     )
-
-    if fallback is not None:
-        print(
-            f"      💰 Prezzo finale FALLBACK: "
-            f"€{fallback / 100:.2f}",
-            flush=True,
-        )
-
-        return fallback
-
-    # --------------------------------------------------------
-    # DEBUG
-    # --------------------------------------------------------
 
     print(
         f"      🔍 DEBUG PREZZO: "
@@ -1004,8 +835,7 @@ def valid_card(card):
 
     if price is None:
         print(
-            "      ❌ Prezzo non disponibile "
-            "anche dopo FALLBACK",
+            "      ❌ Prezzo non disponibile",
             flush=True,
         )
 
@@ -1024,6 +854,10 @@ def valid_card(card):
 
         return False
 
+    # --------------------------------------------------------
+    # RARITÀ
+    # --------------------------------------------------------
+
     if rarity != "LIMITED":
         print(
             f"      ❌ Rarità: {rarity}",
@@ -1031,6 +865,10 @@ def valid_card(card):
         )
 
         return False
+
+    # --------------------------------------------------------
+    # COMPETIZIONE
+    # --------------------------------------------------------
 
     if not check_competition(card):
         return False
@@ -2052,8 +1890,14 @@ def worker():
     )
 
     print(
-        "💰 PREZZI: API normale + "
-        "FALLBACK latestEnglishAuction",
+        "💰 PREZZI: solo API "
+        "lowestPriceCard / "
+        "lowestPriceCardAnySeason",
+        flush=True,
+    )
+
+    print(
+        "🚫 FALLBACK PREZZO: DISABILITATO",
         flush=True,
     )
 
@@ -2154,7 +1998,9 @@ def home():
         "exchange_rate_mode":
             "NOT_FORCED_IN_PREPARE",
         "price_mode":
-            "PRIMARY_API_PLUS_TOKEN_AUCTION_FALLBACK",
+            "PRIMARY_API_ONLY",
+        "price_fallback":
+            "DISABLED",
     })
 
 
