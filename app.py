@@ -24,11 +24,23 @@ STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 KID = os.getenv("KULENOVIC_ID", "").strip()
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
+# ============================================================
+# REGOLA PAGAMENTO
+# ============================================================
+# 20 centesimi = €0,20 PER CARTA
+#
+# 1 carta  -> €0,20
+# 2 carte  -> €0,40
+# 3 carte  -> €0,60
+# ecc.
+# ============================================================
+
+PAY_PER_CARD = 20
+
+# Floor accettabile:
+# €0,30 - €0,80
 MIN_PRICE = 30
 MAX_PRICE = 80
-
-# 20 cents = €0,20
-PAY_PER_CARD = 20
 
 MAX_AGE = 28
 INTERVAL = 10
@@ -48,18 +60,6 @@ KASSET = (
 # 2) minimo delle ultime 5 vendite pubbliche
 #
 # ENTRAMBI DEVONO ESSERE DISPONIBILI.
-#
-# Lo storico viene richiesto tramite:
-#
-# tokens.tokenPrices
-#
-# con:
-# - playerSlug
-# - rarity
-# - collection = FOOTBALL
-#
-# Non viene passato alcun parametro stagione:
-# quindi lo storico non viene limitato alla stagione della carta.
 # ============================================================
 
 RECENT_SALES_REQUIRED = 5
@@ -111,7 +111,7 @@ def auth_headers():
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "Sorare-Bot/17.0",
+        "User-Agent": "Sorare-Bot/18.0",
     }
 
     if AUD:
@@ -256,7 +256,7 @@ def get_live_schema():
                 timeout=TIMEOUT,
                 headers={
                     "Accept": "text/plain",
-                    "User-Agent": "Sorare-Bot/17.0",
+                    "User-Agent": "Sorare-Bot/18.0",
                 },
             )
 
@@ -523,10 +523,14 @@ def extract_eur_cents(obj):
 
             key_lower = str(key).lower()
 
+            # ------------------------------------------------
+            # Formati già espressi in centesimi
+            # ------------------------------------------------
+
             if key_lower in (
                 "eurcents",
-                "usdCents".lower(),
-                "gbpCents".lower(),
+                "usdcents",
+                "gbpcents",
             ):
 
                 try:
@@ -542,15 +546,51 @@ def extract_eur_cents(obj):
                 ):
                     pass
 
+            # ------------------------------------------------
+            # NUOVO FORMATO SORARE:
+            #
+            # amounts {
+            #     eur
+            # }
+            #
+            # eur è in euro.
+            #
+            # Esempio:
+            # eur = 0.22
+            # -> 22 centesimi
+            # ------------------------------------------------
+
+            elif key_lower == "eur":
+
+                try:
+
+                    number = float(value)
+
+                    if number > 0:
+
+                        values.append(
+                            int(
+                                round(
+                                    number * 100
+                                )
+                            )
+                        )
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    pass
+
+            # ------------------------------------------------
+            # Compatibilità vecchi formati
+            # ------------------------------------------------
+
             elif key_lower in (
-                "eur",
                 "priceineur",
                 "eurprice",
             ):
 
-                # Questo viene mantenuto come
-                # compatibilità per eventuali
-                # vecchie strutture.
                 try:
 
                     number = float(value)
@@ -648,8 +688,8 @@ def current_market_floor(card):
        = stesso giocatore + rarità,
          indipendentemente dalla stagione
 
-    In entrambi i casi prendiamo esclusivamente
-    una LIVE SINGLE SALE OFFER.
+    In entrambi i casi prendiamo
+    esclusivamente una LIVE SINGLE SALE OFFER.
 
     Non utilizziamo publicMinPrices come sostituto.
     """
@@ -690,13 +730,50 @@ def current_market_floor(card):
         ):
             continue
 
-        value = amounts.get(
+        # ----------------------------------------------------
+        # NUOVO FORMATO:
+        # eur = 0.22
+        # ----------------------------------------------------
+
+        value_eur = amounts.get(
+            "eur"
+        )
+
+        try:
+
+            if value_eur is not None:
+
+                value = int(
+                    round(
+                        float(value_eur)
+                        * 100
+                    )
+                )
+
+                if value > 0:
+                    values.append(value)
+
+                    continue
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            pass
+
+        # ----------------------------------------------------
+        # Compatibilità eventuale eurCents
+        # ----------------------------------------------------
+
+        value_cents = amounts.get(
             "eurCents"
         )
 
         try:
 
-            value = int(value)
+            value = int(
+                value_cents
+            )
 
             if value > 0:
                 values.append(value)
@@ -722,35 +799,33 @@ def get_recent_sales_for_player(
     rarity,
 ):
     """
-    RECUPERA LE ULTIME 5 VENDITE PUBBLICHE.
+    Recupera le ultime 5 vendite pubbliche
+    tramite tokens.tokenPrices.
 
-    CAMPO REALE SORARE:
+    CORREZIONE IMPORTANTE:
 
-        tokens.tokenPrices
+    tokenPrices NON riceve più:
 
-    Parametri:
+        collection
 
-        playerSlug
-        rarity
-        collection = FOOTBALL
+    perché l'API attuale restituisce:
 
-    Sorare documenta tokenPrices come la query
-    che restituisce gli ultimi 5 prezzi pubblici
-    provenienti da Auction o SingleSaleOffer.
+        Field 'tokenPrices' doesn't accept
+        argument 'collection'
 
-    NON viene passato alcun parametro stagione.
+    Inoltre MonetaryAmount usa:
 
-    Quindi NON limitiamo lo storico alla stagione
-    della carta ricevuta.
+        amounts {
+            eur
+        }
 
-    IMPORTANTE:
+    e NON:
 
-    Se Sorare restituisce meno di 5 prezzi,
-    restituiamo comunque quelli ricevuti e
-    card_price() rifiuterà la carta.
+        amounts {
+            eurCents
+        }
 
-    Se la query fallisce o non contiene prezzi EUR,
-    restituiamo None.
+    Non viene passato alcun parametro stagione.
     """
 
     player_slug = str(
@@ -798,7 +873,8 @@ def get_recent_sales_for_player(
     )
 
     print(
-        "         🌍 Collection: FOOTBALL",
+        "         🌍 Collection: "
+        "NON passata a tokenPrices",
         flush=True,
     )
 
@@ -807,27 +883,28 @@ def get_recent_sales_for_player(
         flush=True,
     )
 
-    # --------------------------------------------------------
-    # QUERY REALE
-    # --------------------------------------------------------
+    # ========================================================
+    # QUERY CORRETTA
+    #
+    # NIENTE collection
+    # NIENTE eurCents
+    # ========================================================
 
     data = graphql("""
         query TokenPrices(
             $playerSlug: String!
             $rarity: Rarity!
-            $collection: Collection!
         ) {
             tokens {
                 tokenPrices(
                     playerSlug: $playerSlug
                     rarity: $rarity
-                    collection: $collection
                 ) {
                     id
                     date
 
                     amounts {
-                        eurCents
+                        eur
                     }
                 }
             }
@@ -835,7 +912,6 @@ def get_recent_sales_for_player(
     """, {
         "playerSlug": player_slug,
         "rarity": rarity,
-        "collection": "FOOTBALL",
     })
 
     if not data:
@@ -902,13 +978,6 @@ def get_recent_sales_for_player(
 
         return None
 
-    # --------------------------------------------------------
-    # tokenPrices è già la lista degli
-    # ultimi prezzi pubblici.
-    #
-    # Non facciamo query arbitrarie.
-    # --------------------------------------------------------
-
     result = []
 
     for item in prices:
@@ -930,13 +999,27 @@ def get_recent_sales_for_player(
         ):
             continue
 
-        value = amounts.get(
-            "eurCents"
+        # ====================================================
+        # NUOVO FORMATO:
+        #
+        # amounts.eur
+        # ====================================================
+
+        value_eur = amounts.get(
+            "eur"
         )
 
         try:
 
-            value = int(value)
+            if value_eur is None:
+                continue
+
+            value = int(
+                round(
+                    float(value_eur)
+                    * 100
+                )
+            )
 
         except (
             TypeError,
@@ -951,7 +1034,9 @@ def get_recent_sales_for_player(
             "id": item.get("id"),
             "date": item.get("date"),
             "amounts": {
-                "eurCents": value,
+                "eur": float(
+                    value_eur
+                ),
             },
         })
 
@@ -965,11 +1050,9 @@ def get_recent_sales_for_player(
 
         return None
 
-    # --------------------------------------------------------
-    # Sicurezza:
-    #
-    # prendiamo al massimo le prime 5.
-    # --------------------------------------------------------
+    # ========================================================
+    # Al massimo ultime 5
+    # ========================================================
 
     result = result[
         :RECENT_SALES_REQUIRED
@@ -1032,13 +1115,13 @@ def card_details(asset_ids):
                     liveSingleSaleOffer {
                         receiverSide {
                             amounts {
-                                eurCents
+                                eur
                             }
                         }
                     }
 
                     publicMinPrices {
-                        eurCents
+                        eur
                     }
                 }
 
@@ -1046,13 +1129,13 @@ def card_details(asset_ids):
                     liveSingleSaleOffer {
                         receiverSide {
                             amounts {
-                                eurCents
+                                eur
                             }
                         }
                     }
 
                     publicMinPrices {
-                        eurCents
+                        eur
                     }
                 }
             }
@@ -1167,10 +1250,6 @@ def card_price(card):
         )
     )
 
-    # ========================================================
-    # OBBLIGO DI ENTRAMBI
-    # ========================================================
-
     if not recent_sales:
 
         print(
@@ -1203,10 +1282,6 @@ def card_price(card):
         )
 
         return None
-
-    # ========================================================
-    # PRENDIAMO ESATTAMENTE LE ULTIME 5
-    # ========================================================
 
     recent_sales = recent_sales[
         :RECENT_SALES_REQUIRED
@@ -1993,6 +2068,10 @@ def counter_offer(
 
         return False
 
+    # ========================================================
+    # €0,20 PER CARTA
+    # ========================================================
+
     amount = (
         len(asset_ids)
         * PAY_PER_CARD
@@ -2001,6 +2080,13 @@ def counter_offer(
     print(
         f"🟢 Controproposta: "
         f"{len(asset_ids)} carta/e → "
+        f"€{amount / 100:.2f}",
+        flush=True,
+    )
+
+    print(
+        f"💶 CALCOLO: "
+        f"{len(asset_ids)} × €0,20 = "
         f"€{amount / 100:.2f}",
         flush=True,
     )
@@ -2648,8 +2734,8 @@ def worker():
     )
 
     print(
-        "📦 VERSIONE BOT: 17.0 "
-        "REAL TOKEN PRICES",
+        "📦 VERSIONE BOT: 18.0 "
+        "TOKEN PRICES FIX",
         flush=True,
     )
 
@@ -2697,8 +2783,18 @@ def worker():
     )
 
     print(
-        "🌍 STORICO: tutte le stagioni "
-        "della collection FOOTBALL",
+        "🔧 tokenPrices: "
+        "NESSUN parametro collection",
+        flush=True,
+    )
+
+    print(
+        "💶 tokenPrices: amounts.eur",
+        flush=True,
+    )
+
+    print(
+        "🌍 STORICO: tutte le stagioni",
         flush=True,
     )
 
@@ -2819,13 +2915,16 @@ def home():
     return jsonify({
         "status": "online",
         "bot": "sorare",
-        "version": "17.0",
+        "version": "18.0",
 
         "dry_run":
             DRY_RUN,
 
         "pay_per_card_cents":
             PAY_PER_CARD,
+
+        "pay_per_card_eur":
+            0.20,
 
         "interval_seconds":
             INTERVAL,
@@ -2851,6 +2950,12 @@ def home():
         "history_query":
             "tokens.tokenPrices",
 
+        "history_price_field":
+            "amounts.eur",
+
+        "history_collection_argument":
+            False,
+
         "prepare_mode":
             "LIVE_SCHEMA_AWARE",
 
@@ -2868,7 +2973,7 @@ def health():
     return jsonify({
         "status": "ok",
         "bot": "running",
-        "version": "17.0",
+        "version": "18.0",
 
         "floor_mode":
             "STRICT_CURRENT_PLUS_LAST_5",
@@ -2878,6 +2983,12 @@ def health():
 
         "history_query":
             "tokens.tokenPrices",
+
+        "history_price_field":
+            "amounts.eur",
+
+        "pay_per_card_cents":
+            PAY_PER_CARD,
     })
 
 
