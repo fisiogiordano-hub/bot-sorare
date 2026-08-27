@@ -24,7 +24,7 @@ STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 KID = os.getenv("KULENOVIC_ID", "").strip()
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
-MIN_PRICE = 32
+MIN_PRICE = 30
 MAX_PRICE = 80
 PAY_PER_CARD = 20
 MAX_AGE = 28
@@ -32,7 +32,6 @@ INTERVAL = 10
 TIMEOUT = 30
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
-
 KASSET = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
     "6796b6c0ed10ba0a6"
@@ -40,10 +39,8 @@ KASSET = (
 
 processed = set()
 state_lock = threading.Lock()
-
 _worker_started = False
 _worker_lock = threading.Lock()
-
 _schema_lock = threading.Lock()
 _schema_text = None
 
@@ -84,7 +81,7 @@ def auth_headers():
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "Sorare-Bot/16.4",
+        "User-Agent": "Sorare-Bot/16.2",
     }
 
     if AUD:
@@ -214,7 +211,7 @@ def get_live_schema():
                 timeout=TIMEOUT,
                 headers={
                     "Accept": "text/plain",
-                    "User-Agent": "Sorare-Bot/16.4",
+                    "User-Agent": "Sorare-Bot/16.2",
                 },
             )
 
@@ -459,15 +456,6 @@ def card_details(asset_ids):
     if not asset_ids:
         return []
 
-    # ========================================================
-    # UNICA QUERY PREZZI
-    #
-    # NON usare cards(slugs:)
-    # NON usare tokens.nfts
-    #
-    # anyCards(assetIds:) è il metodo ufficiale.
-    # ========================================================
-
     data = graphql("""
         query Cards($assetIds: [String!]) {
             anyCards(assetIds: $assetIds) {
@@ -475,8 +463,6 @@ def card_details(asset_ids):
                 slug
                 name
                 rarityTyped
-                seasonYear
-                serialNumber
 
                 anyPlayer {
                     displayName
@@ -492,30 +478,7 @@ def card_details(asset_ids):
                     }
                 }
 
-                # ==================================================
-                # Prezzo della carta stessa
-                # ==================================================
-
-                liveSingleSaleOffer {
-                    receiverSide {
-                        amounts {
-                            eurCents
-                        }
-                    }
-                }
-
-                publicMinPrices {
-                    eurCents
-                }
-
-                # ==================================================
-                # Floor stesso giocatore / rarità / stagione
-                # ==================================================
-
                 lowestPriceCard {
-                    assetId
-                    slug
-
                     liveSingleSaleOffer {
                         receiverSide {
                             amounts {
@@ -527,29 +490,9 @@ def card_details(asset_ids):
                     publicMinPrices {
                         eurCents
                     }
-
-                    latestEnglishAuction {
-                        currency
-                        currentPrice
-                        minNextBid
-
-                        bestBid {
-                            amounts {
-                                eurCents
-                            }
-                        }
-                    }
                 }
-
-                # ==================================================
-                # Floor stesso giocatore / rarità / qualsiasi
-                # stagione
-                # ==================================================
 
                 lowestPriceCardAnySeason {
-                    assetId
-                    slug
-
                     liveSingleSaleOffer {
                         receiverSide {
                             amounts {
@@ -560,34 +503,6 @@ def card_details(asset_ids):
 
                     publicMinPrices {
                         eurCents
-                    }
-
-                    latestEnglishAuction {
-                        currency
-                        currentPrice
-                        minNextBid
-
-                        bestBid {
-                            amounts {
-                                eurCents
-                            }
-                        }
-                    }
-                }
-
-                # ==================================================
-                # Eventuale asta sulla carta originale
-                # ==================================================
-
-                latestEnglishAuction {
-                    currency
-                    currentPrice
-                    minNextBid
-
-                    bestBid {
-                        amounts {
-                            eurCents
-                        }
                     }
                 }
             }
@@ -626,340 +541,265 @@ def card_details(asset_ids):
 
 
 # ============================================================
-# PRICE HELPERS
+# FALLBACK PREZZO TOKEN
 # ============================================================
 
-def extract_eur_cents_from_sale_offer(
-    source
-):
-    if not isinstance(source, dict):
+def token_price_fallback(asset_id):
+    """
+    FALLBACK 16.2
+
+    Quando anyCards() non restituisce:
+        lowestPriceCard
+        lowestPriceCardAnySeason
+
+    interroghiamo direttamente il token/NFT
+    e proviamo a recuperare il prezzo
+    dall'ultima English Auction disponibile.
+
+    Sorare espone:
+        latestEnglishAuction
+            -> bestBid
+                -> amountInFiat
+                    -> eur
+    """
+
+    asset_id = str(
+        asset_id or ""
+    ).strip()
+
+    if not asset_id:
         return None
 
-    try:
-        value = (
-            (source.get(
-                "liveSingleSaleOffer"
-            ) or {})
-            .get("receiverSide", {})
-            .get("amounts", {})
-            .get("eurCents")
-        )
-
-        if value is None:
-            return None
-
-        value = int(value)
-
-        if value > 0:
-            return value
-
-    except (
-        TypeError,
-        ValueError,
-        AttributeError,
-    ):
-        pass
-
-    return None
-
-
-def extract_public_min_price(
-    source
-):
-    if not isinstance(source, dict):
-        return None
-
-    try:
-        value = (
-            source.get(
-                "publicMinPrices"
-            ) or {}
-        ).get("eurCents")
-
-        if value is None:
-            return None
-
-        value = int(value)
-
-        if value > 0:
-            return value
-
-    except (
-        TypeError,
-        ValueError,
-        AttributeError,
-    ):
-        pass
-
-    return None
-
-
-def extract_auction_price(
-    auction
-):
-    if not isinstance(auction, dict):
-        return None
-
-    # --------------------------------------------------------
-    # L'asta deve essere in EUR per poter confrontare
-    # direttamente il prezzo con MIN_PRICE / MAX_PRICE.
-    # --------------------------------------------------------
-
-    currency = str(
-        auction.get("currency") or ""
-    ).upper()
-
-    # --------------------------------------------------------
-    # Prima proviamo minNextBid.
-    # È il minimo importo attualmente necessario
-    # per entrare nell'asta.
-    # --------------------------------------------------------
-
-    min_next = auction.get(
-        "minNextBid"
+    print(
+        f"      🔄 FALLBACK PREZZO TOKEN: "
+        f"{asset_id}",
+        flush=True,
     )
 
-    if currency == "EUR" and min_next is not None:
-        try:
-            value = float(min_next)
+    data = graphql("""
+        query TokenPriceFallback(
+            $assetIds: [String!]!
+        ) {
+            tokens {
+                nfts(assetIds: $assetIds) {
+                    assetId
 
-            if value > 0:
-                return int(
-                    round(value * 100)
-                )
+                    latestEnglishAuction {
+                        bestBid {
+                            amountInFiat {
+                                eur
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    """, {
+        "assetIds": [asset_id],
+    })
 
-        except (
-            TypeError,
-            ValueError,
-        ):
-            pass
-
-    # --------------------------------------------------------
-    # Poi currentPrice.
-    # --------------------------------------------------------
-
-    current = auction.get(
-        "currentPrice"
-    )
-
-    if currency == "EUR" and current is not None:
-        try:
-            value = float(current)
-
-            if value > 0:
-                return int(
-                    round(value * 100)
-                )
-
-        except (
-            TypeError,
-            ValueError,
-        ):
-            pass
-
-    # --------------------------------------------------------
-    # Infine bestBid.amounts.eurCents
-    # --------------------------------------------------------
-
-    try:
-        value = (
-            (auction.get(
-                "bestBid"
-            ) or {})
-            .get("amounts", {})
-            .get("eurCents")
-        )
-
-        if value is not None:
-            value = int(value)
-
-            if value > 0:
-                return value
-
-    except (
-        TypeError,
-        ValueError,
-        AttributeError,
-    ):
-        pass
-
-    return None
-
-
-# ============================================================
-# PREZZO
-# ============================================================
-
-def card_price(card):
-    candidates = []
-
-    # ========================================================
-    # 1. LIVE SALE DELLA CARTA STESSA
-    # ========================================================
-
-    value = extract_eur_cents_from_sale_offer(
-        card
-    )
-
-    if value is not None:
-        candidates.append(
-            (
-                value,
-                "live sale carta",
-            )
-        )
-
-    # ========================================================
-    # 2. PUBLIC MIN PRICE DELLA CARTA STESSA
-    # ========================================================
-
-    value = extract_public_min_price(
-        card
-    )
-
-    if value is not None:
-        candidates.append(
-            (
-                value,
-                "public min carta",
-            )
-        )
-
-    # ========================================================
-    # 3. LOWEST PRICE CARD
-    # ========================================================
-
-    for field_name in (
-        "lowestPriceCard",
-        "lowestPriceCardAnySeason",
-    ):
-        source = (
-            card.get(field_name)
-            or {}
-        )
-
-        value = extract_eur_cents_from_sale_offer(
-            source
-        )
-
-        if value is not None:
-            candidates.append(
-                (
-                    value,
-                    f"{field_name} live sale",
-                )
-            )
-
-        value = extract_public_min_price(
-            source
-        )
-
-        if value is not None:
-            candidates.append(
-                (
-                    value,
-                    f"{field_name} public min",
-                )
-            )
-
-    # ========================================================
-    # 4. ASTA DELLA CARTA STESSA
-    # ========================================================
-
-    auction = (
-        card.get(
-            "latestEnglishAuction"
-        )
-        or {}
-    )
-
-    value = extract_auction_price(
-        auction
-    )
-
-    if value is not None:
-        candidates.append(
-            (
-                value,
-                "asta carta",
-            )
-        )
-
-    # ========================================================
-    # 5. ASTE DELLE LOWEST PRICE CARD
-    # ========================================================
-
-    for field_name in (
-        "lowestPriceCard",
-        "lowestPriceCardAnySeason",
-    ):
-        source = (
-            card.get(field_name)
-            or {}
-        )
-
-        auction = (
-            source.get(
-                "latestEnglishAuction"
-            )
-            or {}
-        )
-
-        value = extract_auction_price(
-            auction
-        )
-
-        if value is not None:
-            candidates.append(
-                (
-                    value,
-                    f"{field_name} asta",
-                )
-            )
-
-    # ========================================================
-    # PREZZO TROVATO
-    # ========================================================
-
-    if candidates:
-        candidates.sort(
-            key=lambda x: x[0]
-        )
-
-        price, source = candidates[0]
-
+    if not data:
         print(
-            f"      💰 Floor trovato: "
-            f"€{price / 100:.2f} "
-            f"| fonte: {source}",
+            "      ❌ FALLBACK: nessuna risposta",
             flush=True,
         )
 
-        # DEBUG: mostra tutte le fonti disponibili
-        if len(candidates) > 1:
+        return None
+
+    if data.get("errors"):
+        print(
+            "      ❌ FALLBACK GraphQL ERROR:",
+            flush=True,
+        )
+
+        for e in data["errors"]:
             print(
-                "      🔎 Altri prezzi:",
+                "         "
+                + json.dumps(
+                    e,
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
 
-            for p, s in candidates:
-                print(
-                    f"         • €{p / 100:.2f} "
-                    f"| {s}",
-                    flush=True,
+        return None
+
+    nfts = (
+        ((data.get("data") or {})
+         .get("tokens") or {})
+        .get("nfts")
+        or []
+    )
+
+    for nft in nfts:
+        if not isinstance(nft, dict):
+            continue
+
+        returned_asset_id = str(
+            nft.get("assetId") or ""
+        ).strip()
+
+        if (
+            returned_asset_id
+            and returned_asset_id.lower()
+            != asset_id.lower()
+        ):
+            continue
+
+        auction = (
+            nft.get("latestEnglishAuction")
+            or {}
+        )
+
+        best_bid = (
+            auction.get("bestBid")
+            or {}
+        )
+
+        fiat = (
+            best_bid.get("amountInFiat")
+            or {}
+        )
+
+        eur = fiat.get("eur")
+
+        if eur is not None:
+            try:
+                value = float(eur)
+
+                if value > 0:
+                    cents = int(round(
+                        value * 100
+                    ))
+
+                    print(
+                        f"      💰 FALLBACK AUCTION: "
+                        f"€{cents / 100:.2f}",
+                        flush=True,
+                    )
+
+                    return cents
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                pass
+
+    print(
+        "      ❌ FALLBACK: prezzo "
+        "non disponibile",
+        flush=True,
+    )
+
+    return None
+
+
+def card_price(card):
+    values = []
+
+    # --------------------------------------------------------
+    # PREZZO PRINCIPALE
+    # --------------------------------------------------------
+
+    for name in (
+        "lowestPriceCard",
+        "lowestPriceCardAnySeason",
+    ):
+        source = card.get(name) or {}
+
+        # ----------------------------------------------------
+        # LIVE SINGLE SALE
+        # ----------------------------------------------------
+
+        try:
+            live = (
+                (source.get(
+                    "liveSingleSaleOffer"
+                ) or {})
+                .get("receiverSide", {})
+                .get("amounts", {})
+                .get("eurCents")
+            )
+
+            if live is not None:
+                value = int(live)
+
+                if value > 0:
+                    values.append(value)
+
+        except (
+            TypeError,
+            ValueError,
+            AttributeError,
+        ):
+            pass
+
+        # ----------------------------------------------------
+        # PUBLIC MIN PRICES
+        # ----------------------------------------------------
+
+        public = (
+            source.get("publicMinPrices")
+            or []
+        )
+
+        if isinstance(public, dict):
+            public = [public]
+
+        for item in public:
+            try:
+                value = int(
+                    item.get("eurCents")
                 )
+
+                if value > 0:
+                    values.append(value)
+
+            except (
+                TypeError,
+                ValueError,
+                AttributeError,
+            ):
+                pass
+
+    # --------------------------------------------------------
+    # PREZZO TROVATO NORMALMENTE
+    # --------------------------------------------------------
+
+    if values:
+        price = min(values)
+
+        print(
+            f"      💰 Floor API: "
+            f"€{price / 100:.2f}",
+            flush=True,
+        )
 
         return price
 
-    # ========================================================
-    # NESSUN PREZZO
-    # ========================================================
+    # --------------------------------------------------------
+    # FALLBACK 16.2
+    # --------------------------------------------------------
 
-    print(
-        "      ❌ Prezzo non disponibile "
-        "dai dati API",
-        flush=True,
+    asset_id = card.get("assetId")
+
+    fallback = token_price_fallback(
+        asset_id
     )
+
+    if fallback is not None:
+        print(
+            f"      💰 Prezzo finale FALLBACK: "
+            f"€{fallback / 100:.2f}",
+            flush=True,
+        )
+
+        return fallback
+
+    # --------------------------------------------------------
+    # DEBUG
+    # --------------------------------------------------------
 
     print(
         f"      🔍 DEBUG PREZZO: "
@@ -972,33 +812,15 @@ def card_price(card):
             {
                 "assetId":
                     card.get("assetId"),
-
                 "slug":
                     card.get("slug"),
-
-                "liveSingleSaleOffer":
-                    card.get(
-                        "liveSingleSaleOffer"
-                    ),
-
-                "publicMinPrices":
-                    card.get(
-                        "publicMinPrices"
-                    ),
-
                 "lowestPriceCard":
                     card.get(
                         "lowestPriceCard"
                     ),
-
                 "lowestPriceCardAnySeason":
                     card.get(
                         "lowestPriceCardAnySeason"
-                    ),
-
-                "latestEnglishAuction":
-                    card.get(
-                        "latestEnglishAuction"
                     ),
             },
             ensure_ascii=False,
@@ -1174,15 +996,16 @@ def valid_card(card):
 
         return False
 
-    # ========================================================
+    # --------------------------------------------------------
     # PREZZO
-    # ========================================================
+    # --------------------------------------------------------
 
     price = card_price(card)
 
     if price is None:
         print(
-            "      ❌ Prezzo non disponibile",
+            "      ❌ Prezzo non disponibile "
+            "anche dopo FALLBACK",
             flush=True,
         )
 
@@ -1201,10 +1024,6 @@ def valid_card(card):
 
         return False
 
-    # ========================================================
-    # RARITÀ
-    # ========================================================
-
     if rarity != "LIMITED":
         print(
             f"      ❌ Rarità: {rarity}",
@@ -1212,10 +1031,6 @@ def valid_card(card):
         )
 
         return False
-
-    # ========================================================
-    # COMPETIZIONE
-    # ========================================================
 
     if not check_competition(card):
         return False
@@ -1584,7 +1399,6 @@ def counter_offer(offer, cards):
         str(c.get("assetId")).strip()
         for c in cards
         if c.get("assetId")
-        and not is_kulenovic(c)
     ]
 
     if not receiver:
@@ -1643,9 +1457,9 @@ def counter_offer(offer, cards):
 
         return False
 
-    # ========================================================
+    # --------------------------------------------------------
     # PREPARE
-    # ========================================================
+    # --------------------------------------------------------
 
     try:
         prepare_input = (
@@ -1822,9 +1636,9 @@ def counter_offer(offer, cards):
         flush=True,
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # SIGN
-    # ========================================================
+    # --------------------------------------------------------
 
     try:
         approvals = sign_authorizations(
@@ -1845,9 +1659,9 @@ def counter_offer(offer, cards):
         flush=True,
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # CREATE
-    # ========================================================
+    # --------------------------------------------------------
 
     try:
         create_input = (
@@ -2051,11 +1865,6 @@ def process_offer(offer):
         or []
     )
 
-    # ========================================================
-    # CONTROLLO SICUREZZA:
-    # Kulenovic deve essere dalla parte del bot.
-    # ========================================================
-
     if not any(
         is_kulenovic(c)
         for c in receiver_cards
@@ -2073,18 +1882,10 @@ def process_offer(offer):
         flush=True,
     )
 
-    # ========================================================
-    # PRENDIAMO ESCLUSIVAMENTE LE CARTE
-    # OFFERTE DALL'ALTRO MANAGER.
-    #
-    # Kulenovic non viene mai incluso.
-    # ========================================================
-
     ids = [
         c.get("assetId")
         for c in sender_cards
         if c.get("assetId")
-        and not is_kulenovic(c)
     ]
 
     if not ids:
@@ -2198,7 +1999,7 @@ def worker():
     )
 
     print(
-        "📦 VERSIONE BOT: 16.4",
+        "📦 VERSIONE BOT: 16.2",
         flush=True,
     )
 
@@ -2239,25 +2040,20 @@ def worker():
     )
 
     print(
-        "💰 PREZZI: anyCards(assetIds:) "
-        "+ live sale + publicMinPrices "
-        "+ lowestPriceCard + auction",
+        "🚫 PREPARE: nessun "
+        "exchangeRateId forzato",
         flush=True,
     )
 
     print(
-        "🚫 FALLBACK tokens.nfts: DISABILITATO",
+        "🚫 PREPARE: type inviato solo "
+        "se presente nello schema LIVE",
         flush=True,
     )
 
     print(
-        "🚫 FALLBACK cards(slugs:): "
-        "DISABILITATO",
-        flush=True,
-    )
-
-    print(
-        "🎯 KULENOVIC: MAI CEDUTO",
+        "💰 PREZZI: API normale + "
+        "FALLBACK latestEnglishAuction",
         flush=True,
     )
 
@@ -2345,12 +2141,10 @@ def home():
     return jsonify({
         "status": "online",
         "bot": "sorare",
-        "version": "16.4",
+        "version": "16.2",
         "dry_run": DRY_RUN,
         "pay_per_card_cents": PAY_PER_CARD,
         "interval_seconds": INTERVAL,
-        "min_price_cents": MIN_PRICE,
-        "max_price_cents": MAX_PRICE,
         "max_age": MAX_AGE,
         "competition_mode":
             "ALL_ACTIVE_SORARE_COMPETITIONS",
@@ -2360,13 +2154,7 @@ def home():
         "exchange_rate_mode":
             "NOT_FORCED_IN_PREPARE",
         "price_mode":
-            "ANYCARDS_ASSETIDS_PLUS_MARKET_SOURCES",
-        "token_nfts_fallback":
-            False,
-        "cards_slugs_fallback":
-            False,
-        "kulenovic_transfer":
-            False,
+            "PRIMARY_API_PLUS_TOKEN_AUCTION_FALLBACK",
     })
 
 
@@ -2375,7 +2163,7 @@ def health():
     return jsonify({
         "status": "ok",
         "bot": "running",
-        "version": "16.4",
+        "version": "16.2",
     })
 
 
