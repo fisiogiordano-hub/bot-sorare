@@ -35,11 +35,9 @@ MAX_AGE = 28
 INTERVAL = 10
 TIMEOUT = 30
 
-# Se il prezzo non è disponibile, l'offerta
-# rimane pendente e viene ricontrollata.
 UNKNOWN_PRICE_RETRY = 60
 
-BOT_VERSION = "18.1"
+BOT_VERSION = "18.2"
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -47,6 +45,16 @@ KASSET = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
     "6796b6c0ed10ba0a6"
 )
+
+# ============================================================
+# USD / EUR
+# ============================================================
+
+USD_EUR_CACHE_SECONDS = 300
+
+_usd_eur_lock = threading.Lock()
+_usd_eur_cache = None
+_usd_eur_cache_time = 0
 
 # ============================================================
 # STATE
@@ -107,7 +115,7 @@ def auth_headers():
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "Sorare-Bot/18.1",
+        "User-Agent": "Sorare-Bot/18.2",
     }
 
     if AUD:
@@ -142,10 +150,6 @@ def graphql(query, variables=None):
                 flush=True,
             )
 
-            # ------------------------------------------------
-            # RATE LIMIT
-            # ------------------------------------------------
-
             if response.status_code == 429:
 
                 try:
@@ -170,10 +174,6 @@ def graphql(query, variables=None):
                 time.sleep(wait)
                 continue
 
-            # ------------------------------------------------
-            # HTTP ERROR
-            # ------------------------------------------------
-
             if response.status_code != 200:
 
                 print(
@@ -184,10 +184,6 @@ def graphql(query, variables=None):
 
                 time.sleep(attempt)
                 continue
-
-            # ------------------------------------------------
-            # JSON
-            # ------------------------------------------------
 
             try:
                 data = response.json()
@@ -200,10 +196,6 @@ def graphql(query, variables=None):
                 )
 
                 return None
-
-            # ------------------------------------------------
-            # GRAPHQL ERRORS
-            # ------------------------------------------------
 
             if data.get("errors"):
 
@@ -266,7 +258,7 @@ def get_live_schema():
                 timeout=TIMEOUT,
                 headers={
                     "Accept": "text/plain",
-                    "User-Agent": "Sorare-Bot/18.1",
+                    "User-Agent": "Sorare-Bot/18.2",
                 },
             )
 
@@ -622,12 +614,6 @@ def card_details(asset_ids):
 # ============================================================
 
 def get_eth_eur_cents_rate():
-    """
-    Recupera il cambio ETH/EUR da Sorare.
-
-    ethRates.eurCents =
-        centesimi EUR per 1 ETH
-    """
 
     global _exchange_cache
     global _exchange_cache_time
@@ -710,6 +696,7 @@ def get_eth_eur_cents_rate():
         )
 
         try:
+
             value = int(value)
 
         except (
@@ -778,8 +765,6 @@ def wei_to_eur_cents(wei):
 
         return None
 
-    # 1 ETH = 10^18 wei
-
     eur_cents = (
         wei
         * eur_cents_per_eth
@@ -792,18 +777,109 @@ def wei_to_eur_cents(wei):
 
 
 # ============================================================
-# USD
+# USD -> EUR
 # ============================================================
 
-def usd_to_eur_cents(usd):
-    """
-    NON effettua una conversione USD/EUR
-    inventando un cambio.
+def get_usd_eur_rate():
 
-    Se Sorare restituisce USD ma non restituisce
-    un prezzo EUR direttamente convertibile,
-    il prezzo viene considerato UNKNOWN.
-    """
+    global _usd_eur_cache
+    global _usd_eur_cache_time
+
+    now = time.time()
+
+    with _usd_eur_lock:
+
+        if (
+            _usd_eur_cache is not None
+            and
+            now - _usd_eur_cache_time
+            < USD_EUR_CACHE_SECONDS
+        ):
+            return _usd_eur_cache
+
+        try:
+
+            response = requests.get(
+                "https://api.frankfurter.app/latest",
+                params={
+                    "from": "USD",
+                    "to": "EUR",
+                },
+                timeout=TIMEOUT,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "Sorare-Bot/18.2",
+                },
+            )
+
+            print(
+                f"💱 USD/EUR HTTP "
+                f"{response.status_code}",
+                flush=True,
+            )
+
+            if response.status_code != 200:
+
+                print(
+                    "❌ Impossibile recuperare "
+                    "il cambio USD/EUR",
+                    flush=True,
+                )
+
+                return None
+
+            data = response.json()
+
+            rates = (
+                data.get("rates")
+                or {}
+            )
+
+            rate = rates.get("EUR")
+
+            try:
+
+                rate = float(rate)
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                rate = None
+
+            if rate is None or rate <= 0:
+
+                print(
+                    "❌ Cambio USD/EUR non valido",
+                    flush=True,
+                )
+
+                return None
+
+            _usd_eur_cache = rate
+            _usd_eur_cache_time = now
+
+            print(
+                f"💱 Cambio USD/EUR: "
+                f"1 USD = {rate:.6f} EUR",
+                flush=True,
+            )
+
+            return rate
+
+        except Exception as error:
+
+            print(
+                f"❌ Errore cambio USD/EUR: "
+                f"{error}",
+                flush=True,
+            )
+
+            return None
+
+
+def usd_to_eur_cents(usd):
 
     if usd is None:
         return None
@@ -819,24 +895,60 @@ def usd_to_eur_cents(usd):
         ValueError,
     ):
 
+        print(
+            f"❌ Valore USD non valido: {usd}",
+            flush=True,
+        )
+
         return None
 
     if usd_value <= 0:
         return None
 
     print(
-        f"⚠️ Prezzo USD rilevato: "
+        f"💵 Prezzo USD rilevato: "
         f"${usd_value:.4f}",
         flush=True,
     )
 
+    rate = get_usd_eur_rate()
+
+    if rate is None:
+
+        print(
+            "🟡 Cambio USD/EUR non disponibile",
+            flush=True,
+        )
+
+        print(
+            "🛡️ Prezzo lasciato UNKNOWN",
+            flush=True,
+        )
+
+        return None
+
+    eur_value = (
+        usd_value * rate
+    )
+
+    eur_cents = int(
+        round(
+            eur_value * 100
+        )
+    )
+
+    if eur_cents <= 0:
+        return None
+
     print(
-        "🟡 Cambio USD/EUR non configurato: "
-        "prezzo considerato UNKNOWN",
+        f"💶 Conversione USD → EUR: "
+        f"${usd_value:.4f} → "
+        f"€{eur_value:.4f} "
+        f"({eur_cents} cents)",
         flush=True,
     )
 
-    return None
+    return eur_cents
 
 
 # ============================================================
@@ -844,45 +956,6 @@ def usd_to_eur_cents(usd):
 # ============================================================
 
 def extract_offer_eur_cents(amounts):
-    """
-    Estrae il prezzo EUR in modo CONSERVATIVO.
-
-    PRIORITÀ:
-
-    1. eurCents
-    2. usd -> EUR
-       SOLO se esiste un cambio verificato.
-       Attualmente NON viene usato.
-    3. wei -> EUR
-       SOLO se referenceCurrency è esplicitamente:
-           ETH
-           WETH
-           ETHER
-
-    IMPORTANTE:
-
-    NON facciamo:
-
-        wei -> ETH
-
-    solo perché il campo wei esiste.
-
-    Esempio:
-
-        {
-            "eurCents": null,
-            "wei": null,
-            "referenceCurrency": "USD"
-        }
-
-    => None
-
-    Quindi:
-
-        UNKNOWN_PRICE
-        nessun rifiuto
-        nessuna controproposta
-    """
 
     if not isinstance(
         amounts,
@@ -930,7 +1003,7 @@ def extract_offer_eur_cents(amounts):
             pass
 
     # ========================================================
-    # USD
+    # USD -> EUR
     # ========================================================
 
     usd = amounts.get(
@@ -952,10 +1025,11 @@ def extract_offer_eur_cents(amounts):
         )
 
         if converted is not None:
+
             return converted
 
     # ========================================================
-    # WEI
+    # WEI -> EUR
     # ========================================================
 
     wei = amounts.get(
@@ -992,6 +1066,7 @@ def extract_offer_eur_cents(amounts):
             )
 
             if converted is not None:
+
                 return converted
 
         else:
@@ -999,7 +1074,7 @@ def extract_offer_eur_cents(amounts):
             print(
                 "⚠️ wei presente ma "
                 f"referenceCurrency="
-                f"'{reference_currency}'.",
+                f"'{reference_currency}'",
                 flush=True,
             )
 
@@ -1009,9 +1084,11 @@ def extract_offer_eur_cents(amounts):
                 flush=True,
             )
 
-    # ========================================================
-    # NESSUN PREZZO
-    # ========================================================
+    print(
+        "🛡️ Nessun prezzo EUR "
+        "convertibile disponibile",
+        flush=True,
+    )
 
     return None
 
@@ -1242,10 +1319,6 @@ def get_live_floor(card):
                 or []
             )
 
-            # ------------------------------------------------
-            # MATCH CARTA
-            # ------------------------------------------------
-
             compatible = False
 
             for offer_card in offer_cards:
@@ -1310,10 +1383,6 @@ def get_live_floor(card):
             if not compatible:
                 continue
 
-            # ------------------------------------------------
-            # PREZZO
-            # ------------------------------------------------
-
             receiver_side = (
                 offer.get(
                     "receiverSide"
@@ -1369,10 +1438,6 @@ def get_live_floor(card):
                 )
             )
 
-        # ----------------------------------------------------
-        # PAGINATION
-        # ----------------------------------------------------
-
         page_info = (
             connection.get(
                 "pageInfo"
@@ -1402,10 +1467,6 @@ def get_live_floor(card):
             break
 
         cursor = next_cursor
-
-    # ========================================================
-    # FLOOR
-    # ========================================================
 
     if not prices:
 
@@ -1645,10 +1706,6 @@ def valid_card(card):
         flush=True,
     )
 
-    # --------------------------------------------------------
-    # AGE
-    # --------------------------------------------------------
-
     if age >= MAX_AGE:
 
         print(
@@ -1662,10 +1719,6 @@ def valid_card(card):
             "invalid",
         )
 
-    # --------------------------------------------------------
-    # RARITY
-    # --------------------------------------------------------
-
     if rarity != "LIMITED":
 
         print(
@@ -1677,10 +1730,6 @@ def valid_card(card):
             False,
             "invalid",
         )
-
-    # --------------------------------------------------------
-    # PRICE
-    # --------------------------------------------------------
 
     price = get_live_floor(
         card
@@ -1716,10 +1765,6 @@ def valid_card(card):
         flush=True,
     )
 
-    # --------------------------------------------------------
-    # PRICE RANGE
-    # --------------------------------------------------------
-
     if not (
         MIN_PRICE
         <= price
@@ -1735,10 +1780,6 @@ def valid_card(card):
             False,
             "invalid",
         )
-
-    # --------------------------------------------------------
-    # COMPETITION
-    # --------------------------------------------------------
 
     if not check_competition(
         card
@@ -2241,10 +2282,6 @@ def counter_offer(
 
         return False
 
-    # ========================================================
-    # PREPARE
-    # ========================================================
-
     try:
 
         prepare_input = (
@@ -2433,10 +2470,6 @@ def counter_offer(
         flush=True,
     )
 
-    # ========================================================
-    # SIGN
-    # ========================================================
-
     try:
 
         approvals = sign_authorizations(
@@ -2457,10 +2490,6 @@ def counter_offer(
         f"{len(approvals)}",
         flush=True,
     )
-
-    # ========================================================
-    # CREATE
-    # ========================================================
 
     try:
 
@@ -2714,10 +2743,6 @@ def process_offer(offer):
     if not offer_id:
         return
 
-    # --------------------------------------------------------
-    # GIÀ COMPLETATA
-    # --------------------------------------------------------
-
     with state_lock:
 
         if offer_id in processed:
@@ -2732,10 +2757,6 @@ def process_offer(offer):
         f"📨 OFFERTA {offer_id}",
         flush=True,
     )
-
-    # --------------------------------------------------------
-    # RETRY PRICE UNKNOWN
-    # --------------------------------------------------------
 
     if not should_retry_unknown(
         offer_id
@@ -2772,10 +2793,6 @@ def process_offer(offer):
         )
         or []
     )
-
-    # --------------------------------------------------------
-    # KULENOVIC
-    # --------------------------------------------------------
 
     if not any(
         is_kulenovic(card)
@@ -2881,10 +2898,6 @@ def process_offer(offer):
         flush=True,
     )
 
-    # ========================================================
-    # FLOOR MANCANTE
-    # ========================================================
-
     if has_unknown_price:
 
         print(
@@ -2922,10 +2935,6 @@ def process_offer(offer):
 
         return
 
-    # ========================================================
-    # NESSUNA CARTA VALIDA
-    # ========================================================
-
     if not valid_cards:
 
         print(
@@ -2948,10 +2957,6 @@ def process_offer(offer):
 
         return
 
-    # ========================================================
-    # CARTA VALIDA
-    # ========================================================
-
     rejected = (
         len(cards)
         - len(valid_cards)
@@ -2964,10 +2969,6 @@ def process_offer(offer):
             f"esclusa/e",
             flush=True,
         )
-
-    # ========================================================
-    # COUNTER OFFER
-    # ========================================================
 
     if counter_offer(
         offer,
@@ -3078,8 +3079,14 @@ def worker():
     )
 
     print(
-        "💵 USD: NON convertito senza "
-        "cambio verificato USD/EUR",
+        "💵 USD: CONVERSIONE "
+        "AUTOMATICA USD → EUR",
+        flush=True,
+    )
+
+    print(
+        f"💱 USD/EUR CACHE: "
+        f"{USD_EUR_CACHE_SECONDS}s",
         flush=True,
     )
 
@@ -3138,10 +3145,6 @@ def worker():
         flush=True,
     )
 
-    # --------------------------------------------------------
-    # ACCOUNT
-    # --------------------------------------------------------
-
     if not check_account():
 
         print(
@@ -3152,15 +3155,7 @@ def worker():
 
         return
 
-    # --------------------------------------------------------
-    # SCHEMA
-    # --------------------------------------------------------
-
     inspect_live_schema()
-
-    # --------------------------------------------------------
-    # LOOP
-    # --------------------------------------------------------
 
     while True:
 
@@ -3281,10 +3276,16 @@ def home():
             "LIVE_SINGLE_SALE_EXACT_PLAYER_RARITY_SEASON",
 
         "price_eur_mode":
-            "EUR_CENTS_ONLY_OR_EXPLICIT_ETH_WEI",
+            "EUR_CENTS_OR_USD_CONVERTED_OR_EXPLICIT_ETH_WEI",
 
         "usd_conversion":
-            False,
+            True,
+
+        "usd_eur_exchange":
+            "FRANKFURTER_LATEST",
+
+        "usd_eur_cache_seconds":
+            USD_EUR_CACHE_SECONDS,
 
         "wei_requires_explicit_eth":
             True,
