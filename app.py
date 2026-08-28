@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import threading
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
 import requests
 
 from flask import Flask, jsonify
@@ -53,7 +55,7 @@ USD_EUR_CACHE_SECONDS = 300
 # Cache cambio ETH/EUR Sorare
 ETH_EUR_CACHE_SECONDS = 300
 
-BOT_VERSION = "18.3"
+BOT_VERSION = "18.4"
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -79,9 +81,11 @@ _worker_lock = threading.Lock()
 _schema_lock = threading.Lock()
 _schema_text = None
 
+
 _usd_eur_lock = threading.Lock()
 _usd_eur_cache = None
 _usd_eur_cache_time = 0
+
 
 _eth_eur_lock = threading.Lock()
 _eth_eur_cache = None
@@ -436,6 +440,70 @@ def inspect_live_schema():
                 flush=True,
             )
 
+    # Controlli minimi obbligatori.
+    required_prepare = {
+        "receiveAssetIds",
+        "sendAssetIds",
+        "sendAmount",
+        "receiverSlug",
+        "settlementCurrencies",
+    }
+
+    required_create = {
+        "approvals",
+        "dealId",
+        "receiveAssetIds",
+        "sendAssetIds",
+        "sendAmount",
+        "receiverSlug",
+    }
+
+    missing_prepare = (
+        required_prepare - prepare_fields
+    )
+
+    missing_create = (
+        required_create - create_fields
+    )
+
+    if missing_prepare:
+
+        print(
+            "🛑 Campi mancanti in "
+            "prepareOfferInput: "
+            + ", ".join(
+                sorted(missing_prepare)
+            ),
+            flush=True,
+        )
+
+    else:
+
+        print(
+            "✅ prepareOfferInput "
+            "compatibile con il flusso bot",
+            flush=True,
+        )
+
+    if missing_create:
+
+        print(
+            "🛑 Campi mancanti in "
+            "createDirectOfferInput: "
+            + ", ".join(
+                sorted(missing_create)
+            ),
+            flush=True,
+        )
+
+    else:
+
+        print(
+            "✅ createDirectOfferInput "
+            "compatibile con il flusso bot",
+            flush=True,
+        )
+
     return (
         prepare_fields,
         create_fields,
@@ -477,6 +545,14 @@ def check_account():
         f"{user.get('nickname') or user.get('slug')}",
         flush=True,
     )
+
+    if user.get("starkKey"):
+
+        print(
+            f"🔐 Stark key account: "
+            f"{user.get('starkKey')}",
+            flush=True,
+        )
 
     return True
 
@@ -620,11 +696,13 @@ def card_details(asset_ids):
 
         return []
 
-    return (
+    cards = (
         ((data.get("data") or {})
          .get("anyCards"))
         or []
     )
+
+    return cards
 
 
 # ============================================================
@@ -638,7 +716,7 @@ def get_usd_eur_rate():
     Esempio:
         1 USD = 0.85 EUR
 
-    Il cambio viene messo in cache per 300 secondi.
+    Il cambio viene messo in cache.
     """
 
     global _usd_eur_cache
@@ -685,12 +763,14 @@ def get_usd_eur_rate():
 
             data = response.json()
 
-            rate = (
+            raw_rate = (
                 (data.get("rates") or {})
                 .get("EUR")
             )
 
-            rate = float(rate)
+            rate = Decimal(
+                str(raw_rate)
+            )
 
             if rate <= 0:
                 raise ValueError(
@@ -708,7 +788,12 @@ def get_usd_eur_rate():
 
             return rate
 
-        except Exception as error:
+        except (
+            requests.RequestException,
+            InvalidOperation,
+            TypeError,
+            ValueError,
+        ) as error:
 
             print(
                 f"❌ Errore cambio USD/EUR: "
@@ -719,14 +804,23 @@ def get_usd_eur_rate():
             return None
 
 
-def usd_to_eur_cents(usd):
+def usd_cents_to_eur_cents(
+    usd_cents
+):
+    """
+    Sorare espone usdCents.
 
-    if usd is None:
+    Esempio:
+        usdCents = 123
+        = $1.23
+    """
+
+    if usd_cents is None:
         return None
 
     try:
-        usd_value = float(
-            str(usd).strip()
+        usd_cents = int(
+            str(usd_cents).strip()
         )
 
     except (
@@ -736,7 +830,7 @@ def usd_to_eur_cents(usd):
 
         return None
 
-    if usd_value <= 0:
+    if usd_cents <= 0:
         return None
 
     rate = get_usd_eur_rate()
@@ -751,13 +845,19 @@ def usd_to_eur_cents(usd):
 
         return None
 
-    eur_value = (
-        usd_value * rate
+    usd = (
+        Decimal(usd_cents)
+        / Decimal("100")
     )
 
+    eur = usd * rate
+
     eur_cents = int(
-        round(
-            eur_value * 100
+        (
+            eur * Decimal("100")
+        ).quantize(
+            Decimal("1"),
+            rounding=ROUND_HALF_UP,
         )
     )
 
@@ -765,8 +865,8 @@ def usd_to_eur_cents(usd):
         return None
 
     print(
-        f"💵 ${usd_value:.4f} USD "
-        f"→ €{eur_value:.4f} EUR "
+        f"💵 ${usd:.2f} USD "
+        f"→ €{eur:.4f} EUR "
         f"→ {eur_cents} cents",
         flush=True,
     )
@@ -947,7 +1047,7 @@ def extract_offer_eur_cents(amounts):
     Ordine:
 
     1. eurCents
-    2. USD -> EUR
+    2. usdCents -> EUR
     3. wei -> EUR SOLO se referenceCurrency
        è ETH/WETH/ETHER
 
@@ -1008,20 +1108,22 @@ def extract_offer_eur_cents(amounts):
     # 2. USD -> EUR
     # ========================================================
 
-    usd = amounts.get(
-        "usd"
+    usd_cents = amounts.get(
+        "usdCents"
     )
 
-    if usd is not None:
+    if usd_cents is not None:
 
         print(
-            f"💵 Prezzo USD rilevato: "
-            f"{usd}",
+            f"💵 Prezzo USD cents "
+            f"rilevato: {usd_cents}",
             flush=True,
         )
 
-        converted = usd_to_eur_cents(
-            usd
+        converted = (
+            usd_cents_to_eur_cents(
+                usd_cents
+            )
         )
 
         if converted is not None:
@@ -1035,7 +1137,7 @@ def extract_offer_eur_cents(amounts):
             return converted
 
         print(
-            "⚠️ USD presente ma "
+            "⚠️ usdCents presente ma "
             "conversione impossibile",
             flush=True,
         )
@@ -1054,6 +1156,7 @@ def extract_offer_eur_cents(amounts):
             "ETH",
             "WETH",
             "ETHER",
+            "WEI",
         }
 
         if reference_currency in crypto_references:
@@ -1200,9 +1303,9 @@ def get_live_floor(card):
                             senderSide {
                                 amounts {
                                     eurCents
+                                    usdCents
                                     wei
                                     referenceCurrency
-                                    usd
                                 }
 
                                 anyCards {
@@ -1221,9 +1324,9 @@ def get_live_floor(card):
                             receiverSide {
                                 amounts {
                                     eurCents
+                                    usdCents
                                     wei
                                     referenceCurrency
-                                    usd
                                 }
                             }
                         }
@@ -1352,9 +1455,10 @@ def get_live_floor(card):
                     or ""
                 ).strip().lower()
 
+                # MATCH ESATTO:
+                # giocatore + rarità + stagione
+
                 if (
-                    offer_player_slug
-                    and
                     offer_player_slug
                     != player_slug
                 ):
@@ -1515,18 +1619,20 @@ def is_kulenovic(card):
             KID.lower()
         )
 
+    card_asset_id = str(
+        card.get("assetId")
+        or ""
+    ).lower()
+
+    card_slug = str(
+        card.get("slug")
+        or ""
+    ).lower()
+
     return (
-        str(
-            card.get("assetId")
-            or ""
-        ).lower()
-        in wanted
+        card_asset_id in wanted
         or
-        str(
-            card.get("slug")
-            or ""
-        ).lower()
-        in wanted
+        card_slug in wanted
     )
 
 
@@ -1663,6 +1769,7 @@ def valid_card(card):
     )
 
     try:
+
         age = int(
             player.get("age")
         )
@@ -1876,9 +1983,39 @@ def reject_offer(offer):
         }
     })
 
+    if not data:
+
+        print(
+            "❌ Nessuna risposta da rejectOffer",
+            flush=True,
+        )
+
+        return False
+
+    if data.get("errors"):
+
+        print(
+            "❌ rejectOffer "
+            "GRAPHQL GLOBAL ERROR:",
+            flush=True,
+        )
+
+        for error in data["errors"]:
+
+            print(
+                json.dumps(
+                    error,
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+        return False
+
     result = (
-        (data or {}).get("data") or {}
-    ).get("rejectOffer")
+        (data.get("data") or {})
+        .get("rejectOffer")
+    )
 
     if not result:
 
@@ -1932,6 +2069,13 @@ def sign_authorizations(authorizations):
             "Node.js non disponibile"
         )
 
+    if not STARK:
+
+        raise RuntimeError(
+            "SORARE_STARK_PRIVATE_KEY "
+            "non configurata"
+        )
+
     script = r'''
 const fs = require("fs");
 
@@ -1951,18 +2095,6 @@ function build(a) {
 
         throw new Error(
             "AuthorizationRequest mancante"
-        );
-    }
-
-    if (
-        r.__typename ===
-        "StarkexTransferAuthorizationRequest"
-        &&
-        r.amount != null
-    ) {
-
-        r.amount = BigInt(
-            r.amount
         );
     }
 
@@ -2073,9 +2205,20 @@ process.stdout.write(
             or "Firma fallita"
         )
 
-    return json.loads(
-        process.stdout
-    )
+    try:
+
+        result = json.loads(
+            process.stdout
+        )
+
+    except json.JSONDecodeError as error:
+
+        raise RuntimeError(
+            "Output firma JSON non valido: "
+            + str(error)
+        )
+
+    return result
 
 
 # ============================================================
@@ -2102,21 +2245,46 @@ def build_prepare_offer_input(
 
     result = {}
 
+    # Carte che VOGLIAMO RICEVERE
     if "receiveAssetIds" in fields:
         result["receiveAssetIds"] = asset_ids
+    else:
+        raise RuntimeError(
+            "receiveAssetIds non presente "
+            "in prepareOfferInput"
+        )
 
+    # Carte che NOI CEDIAMO
     if "sendAssetIds" in fields:
         result["sendAssetIds"] = []
+    else:
+        raise RuntimeError(
+            "sendAssetIds non presente "
+            "in prepareOfferInput"
+        )
 
+    # Denaro che NOI INVIAMO
     if "sendAmount" in fields:
         result["sendAmount"] = {
             "amount": str(amount),
             "currency": "EUR",
         }
+    else:
+        raise RuntimeError(
+            "sendAmount non presente "
+            "in prepareOfferInput"
+        )
 
+    # Utente destinatario della controproposta
     if "receiverSlug" in fields:
         result["receiverSlug"] = receiver
+    else:
+        raise RuntimeError(
+            "receiverSlug non presente "
+            "in prepareOfferInput"
+        )
 
+    # Wallet/currency accettati
     if "settlementCurrencies" in fields:
         result["settlementCurrencies"] = [
             "EUR"
@@ -2155,13 +2323,31 @@ def build_create_direct_offer_input(
 
     result = {}
 
-    if "approvals" in fields:
-        result["approvals"] = approvals
+    # --------------------------------------------------------
+    # OBBLIGATORI
+    # --------------------------------------------------------
 
-    if "dealId" in fields:
-        result["dealId"] = str(
-            uuid.uuid4()
+    if "approvals" not in fields:
+        raise RuntimeError(
+            "approvals non presente "
+            "in createDirectOfferInput"
         )
+
+    result["approvals"] = approvals
+
+    if "dealId" not in fields:
+        raise RuntimeError(
+            "dealId non presente "
+            "in createDirectOfferInput"
+        )
+
+    result["dealId"] = str(
+        uuid.uuid4()
+    )
+
+    # --------------------------------------------------------
+    # CARTE
+    # --------------------------------------------------------
 
     if "sendAssetIds" in fields:
         result["sendAssetIds"] = []
@@ -2169,16 +2355,31 @@ def build_create_direct_offer_input(
     if "receiveAssetIds" in fields:
         result["receiveAssetIds"] = asset_ids
 
+    # --------------------------------------------------------
+    # DENARO
+    # --------------------------------------------------------
+
     if "sendAmount" in fields:
+
         result["sendAmount"] = {
             "amount": str(amount),
             "currency": "EUR",
         }
 
+    # --------------------------------------------------------
+    # RECEIVER
+    # --------------------------------------------------------
+
     if "receiverSlug" in fields:
+
         result["receiverSlug"] = receiver
 
+    # --------------------------------------------------------
+    # CLIENT ID
+    # --------------------------------------------------------
+
     if "clientMutationId" in fields:
+
         result["clientMutationId"] = str(
             uuid.uuid4()
         )
@@ -2463,6 +2664,26 @@ def counter_offer(
         flush=True,
     )
 
+    # Mostra i tipi ricevuti senza
+    # esporre la private key.
+    for index, authorization in enumerate(
+        authorizations,
+        start=1,
+    ):
+
+        request = (
+            authorization.get(
+                "request"
+            )
+            or {}
+        )
+
+        print(
+            f"   🔐 Authorization #{index}: "
+            f"{request.get('__typename')}",
+            flush=True,
+        )
+
     # ========================================================
     # SIGN
     # ========================================================
@@ -2477,6 +2698,18 @@ def counter_offer(
 
         print(
             f"❌ Firma: {error}",
+            flush=True,
+        )
+
+        return False
+
+    if len(approvals) != len(
+        authorizations
+    ):
+
+        print(
+            "❌ Numero approvals "
+            "diverso dalle authorizations",
             flush=True,
         )
 
@@ -3102,8 +3335,8 @@ def worker():
     )
 
     print(
-        "💵 USD: CONVERSIONE "
-        "AUTOMATICA USD → EUR",
+        "💵 USD: usdCents → "
+        "conversione USD → EUR",
         flush=True,
     )
 
@@ -3116,7 +3349,7 @@ def worker():
     print(
         "💎 WEI: convertito in EUR "
         "SOLO con referenceCurrency "
-        "ETH/WETH/ETHER",
+        "ETH/WETH/ETHER/WEI",
         flush=True,
     )
 
@@ -3308,10 +3541,13 @@ def home():
             "LIVE_SINGLE_SALE_EXACT_PLAYER_RARITY_SEASON",
 
         "price_eur_mode":
-            "EUR_DIRECT_OR_USD_CONVERTED_OR_EXPLICIT_ETH_WEI",
+            "EUR_DIRECT_OR_USDCENTS_CONVERTED_OR_EXPLICIT_ETH_WEI",
 
         "usd_conversion":
             True,
+
+        "usd_field":
+            "usdCents",
 
         "usd_conversion_mode":
             "LIVE_USD_EUR_RATE_WITH_CACHE",
