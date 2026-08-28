@@ -6,8 +6,6 @@ import shutil
 import subprocess
 import threading
 import re
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-
 import requests
 
 from flask import Flask, jsonify
@@ -32,30 +30,56 @@ DRY_RUN = (
     os.getenv("DRY_RUN", "false").lower() == "true"
 )
 
-# Prezzi in CENTESIMI di EUR
+# ------------------------------------------------------------
+# PREZZI
+# ------------------------------------------------------------
+
+# Tutti i prezzi sono in CENTESIMI EUR.
+
 MIN_PRICE = 32
 MAX_PRICE = 70
 
-# 20 centesimi = €0,20 per carta
+# €0,20 per carta
 PAY_PER_CARD = 20
 
 # Deve essere strettamente minore di 28
 MAX_AGE = 28
 
+
+# ------------------------------------------------------------
+# LOOP
+# ------------------------------------------------------------
+
 INTERVAL = 10
 TIMEOUT = 30
 
-# Se il prezzo non è disponibile,
-# l'offerta resta pending e viene ritentata.
+# Timeout specifico per il download dello schema.
+# Non deve bloccare l'avvio del bot.
+SCHEMA_TIMEOUT = 10
+
+# Se il floor non è determinabile:
+# lascia l'offerta pending.
 UNKNOWN_PRICE_RETRY = 60
 
-# Cache cambio USD/EUR
-USD_EUR_CACHE_SECONDS = 300
 
-# Cache cambio ETH/EUR Sorare
+# ------------------------------------------------------------
+# CACHE CAMBI
+# ------------------------------------------------------------
+
+USD_EUR_CACHE_SECONDS = 300
 ETH_EUR_CACHE_SECONDS = 300
 
-BOT_VERSION = "18.4"
+
+# ------------------------------------------------------------
+# VERSIONE
+# ------------------------------------------------------------
+
+BOT_VERSION = "19.0"
+
+
+# ============================================================
+# KULENOVIC
+# ============================================================
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -80,12 +104,12 @@ _worker_lock = threading.Lock()
 
 _schema_lock = threading.Lock()
 _schema_text = None
-
+_schema_checked = False
+_schema_available = False
 
 _usd_eur_lock = threading.Lock()
 _usd_eur_cache = None
 _usd_eur_cache_time = 0
-
 
 _eth_eur_lock = threading.Lock()
 _eth_eur_cache = None
@@ -114,6 +138,7 @@ def slug(value):
 
 
 def auth_headers():
+
     if not TOKEN:
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato"
@@ -142,6 +167,7 @@ def auth_headers():
 # ============================================================
 
 def graphql(query, variables=None):
+
     payload = {
         "query": query,
         "variables": variables or {},
@@ -150,6 +176,7 @@ def graphql(query, variables=None):
     for attempt in range(1, 4):
 
         try:
+
             response = requests.post(
                 URL,
                 json=payload,
@@ -232,6 +259,7 @@ def graphql(query, variables=None):
                 )
 
                 for error in data["errors"]:
+
                     print(
                         json.dumps(
                             error,
@@ -269,18 +297,30 @@ def graphql(query, variables=None):
 # LIVE SCHEMA
 # ============================================================
 
-def get_live_schema():
+def get_live_schema(force=False):
+
     global _schema_text
+    global _schema_checked
+    global _schema_available
 
     with _schema_lock:
 
-        if _schema_text is not None:
+        if (
+            _schema_checked
+            and not force
+        ):
             return _schema_text
 
+        print(
+            "📚 Controllo schema Sorare corrente...",
+            flush=True,
+        )
+
         try:
+
             response = requests.get(
                 SCHEMA_URL,
-                timeout=TIMEOUT,
+                timeout=SCHEMA_TIMEOUT,
                 headers={
                     "Accept": "text/plain",
                     "User-Agent": f"Sorare-Bot/{BOT_VERSION}",
@@ -296,43 +336,84 @@ def get_live_schema():
             if response.status_code != 200:
 
                 print(
-                    "⚠️ Impossibile scaricare "
-                    "lo schema live",
+                    "⚠️ Schema HTTP non disponibile",
                     flush=True,
                 )
 
+                _schema_checked = True
+                _schema_available = False
+
                 return None
 
-            _schema_text = response.text
+            text = response.text
+
+            if not text.strip():
+
+                print(
+                    "⚠️ Schema vuoto",
+                    flush=True,
+                )
+
+                _schema_checked = True
+                _schema_available = False
+
+                return None
+
+            _schema_text = text
+            _schema_checked = True
+            _schema_available = True
 
             print(
                 f"✅ Schema live scaricato "
-                f"({len(_schema_text)} caratteri)",
+                f"({len(text)} caratteri)",
                 flush=True,
             )
 
-            return _schema_text
+            return text
+
+        except requests.RequestException as error:
+
+            print(
+                f"⚠️ Timeout/errore schema live: "
+                f"{error}",
+                flush=True,
+            )
+
+            _schema_checked = True
+            _schema_available = False
+
+            return None
 
         except Exception as error:
 
             print(
-                f"⚠️ Errore download schema: {error}",
+                f"⚠️ Errore schema live: "
+                f"{error}",
                 flush=True,
             )
+
+            _schema_checked = True
+            _schema_available = False
 
             return None
 
 
-def get_input_fields(type_name):
-    schema = get_live_schema()
+def extract_schema_input_fields(
+    schema,
+    type_name,
+):
 
     if not schema:
         return set()
 
-    match = re.search(
+    pattern = (
         r"\binput\s+"
         + re.escape(type_name)
-        + r"\s*\{",
+        + r"\s*\{"
+    )
+
+    match = re.search(
+        pattern,
         schema,
         re.MULTILINE,
     )
@@ -340,8 +421,8 @@ def get_input_fields(type_name):
     if not match:
 
         print(
-            f"⚠️ {type_name} non trovato "
-            "nello schema",
+            f"⚠️ {type_name} "
+            "non trovato nello schema",
             flush=True,
         )
 
@@ -352,12 +433,17 @@ def get_input_fields(type_name):
     depth = 1
     position = start
 
-    while position < len(schema) and depth:
+    while (
+        position < len(schema)
+        and depth > 0
+    ):
 
-        if schema[position] == "{":
+        char = schema[position]
+
+        if char == "{":
             depth += 1
 
-        elif schema[position] == "}":
+        elif char == "}":
             depth -= 1
 
         position += 1
@@ -372,22 +458,42 @@ def get_input_fields(type_name):
 
         line = line.strip()
 
-        if not line or line.startswith("#"):
+        if not line:
+            continue
+
+        if line.startswith("#"):
             continue
 
         field_match = re.match(
-            r"^([A-Za-z_][A-Za-z0-9_]*)\s*"
-            r"(?:\([^)]*\))?\s*:",
+            r"^([A-Za-z_][A-Za-z0-9_]*)"
+            r"\s*(?:\([^)]*\))?\s*:",
             line,
         )
 
         if field_match:
+
             fields.add(
                 field_match.group(1)
             )
 
+    return fields
+
+
+def get_input_fields(type_name):
+
+    schema = get_live_schema()
+
+    if not schema:
+
+        return set()
+
+    fields = extract_schema_input_fields(
+        schema,
+        type_name,
+    )
+
     print(
-        f"🔍 Campi {type_name}: "
+        f"🔍 {type_name}: "
         f"{', '.join(sorted(fields))}",
         flush=True,
     )
@@ -402,45 +508,41 @@ def inspect_live_schema():
         flush=True,
     )
 
-    prepare_fields = get_input_fields(
-        "prepareOfferInput"
-    )
+    schema = get_live_schema()
 
-    create_fields = get_input_fields(
-        "createDirectOfferInput"
-    )
-
-    if prepare_fields:
+    if not schema:
 
         print(
-            "   prepareOfferInput:",
+            "⚠️ Schema live non raggiungibile.",
             flush=True,
         )
 
-        for field in sorted(
-            prepare_fields
-        ):
-            print(
-                f"      • {field}",
-                flush=True,
-            )
-
-    if create_fields:
-
         print(
-            "   createDirectOfferInput:",
+            "ℹ️ Il bot userà la struttura "
+            "confermata dello schema corrente.",
             flush=True,
         )
 
-        for field in sorted(
-            create_fields
-        ):
-            print(
-                f"      • {field}",
-                flush=True,
-            )
+        return False
 
-    # Controlli minimi obbligatori.
+    prepare_fields = (
+        extract_schema_input_fields(
+            schema,
+            "prepareOfferInput",
+        )
+    )
+
+    create_fields = (
+        extract_schema_input_fields(
+            schema,
+            "createDirectOfferInput",
+        )
+    )
+
+    # --------------------------------------------------------
+    # CAMPI ATTUALMENTE RICHIESTI
+    # --------------------------------------------------------
+
     required_prepare = {
         "receiveAssetIds",
         "sendAssetIds",
@@ -459,55 +561,96 @@ def inspect_live_schema():
     }
 
     missing_prepare = (
-        required_prepare - prepare_fields
+        required_prepare
+        - prepare_fields
     )
 
     missing_create = (
-        required_create - create_fields
+        required_create
+        - create_fields
     )
+
+    print(
+        "   prepareOfferInput:",
+        flush=True,
+    )
+
+    for field in sorted(
+        prepare_fields
+    ):
+
+        print(
+            f"      • {field}",
+            flush=True,
+        )
+
+    print(
+        "   createDirectOfferInput:",
+        flush=True,
+    )
+
+    for field in sorted(
+        create_fields
+    ):
+
+        print(
+            f"      • {field}",
+            flush=True,
+        )
 
     if missing_prepare:
 
         print(
-            "🛑 Campi mancanti in "
-            "prepareOfferInput: "
-            + ", ".join(
-                sorted(missing_prepare)
-            ),
+            "⚠️ Campi mancanti "
+            "prepareOfferInput:",
             flush=True,
         )
 
-    else:
+        for field in sorted(
+            missing_prepare
+        ):
 
-        print(
-            "✅ prepareOfferInput "
-            "compatibile con il flusso bot",
-            flush=True,
-        )
+            print(
+                f"      ❌ {field}",
+                flush=True,
+            )
 
     if missing_create:
 
         print(
-            "🛑 Campi mancanti in "
-            "createDirectOfferInput: "
-            + ", ".join(
-                sorted(missing_create)
-            ),
+            "⚠️ Campi mancanti "
+            "createDirectOfferInput:",
             flush=True,
         )
 
-    else:
+        for field in sorted(
+            missing_create
+        ):
+
+            print(
+                f"      ❌ {field}",
+                flush=True,
+            )
+
+    if (
+        not missing_prepare
+        and not missing_create
+    ):
 
         print(
-            "✅ createDirectOfferInput "
-            "compatibile con il flusso bot",
+            "✅ SCHEMA OFFER CONFERMATO",
             flush=True,
         )
 
-    return (
-        prepare_fields,
-        create_fields,
+        return True
+
+    print(
+        "🛑 Schema incompatibile "
+        "con la configurazione del bot.",
+        flush=True,
     )
+
+    return False
 
 
 # ============================================================
@@ -549,8 +692,7 @@ def check_account():
     if user.get("starkKey"):
 
         print(
-            f"🔐 Stark key account: "
-            f"{user.get('starkKey')}",
+            "🔐 Stark key account: PRESENTE",
             flush=True,
         )
 
@@ -686,6 +828,7 @@ def card_details(asset_ids):
         )
 
         for error in data["errors"]:
+
             print(
                 json.dumps(
                     error,
@@ -696,13 +839,11 @@ def card_details(asset_ids):
 
         return []
 
-    cards = (
+    return (
         ((data.get("data") or {})
          .get("anyCards"))
         or []
     )
-
-    return cards
 
 
 # ============================================================
@@ -710,14 +851,6 @@ def card_details(asset_ids):
 # ============================================================
 
 def get_usd_eur_rate():
-    """
-    Restituisce quanti EUR valgono 1 USD.
-
-    Esempio:
-        1 USD = 0.85 EUR
-
-    Il cambio viene messo in cache.
-    """
 
     global _usd_eur_cache
     global _usd_eur_cache_time
@@ -763,14 +896,12 @@ def get_usd_eur_rate():
 
             data = response.json()
 
-            raw_rate = (
+            rate = (
                 (data.get("rates") or {})
                 .get("EUR")
             )
 
-            rate = Decimal(
-                str(raw_rate)
-            )
+            rate = float(rate)
 
             if rate <= 0:
                 raise ValueError(
@@ -781,19 +912,14 @@ def get_usd_eur_rate():
             _usd_eur_cache_time = now
 
             print(
-                f"💱 Cambio USD/EUR: "
-                f"1 USD = {rate:.6f} EUR",
+                f"💱 1 USD = "
+                f"{rate:.6f} EUR",
                 flush=True,
             )
 
             return rate
 
-        except (
-            requests.RequestException,
-            InvalidOperation,
-            TypeError,
-            ValueError,
-        ) as error:
+        except Exception as error:
 
             print(
                 f"❌ Errore cambio USD/EUR: "
@@ -807,18 +933,12 @@ def get_usd_eur_rate():
 def usd_cents_to_eur_cents(
     usd_cents
 ):
-    """
-    Sorare espone usdCents.
-
-    Esempio:
-        usdCents = 123
-        = $1.23
-    """
 
     if usd_cents is None:
         return None
 
     try:
+
         usd_cents = int(
             str(usd_cents).strip()
         )
@@ -845,19 +965,9 @@ def usd_cents_to_eur_cents(
 
         return None
 
-    usd = (
-        Decimal(usd_cents)
-        / Decimal("100")
-    )
-
-    eur = usd * rate
-
     eur_cents = int(
-        (
-            eur * Decimal("100")
-        ).quantize(
-            Decimal("1"),
-            rounding=ROUND_HALF_UP,
+        round(
+            usd_cents * rate
         )
     )
 
@@ -865,9 +975,8 @@ def usd_cents_to_eur_cents(
         return None
 
     print(
-        f"💵 ${usd:.2f} USD "
-        f"→ €{eur:.4f} EUR "
-        f"→ {eur_cents} cents",
+        f"💵 {usd_cents} USD cents "
+        f"→ {eur_cents} EUR cents",
         flush=True,
     )
 
@@ -879,12 +988,6 @@ def usd_cents_to_eur_cents(
 # ============================================================
 
 def get_eth_eur_cents_rate():
-    """
-    Recupera il cambio ETH/EUR da Sorare.
-
-    ethRates.eurCents =
-        centesimi EUR per 1 ETH
-    """
 
     global _eth_eur_cache
     global _eth_eur_cache_time
@@ -934,6 +1037,7 @@ def get_eth_eur_cents_rate():
             )
 
             for error in data["errors"]:
+
                 print(
                     json.dumps(
                         error,
@@ -966,12 +1070,14 @@ def get_eth_eur_cents_rate():
         )
 
         try:
+
             value = int(value)
 
         except (
             TypeError,
             ValueError,
         ):
+
             value = None
 
         if not value or value <= 0:
@@ -987,7 +1093,7 @@ def get_eth_eur_cents_rate():
         _eth_eur_cache_time = now
 
         print(
-            f"💱 Cambio Sorare ETH/EUR: "
+            f"💱 Sorare ETH/EUR: "
             f"{value} EUR cents / ETH",
             flush=True,
         )
@@ -1001,6 +1107,14 @@ def wei_to_eur_cents(wei):
         return None
 
     try:
+
+        if isinstance(wei, dict):
+
+            wei = (
+                wei.get("amount")
+                or wei.get("value")
+            )
+
         wei = int(
             str(wei).strip()
         )
@@ -1009,6 +1123,7 @@ def wei_to_eur_cents(wei):
         TypeError,
         ValueError,
     ):
+
         return None
 
     if wei <= 0:
@@ -1019,11 +1134,6 @@ def wei_to_eur_cents(wei):
     )
 
     if not eur_cents_per_eth:
-
-        print(
-            "⚠️ Cambio ETH/EUR non disponibile",
-            flush=True,
-        )
 
         return None
 
@@ -1042,21 +1152,28 @@ def wei_to_eur_cents(wei):
 # PRICE EXTRACTION
 # ============================================================
 
-def extract_offer_eur_cents(amounts):
+def extract_offer_eur_cents(
+    amounts
+):
     """
+    Schema Sorare corrente:
+
+        MonetaryAmount {
+            eurCents
+            usdCents
+            wei
+            referenceCurrency
+        }
+
     Ordine:
 
-    1. eurCents
-    2. usdCents -> EUR
-    3. wei -> EUR SOLO se referenceCurrency
-       è ETH/WETH/ETHER
+        1. eurCents
+        2. usdCents -> EUR
+        3. wei -> EUR SOLO se
+           referenceCurrency = ETH/WETH/ETHER/WEI
 
-    MAI:
-
-        wei + USD -> ETH
-
-    Se nessun metodo è verificabile:
-        None = UNKNOWN_PRICE
+    MAI convertire automaticamente
+    wei + USD in ETH.
     """
 
     if not isinstance(
@@ -1091,7 +1208,7 @@ def extract_offer_eur_cents(amounts):
             if eur > 0:
 
                 print(
-                    f"💶 Prezzo EUR diretto: "
+                    f"💶 Prezzo EUR: "
                     f"€{eur / 100:.2f}",
                     flush=True,
                 )
@@ -1105,7 +1222,7 @@ def extract_offer_eur_cents(amounts):
             pass
 
     # ========================================================
-    # 2. USD -> EUR
+    # 2. USD CENTS -> EUR
     # ========================================================
 
     usd_cents = amounts.get(
@@ -1115,8 +1232,8 @@ def extract_offer_eur_cents(amounts):
     if usd_cents is not None:
 
         print(
-            f"💵 Prezzo USD cents "
-            f"rilevato: {usd_cents}",
+            f"💵 Prezzo USD cents: "
+            f"{usd_cents}",
             flush=True,
         )
 
@@ -1137,7 +1254,7 @@ def extract_offer_eur_cents(amounts):
             return converted
 
         print(
-            "⚠️ usdCents presente ma "
+            "⚠️ USD presente ma "
             "conversione impossibile",
             flush=True,
         )
@@ -1168,8 +1285,10 @@ def extract_offer_eur_cents(amounts):
                 flush=True,
             )
 
-            converted = wei_to_eur_cents(
-                wei
+            converted = (
+                wei_to_eur_cents(
+                    wei
+                )
             )
 
             if converted is not None:
@@ -1186,7 +1305,7 @@ def extract_offer_eur_cents(amounts):
 
             print(
                 "🛑 NON viene interpretato "
-                "come ETH",
+                "automaticamente come ETH",
                 flush=True,
             )
 
@@ -1219,62 +1338,46 @@ def get_live_floor(card):
     )
 
     try:
+
         season = int(season)
 
     except (
         TypeError,
         ValueError,
     ):
+
         season = None
 
     print(
-        "      🔎 FLOOR LIVE SINGLE SALE:",
+        "      🔎 FLOOR LIVE SINGLE SALE",
         flush=True,
     )
 
     print(
-        f"         👤 playerSlug: "
+        f"         playerSlug: "
         f"{player_slug}",
         flush=True,
     )
 
     print(
-        f"         🏷️ rarità: "
+        f"         rarità: "
         f"{rarity}",
         flush=True,
     )
 
     print(
-        f"         📅 stagione: "
+        f"         stagione: "
         f"{season}",
         flush=True,
     )
 
     if not player_slug:
-
-        print(
-            "      ❌ playerSlug mancante",
-            flush=True,
-        )
-
         return None
 
     if not rarity:
-
-        print(
-            "      ❌ rarità mancante",
-            flush=True,
-        )
-
         return None
 
     if season is None:
-
-        print(
-            "      ❌ stagione mancante",
-            flush=True,
-        )
-
         return None
 
     cursor = None
@@ -1304,8 +1407,8 @@ def get_live_floor(card):
                                 amounts {
                                     eurCents
                                     usdCents
-                                    wei
                                     referenceCurrency
+                                    wei
                                 }
 
                                 anyCards {
@@ -1325,8 +1428,8 @@ def get_live_floor(card):
                                 amounts {
                                     eurCents
                                     usdCents
-                                    wei
                                     referenceCurrency
+                                    wei
                                 }
                             }
                         }
@@ -1348,7 +1451,7 @@ def get_live_floor(card):
 
             print(
                 "      ❌ Nessuna risposta "
-                "dalle LIVE SINGLE SALE",
+                "LIVE SINGLE SALE",
                 flush=True,
             )
 
@@ -1363,6 +1466,7 @@ def get_live_floor(card):
             )
 
             for error in data["errors"]:
+
                 print(
                     json.dumps(
                         error,
@@ -1393,7 +1497,7 @@ def get_live_floor(card):
 
         print(
             f"         📦 pagina {page}: "
-            f"{len(nodes)} live offer",
+            f"{len(nodes)} offerte",
             flush=True,
         )
 
@@ -1431,6 +1535,7 @@ def get_live_floor(card):
                 )
 
                 try:
+
                     offer_season = int(
                         offer_season
                     )
@@ -1439,6 +1544,7 @@ def get_live_floor(card):
                     TypeError,
                     ValueError,
                 ):
+
                     offer_season = None
 
                 offer_player = (
@@ -1455,10 +1561,9 @@ def get_live_floor(card):
                     or ""
                 ).strip().lower()
 
-                # MATCH ESATTO:
-                # giocatore + rarità + stagione
-
                 if (
+                    offer_player_slug
+                    and
                     offer_player_slug
                     != player_slug
                 ):
@@ -1490,27 +1595,17 @@ def get_live_floor(card):
                 or {}
             )
 
-            price = extract_offer_eur_cents(
-                amounts
+            price = (
+                extract_offer_eur_cents(
+                    amounts
+                )
             )
 
             if price is None:
 
                 print(
-                    "         ⚠️ LIVE OFFER "
-                    "compatibile ma prezzo "
-                    "non convertibile in EUR",
-                    flush=True,
-                )
-
-                print(
-                    f"            🆔 "
-                    f"{offer.get('id')}",
-                    flush=True,
-                )
-
-                print(
-                    "            💱 amounts:",
+                    "         ⚠️ Offerta compatibile "
+                    "ma prezzo non convertibile",
                     flush=True,
                 )
 
@@ -1561,15 +1656,11 @@ def get_live_floor(card):
 
         cursor = next_cursor
 
-    # ========================================================
-    # FLOOR
-    # ========================================================
-
     if not prices:
 
         print(
             "      ❌ Nessuna LIVE SINGLE SALE "
-            "compatibile con prezzo disponibile",
+            "compatibile",
             flush=True,
         )
 
@@ -1589,13 +1680,12 @@ def get_live_floor(card):
     )
 
     print(
-        f"         🆔 offerta floor: "
-        f"{offer_id}",
+        f"         🆔 {offer_id}",
         flush=True,
     )
 
     print(
-        f"         📊 offerte compatibili: "
+        f"         📊 compatibili: "
         f"{len(prices)}",
         flush=True,
     )
@@ -1619,20 +1709,18 @@ def is_kulenovic(card):
             KID.lower()
         )
 
-    card_asset_id = str(
-        card.get("assetId")
-        or ""
-    ).lower()
-
-    card_slug = str(
-        card.get("slug")
-        or ""
-    ).lower()
-
     return (
-        card_asset_id in wanted
+        str(
+            card.get("assetId")
+            or ""
+        ).lower()
+        in wanted
         or
-        card_slug in wanted
+        str(
+            card.get("slug")
+            or ""
+        ).lower()
+        in wanted
     )
 
 
@@ -1727,21 +1815,16 @@ def check_competition(card):
         return False
 
     print(
-        "      🏆 Competizioni Sorare:",
+        "      🏆 activeCompetitions:",
         flush=True,
     )
 
     for competition in competitions:
 
         print(
-            f"         🆕 {competition}",
+            f"         • {competition}",
             flush=True,
         )
-
-    print(
-        "      ✅ COMPETIZIONE COPERTA",
-        flush=True,
-    )
 
     return True
 
@@ -1800,7 +1883,7 @@ def valid_card(card):
     )
 
     print(
-        f"      🎂 Età: {age} anni",
+        f"      🎂 Età: {age}",
         flush=True,
     )
 
@@ -1811,8 +1894,7 @@ def valid_card(card):
     if age >= MAX_AGE:
 
         print(
-            f"      ❌ Età troppo alta "
-            f"(limite: < {MAX_AGE})",
+            f"      ❌ Età >= {MAX_AGE}",
             flush=True,
         )
 
@@ -1838,7 +1920,7 @@ def valid_card(card):
         )
 
     # --------------------------------------------------------
-    # PRICE
+    # FLOOR
     # --------------------------------------------------------
 
     price = get_live_floor(
@@ -1848,19 +1930,7 @@ def valid_card(card):
     if price is None:
 
         print(
-            "      ⚠️ FLOOR NON TROVATO",
-            flush=True,
-        )
-
-        print(
-            "      🟡 Carta NON "
-            "classificata come non idonea",
-            flush=True,
-        )
-
-        print(
-            "      🟡 Offerta lasciata "
-            "IN SOSPESO",
+            "      🟡 FLOOR UNKNOWN",
             flush=True,
         )
 
@@ -1870,13 +1940,13 @@ def valid_card(card):
         )
 
     print(
-        f"      💰 Floor "
+        f"      💰 Floor: "
         f"€{price / 100:.2f}",
         flush=True,
     )
 
     # --------------------------------------------------------
-    # PRICE RANGE
+    # PRICE
     # --------------------------------------------------------
 
     if not (
@@ -1951,7 +2021,7 @@ def reject_offer(offer):
     if DRY_RUN:
 
         print(
-            "🟡 DRY RUN: rifiuto simulato",
+            "🟡 DRY RUN: reject simulato",
             flush=True,
         )
 
@@ -1983,44 +2053,14 @@ def reject_offer(offer):
         }
     })
 
-    if not data:
-
-        print(
-            "❌ Nessuna risposta da rejectOffer",
-            flush=True,
-        )
-
-        return False
-
-    if data.get("errors"):
-
-        print(
-            "❌ rejectOffer "
-            "GRAPHQL GLOBAL ERROR:",
-            flush=True,
-        )
-
-        for error in data["errors"]:
-
-            print(
-                json.dumps(
-                    error,
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-
-        return False
-
     result = (
-        (data.get("data") or {})
-        .get("rejectOffer")
-    )
+        (data or {}).get("data") or {}
+    ).get("rejectOffer")
 
     if not result:
 
         print(
-            "❌ Risposta rejectOffer vuota",
+            "❌ rejectOffer vuoto",
             flush=True,
         )
 
@@ -2055,7 +2095,9 @@ def reject_offer(offer):
 # SIGN
 # ============================================================
 
-def sign_authorizations(authorizations):
+def sign_authorizations(
+    authorizations
+):
 
     node = (
         shutil.which("node")
@@ -2092,10 +2134,18 @@ function build(a) {
     const r = a.request;
 
     if (!r) {
-
         throw new Error(
             "AuthorizationRequest mancante"
         );
+    }
+
+    if (
+        r.__typename ===
+        "StarkexTransferAuthorizationRequest"
+        &&
+        r.amount != null
+    ) {
+        r.amount = BigInt(r.amount);
     }
 
     const signature =
@@ -2110,12 +2160,10 @@ function build(a) {
     ) {
 
         return {
-
             fingerprint:
                 a.fingerprint,
 
             starkexTransferApproval: {
-
                 nonce:
                     r.nonce,
 
@@ -2133,12 +2181,10 @@ function build(a) {
     ) {
 
         return {
-
             fingerprint:
                 a.fingerprint,
 
             starkexLimitOrderApproval: {
-
                 nonce:
                     r.nonce,
 
@@ -2156,12 +2202,10 @@ function build(a) {
     ) {
 
         return {
-
             fingerprint:
                 a.fingerprint,
 
             mangopayWalletTransferApproval: {
-
                 nonce:
                     r.nonce,
 
@@ -2207,18 +2251,15 @@ process.stdout.write(
 
     try:
 
-        result = json.loads(
+        return json.loads(
             process.stdout
         )
 
     except json.JSONDecodeError as error:
 
         raise RuntimeError(
-            "Output firma JSON non valido: "
-            + str(error)
+            f"Output firma non valido: {error}"
         )
-
-    return result
 
 
 # ============================================================
@@ -2231,71 +2272,38 @@ def build_prepare_offer_input(
     amount,
 ):
 
-    fields = get_input_fields(
-        "prepareOfferInput"
-    )
+    # Schema corrente verificato:
+    #
+    # prepareOfferInput {
+    #   clientMutationId
+    #   receiveAmount
+    #   receiveAssetIds!
+    #   receiverSlug
+    #   sendAmount
+    #   sendAssetIds!
+    #   settlementCurrencies
+    # }
 
-    if not fields:
+    return {
+        "receiveAssetIds": asset_ids,
 
-        raise RuntimeError(
-            "Impossibile leggere "
-            "prepareOfferInput "
-            "dallo schema live"
-        )
+        "sendAssetIds": [],
 
-    result = {}
-
-    # Carte che VOGLIAMO RICEVERE
-    if "receiveAssetIds" in fields:
-        result["receiveAssetIds"] = asset_ids
-    else:
-        raise RuntimeError(
-            "receiveAssetIds non presente "
-            "in prepareOfferInput"
-        )
-
-    # Carte che NOI CEDIAMO
-    if "sendAssetIds" in fields:
-        result["sendAssetIds"] = []
-    else:
-        raise RuntimeError(
-            "sendAssetIds non presente "
-            "in prepareOfferInput"
-        )
-
-    # Denaro che NOI INVIAMO
-    if "sendAmount" in fields:
-        result["sendAmount"] = {
+        "sendAmount": {
             "amount": str(amount),
             "currency": "EUR",
-        }
-    else:
-        raise RuntimeError(
-            "sendAmount non presente "
-            "in prepareOfferInput"
-        )
+        },
 
-    # Utente destinatario della controproposta
-    if "receiverSlug" in fields:
-        result["receiverSlug"] = receiver
-    else:
-        raise RuntimeError(
-            "receiverSlug non presente "
-            "in prepareOfferInput"
-        )
+        "receiverSlug": receiver,
 
-    # Wallet/currency accettati
-    if "settlementCurrencies" in fields:
-        result["settlementCurrencies"] = [
+        "settlementCurrencies": [
             "EUR"
-        ]
+        ],
 
-    if "clientMutationId" in fields:
-        result["clientMutationId"] = str(
+        "clientMutationId": str(
             uuid.uuid4()
-        )
-
-    return result
+        ),
+    }
 
 
 # ============================================================
@@ -2309,82 +2317,44 @@ def build_create_direct_offer_input(
     approvals,
 ):
 
-    fields = get_input_fields(
-        "createDirectOfferInput"
-    )
+    # Schema corrente verificato:
+    #
+    # createDirectOfferInput {
+    #   approvals!
+    #   clientMutationId
+    #   counteredOfferId
+    #   dealId!
+    #   duration
+    #   migrationData
+    #   receiveAmount
+    #   receiveAssetIds
+    #   receiverSlug!
+    #   sendAmount
+    #   sendAssetIds
+    # }
 
-    if not fields:
+    return {
+        "approvals": approvals,
 
-        raise RuntimeError(
-            "Impossibile leggere "
-            "createDirectOfferInput "
-            "dallo schema live"
-        )
+        "dealId": str(
+            uuid.uuid4()
+        ),
 
-    result = {}
+        "sendAssetIds": [],
 
-    # --------------------------------------------------------
-    # OBBLIGATORI
-    # --------------------------------------------------------
+        "receiveAssetIds": asset_ids,
 
-    if "approvals" not in fields:
-        raise RuntimeError(
-            "approvals non presente "
-            "in createDirectOfferInput"
-        )
-
-    result["approvals"] = approvals
-
-    if "dealId" not in fields:
-        raise RuntimeError(
-            "dealId non presente "
-            "in createDirectOfferInput"
-        )
-
-    result["dealId"] = str(
-        uuid.uuid4()
-    )
-
-    # --------------------------------------------------------
-    # CARTE
-    # --------------------------------------------------------
-
-    if "sendAssetIds" in fields:
-        result["sendAssetIds"] = []
-
-    if "receiveAssetIds" in fields:
-        result["receiveAssetIds"] = asset_ids
-
-    # --------------------------------------------------------
-    # DENARO
-    # --------------------------------------------------------
-
-    if "sendAmount" in fields:
-
-        result["sendAmount"] = {
+        "sendAmount": {
             "amount": str(amount),
             "currency": "EUR",
-        }
+        },
 
-    # --------------------------------------------------------
-    # RECEIVER
-    # --------------------------------------------------------
+        "receiverSlug": receiver,
 
-    if "receiverSlug" in fields:
-
-        result["receiverSlug"] = receiver
-
-    # --------------------------------------------------------
-    # CLIENT ID
-    # --------------------------------------------------------
-
-    if "clientMutationId" in fields:
-
-        result["clientMutationId"] = str(
+        "clientMutationId": str(
             uuid.uuid4()
-        )
-
-    return result
+        ),
+    }
 
 
 # ============================================================
@@ -2489,15 +2459,15 @@ def counter_offer(
     except Exception as error:
 
         print(
-            f"❌ Costruzione "
-            f"prepareOfferInput: {error}",
+            f"❌ prepare input: "
+            f"{error}",
             flush=True,
         )
 
         return False
 
     print(
-        "📦 prepareOfferInput:",
+        "📦 prepareOffer:",
         flush=True,
     )
 
@@ -2592,8 +2562,7 @@ def counter_offer(
     if data.get("errors"):
 
         print(
-            "❌ prepareOffer "
-            "GRAPHQL GLOBAL ERROR:",
+            "❌ prepareOffer GLOBAL ERROR:",
             flush=True,
         )
 
@@ -2617,8 +2586,7 @@ def counter_offer(
     if not result:
 
         print(
-            "❌ prepareOffer "
-            "ha restituito NULL",
+            "❌ prepareOffer NULL",
             flush=True,
         )
 
@@ -2651,38 +2619,17 @@ def counter_offer(
     if not authorizations:
 
         print(
-            "❌ Nessuna autorizzazione "
-            "restituita",
+            "❌ Nessuna autorizzazione",
             flush=True,
         )
 
         return False
 
     print(
-        f"🔐 Autorizzazioni ricevute: "
+        f"🔐 Autorizzazioni: "
         f"{len(authorizations)}",
         flush=True,
     )
-
-    # Mostra i tipi ricevuti senza
-    # esporre la private key.
-    for index, authorization in enumerate(
-        authorizations,
-        start=1,
-    ):
-
-        request = (
-            authorization.get(
-                "request"
-            )
-            or {}
-        )
-
-        print(
-            f"   🔐 Authorization #{index}: "
-            f"{request.get('__typename')}",
-            flush=True,
-        )
 
     # ========================================================
     # SIGN
@@ -2690,8 +2637,10 @@ def counter_offer(
 
     try:
 
-        approvals = sign_authorizations(
-            authorizations
+        approvals = (
+            sign_authorizations(
+                authorizations
+            )
         )
 
     except Exception as error:
@@ -2703,20 +2652,8 @@ def counter_offer(
 
         return False
 
-    if len(approvals) != len(
-        authorizations
-    ):
-
-        print(
-            "❌ Numero approvals "
-            "diverso dalle authorizations",
-            flush=True,
-        )
-
-        return False
-
     print(
-        f"✍️ Autorizzazioni firmate: "
+        f"✍️ Firmate: "
         f"{len(approvals)}",
         flush=True,
     )
@@ -2739,8 +2676,7 @@ def counter_offer(
     except Exception as error:
 
         print(
-            f"❌ Costruzione "
-            f"createDirectOfferInput: "
+            f"❌ create input: "
             f"{error}",
             flush=True,
         )
@@ -2754,12 +2690,11 @@ def counter_offer(
     if "approvals" in debug:
 
         debug["approvals"] = (
-            f"{len(approvals)} "
-            f"authorization(s)"
+            f"{len(approvals)} authorization(s)"
         )
 
     print(
-        "📦 createDirectOfferInput:",
+        "📦 createDirectOffer:",
         flush=True,
     )
 
@@ -2807,8 +2742,7 @@ def counter_offer(
     if data.get("errors"):
 
         print(
-            "❌ createDirectOffer "
-            "GRAPHQL GLOBAL ERROR:",
+            "❌ createDirectOffer GLOBAL ERROR:",
             flush=True,
         )
 
@@ -2832,8 +2766,7 @@ def counter_offer(
     if not result:
 
         print(
-            "❌ createDirectOffer "
-            "ha restituito NULL",
+            "❌ createDirectOffer NULL",
             flush=True,
         )
 
@@ -2870,8 +2803,7 @@ def counter_offer(
     if not offer_id:
 
         print(
-            "❌ Nessuna offerta creata "
-            "da Sorare",
+            "❌ Nessuna offerta creata",
             flush=True,
         )
 
@@ -2911,7 +2843,9 @@ def counter_offer(
 # UNKNOWN PRICE RETRY
 # ============================================================
 
-def should_retry_unknown(offer_id):
+def should_retry_unknown(
+    offer_id
+):
 
     now = time.time()
 
@@ -2945,7 +2879,9 @@ def should_retry_unknown(offer_id):
         return False
 
 
-def mark_completed(offer_id):
+def mark_completed(
+    offer_id
+):
 
     with state_lock:
 
@@ -2963,7 +2899,9 @@ def mark_completed(offer_id):
 # PROCESS OFFER
 # ============================================================
 
-def process_offer(offer):
+def process_offer(
+    offer
+):
 
     offer_id = str(
         offer.get("id")
@@ -2972,10 +2910,6 @@ def process_offer(offer):
 
     if not offer_id:
         return
-
-    # --------------------------------------------------------
-    # GIÀ COMPLETATA
-    # --------------------------------------------------------
 
     with state_lock:
 
@@ -2992,16 +2926,12 @@ def process_offer(offer):
         flush=True,
     )
 
-    # --------------------------------------------------------
-    # RETRY PRICE UNKNOWN
-    # --------------------------------------------------------
-
     if not should_retry_unknown(
         offer_id
     ):
 
         print(
-            "⏳ Floor ancora sconosciuto: "
+            "⏳ Floor unknown: "
             "attendo prossimo tentativo",
             flush=True,
         )
@@ -3042,8 +2972,7 @@ def process_offer(offer):
     ):
 
         print(
-            "⏭️ Kulenovic non presente: "
-            "ignoro",
+            "⏭️ Kulenovic non presente",
             flush=True,
         )
 
@@ -3099,7 +3028,6 @@ def process_offer(offer):
     valid_cards = []
 
     has_unknown_price = False
-    invalid_cards = 0
 
     for card in cards:
 
@@ -3119,10 +3047,6 @@ def process_offer(offer):
 
                 has_unknown_price = True
 
-            else:
-
-                invalid_cards += 1
-
         except Exception as error:
 
             print(
@@ -3140,41 +3064,19 @@ def process_offer(offer):
     )
 
     # ========================================================
-    # FLOOR MANCANTE
+    # UNKNOWN PRICE
     # ========================================================
 
     if has_unknown_price:
 
         print(
-            "⚠️ ALMENO UNA CARTA "
-            "NON HA UN FLOOR DISPONIBILE.",
+            "🟡 ALMENO UNA CARTA "
+            "HA FLOOR UNKNOWN",
             flush=True,
         )
 
         print(
-            "🟡 NESSUNA AZIONE AUTOMATICA.",
-            flush=True,
-        )
-
-        print(
-            "🟡 OFFERTA LASCIATA "
-            "IN SOSPESO.",
-            flush=True,
-        )
-
-        print(
-            "🛑 Niente rifiuto.",
-            flush=True,
-        )
-
-        print(
-            "🛑 Niente controproposta.",
-            flush=True,
-        )
-
-        print(
-            "🔁 Verrà ritentata "
-            f"tra circa {UNKNOWN_PRICE_RETRY}s.",
+            "🟡 OFFERTA LASCIATA PENDING",
             flush=True,
         )
 
@@ -3187,12 +3089,12 @@ def process_offer(offer):
     if not valid_cards:
 
         print(
-            "❌ Nessuna carta idonea.",
+            "❌ Nessuna carta idonea",
             flush=True,
         )
 
         print(
-            "🔴 Rifiuto dell'offerta.",
+            "🔴 Rifiuto offerta",
             flush=True,
         )
 
@@ -3207,7 +3109,7 @@ def process_offer(offer):
         return
 
     # ========================================================
-    # CARTA VALIDA
+    # CONTROPROPOSTA
     # ========================================================
 
     rejected = (
@@ -3219,13 +3121,9 @@ def process_offer(offer):
 
         print(
             f"⚠️ {rejected} carta/e "
-            f"esclusa/e",
+            "esclusa/e",
             flush=True,
         )
-
-    # ========================================================
-    # COUNTER OFFER
-    # ========================================================
 
     if counter_offer(
         offer,
@@ -3233,8 +3131,7 @@ def process_offer(offer):
     ):
 
         print(
-            "🟢 Controproposta "
-            "completata con successo.",
+            "🟢 Controproposta completata",
             flush=True,
         )
 
@@ -3250,21 +3147,21 @@ def process_offer(offer):
 
             print(
                 "⚠️ Controproposta creata "
-                "ma impossibile rifiutare "
-                "l'offerta originale.",
+                "ma offerta originale "
+                "non rifiutata",
                 flush=True,
             )
 
     else:
 
         print(
-            "🔴 Controproposta NON creata.",
+            "🔴 Controproposta NON creata",
             flush=True,
         )
 
         print(
             "🟡 Offerta originale "
-            "lasciata IN SOSPESO.",
+            "lasciata PENDING",
             flush=True,
         )
 
@@ -3301,103 +3198,78 @@ def worker():
     )
 
     print(
-        f"🎂 Età massima: "
-        f"meno di {MAX_AGE} anni",
+        f"🎂 Età: < {MAX_AGE}",
         flush=True,
     )
 
     print(
-        "🏆 COMPETIZIONI: TUTTE le "
-        "activeCompetitions Sorare",
+        "🏆 COMPETIZIONI: "
+        "tutte le activeCompetitions",
         flush=True,
     )
 
     print(
-        "🔧 PREPARE: schema LIVE",
+        "💰 PRICE SOURCE: "
+        "liveSingleSaleOffers",
         flush=True,
     )
 
     print(
-        "🔧 CREATE: createDirectOffer",
+        "🎯 MATCH PRICE: "
+        "player + rarity + season",
         flush=True,
     )
 
     print(
-        "💰 PREZZI: LIVE SINGLE SALE "
-        "esatta per giocatore + "
-        "rarità + stagione",
+        "💶 EUR: eurCents",
         flush=True,
     )
 
     print(
-        "💶 PREZZI FIAT: eurCents diretto",
+        "💵 USD: usdCents → EUR",
         flush=True,
     )
 
     print(
-        "💵 USD: usdCents → "
-        "conversione USD → EUR",
+        "💎 WEI: solo con "
+        "referenceCurrency crypto",
         flush=True,
     )
 
     print(
-        f"💱 USD/EUR CACHE: "
-        f"{USD_EUR_CACHE_SECONDS}s",
+        "🚫 latestEnglishAuction: OFF",
         flush=True,
     )
 
     print(
-        "💎 WEI: convertito in EUR "
-        "SOLO con referenceCurrency "
-        "ETH/WETH/ETHER/WEI",
+        "🚫 publicMinPrices: OFF",
         flush=True,
     )
 
     print(
-        "🚫 wei + USD NON viene "
-        "interpretato come ETH",
+        "🚫 lowestPriceCard: OFF",
         flush=True,
     )
 
     print(
-        "🚫 latestEnglishAuction: "
-        "DISABILITATO",
-        flush=True,
-    )
-
-    print(
-        "🚫 publicMinPrices: "
-        "DISABILITATO",
-        flush=True,
-    )
-
-    print(
-        "🚫 lowestPriceCard: "
-        "DISABILITATO",
-        flush=True,
-    )
-
-    print(
-        "🚫 tokenPrices: "
-        "DISABILITATO",
+        "🚫 tokenPrices: OFF",
         flush=True,
     )
 
     print(
         "🛡️ PRICE UNKNOWN: "
-        "OFFERTA LASCIATA IN SOSPESO",
+        "LEAVE PENDING",
         flush=True,
     )
 
     print(
-        f"🔁 RETRY PRICE UNKNOWN: "
-        f"ogni {UNKNOWN_PRICE_RETRY}s",
+        f"🔁 RETRY: "
+        f"{UNKNOWN_PRICE_RETRY}s",
         flush=True,
     )
 
     print(
-        "🧪 DRY_RUN="
-        + str(DRY_RUN),
+        f"🧪 DRY_RUN={DRY_RUN}",
         flush=True,
     )
 
@@ -3419,7 +3291,31 @@ def worker():
     # SCHEMA
     # --------------------------------------------------------
 
-    inspect_live_schema()
+    schema_ok = (
+        inspect_live_schema()
+    )
+
+    if schema_ok:
+
+        print(
+            "🟢 Schema corrente "
+            "compatibile.",
+            flush=True,
+        )
+
+    else:
+
+        print(
+            "🟡 Schema non verificabile "
+            "in questo momento.",
+            flush=True,
+        )
+
+        print(
+            "🟡 Il bot continua usando "
+            "la struttura corrente confermata.",
+            flush=True,
+        )
 
     # --------------------------------------------------------
     # LOOP
@@ -3531,8 +3427,14 @@ def home():
         "competition_mode":
             "ALL_ACTIVE_SORARE_COMPETITIONS",
 
+        "schema_mode":
+            "LIVE_SCHEMA_CHECK_WITH_SAFE_FALLBACK",
+
         "prepare_mode":
-            "LIVE_SCHEMA_AWARE",
+            "CURRENT_SORARE_SCHEMA",
+
+        "create_mode":
+            "CURRENT_SORARE_SCHEMA",
 
         "settlement_currency":
             "EUR",
@@ -3543,11 +3445,11 @@ def home():
         "price_eur_mode":
             "EUR_DIRECT_OR_USDCENTS_CONVERTED_OR_EXPLICIT_ETH_WEI",
 
-        "usd_conversion":
-            True,
-
         "usd_field":
             "usdCents",
+
+        "usd_conversion":
+            True,
 
         "usd_conversion_mode":
             "LIVE_USD_EUR_RATE_WITH_CACHE",
@@ -3558,7 +3460,7 @@ def home():
         "wei_conversion":
             True,
 
-        "wei_requires_explicit_eth":
+        "wei_requires_explicit_crypto_reference":
             True,
 
         "latest_english_auction_fallback":
