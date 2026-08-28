@@ -8,7 +8,6 @@ import threading
 import re
 import requests
 
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from flask import Flask, jsonify
 
 
@@ -27,46 +26,32 @@ AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 KID = os.getenv("KULENOVIC_ID", "").strip()
 
-DRY_RUN = (
-    os.getenv("DRY_RUN", "false").lower() == "true"
-)
+DRY_RUN = os.getenv(
+    "DRY_RUN",
+    "false",
+).lower() == "true"
 
-# ------------------------------------------------------------
-# PREZZI
-# ------------------------------------------------------------
-#
-# Tutti i prezzi qui sono CENTESIMI EUR.
-#
-# €0.32 = 32
-# €0.70 = 70
-#
+# Prezzi in CENTESIMI EUR
 MIN_PRICE = 32
 MAX_PRICE = 70
 
-# €0.20 per carta
+# Pagamento per carta:
+# 20 centesimi = €0,20
 PAY_PER_CARD = 20
 
-# Deve essere strettamente minore di 28
+# Età strettamente minore di 28
 MAX_AGE = 28
 
-# Polling offerte
 INTERVAL = 10
-
-# Timeout HTTP
 TIMEOUT = 30
 
-# Se non troviamo un prezzo fiat verificabile,
-# lasciamo l'offerta pending e ritentiamo.
+# Se il floor non è verificabile,
+# l'offerta resta pending.
 UNKNOWN_PRICE_RETRY = 60
 
-# Cache USD/EUR
 USD_EUR_CACHE_SECONDS = 300
 
-BOT_VERSION = "20.0"
-
-# ------------------------------------------------------------
-# KULENOVIC
-# ------------------------------------------------------------
+BOT_VERSION = "20.1"
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -91,6 +76,7 @@ _worker_lock = threading.Lock()
 
 _schema_lock = threading.Lock()
 _schema_text = None
+
 
 _usd_eur_lock = threading.Lock()
 _usd_eur_cache = None
@@ -134,48 +120,15 @@ def auth_headers():
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": f"Sorare-Bot/{BOT_VERSION}",
+        "User-Agent": (
+            f"Sorare-Bot/{BOT_VERSION}"
+        ),
     }
 
     if AUD:
         headers["JWT-AUD"] = AUD
 
     return headers
-
-
-def safe_int(value):
-
-    if value is None:
-        return None
-
-    try:
-        return int(
-            str(value).strip()
-        )
-
-    except (
-        TypeError,
-        ValueError,
-    ):
-        return None
-
-
-def safe_decimal(value):
-
-    if value is None:
-        return None
-
-    try:
-        return Decimal(
-            str(value).strip()
-        )
-
-    except (
-        InvalidOperation,
-        ValueError,
-        TypeError,
-    ):
-        return None
 
 
 # ============================================================
@@ -201,7 +154,8 @@ def graphql(query, variables=None):
             )
 
             print(
-                f"🌐 Sorare HTTP {response.status_code}",
+                f"🌐 Sorare HTTP "
+                f"{response.status_code}",
                 flush=True,
             )
 
@@ -211,17 +165,13 @@ def graphql(query, variables=None):
 
             if response.status_code == 429:
 
-                retry_after = (
-                    response.headers.get(
-                        "Retry-After"
-                    )
-                )
-
                 try:
                     wait = int(
-                        retry_after
+                        response.headers.get(
+                            "Retry-After",
+                            attempt * 3,
+                        )
                     )
-
                 except (
                     TypeError,
                     ValueError,
@@ -229,7 +179,8 @@ def graphql(query, variables=None):
                     wait = attempt * 3
 
                 print(
-                    f"⏳ Rate limit Sorare: {wait}s",
+                    f"⏳ Rate limit Sorare: "
+                    f"{wait}s",
                     flush=True,
                 )
 
@@ -243,7 +194,8 @@ def graphql(query, variables=None):
             if response.status_code != 200:
 
                 print(
-                    f"❌ HTTP {response.status_code}: "
+                    f"❌ HTTP "
+                    f"{response.status_code}: "
                     f"{response.text[:1500]}",
                     flush=True,
                 )
@@ -256,7 +208,6 @@ def graphql(query, variables=None):
             # ------------------------------------------------
 
             try:
-
                 data = response.json()
 
             except ValueError:
@@ -296,7 +247,8 @@ def graphql(query, variables=None):
         except requests.RequestException as error:
 
             print(
-                f"❌ HTTP Sorare: {error}",
+                f"❌ HTTP Sorare: "
+                f"{error}",
                 flush=True,
             )
 
@@ -305,7 +257,8 @@ def graphql(query, variables=None):
         except Exception as error:
 
             print(
-                f"❌ GraphQL: {error}",
+                f"❌ GraphQL: "
+                f"{error}",
                 flush=True,
             )
 
@@ -328,7 +281,8 @@ def get_live_schema():
             return _schema_text
 
         print(
-            "📚 Controllo schema Sorare corrente...",
+            "📚 Controllo schema "
+            "Sorare corrente...",
             flush=True,
         )
 
@@ -354,7 +308,7 @@ def get_live_schema():
             if response.status_code != 200:
 
                 print(
-                    "⚠️ Impossibile scaricare "
+                    "❌ Impossibile scaricare "
                     "lo schema live",
                     flush=True,
                 )
@@ -364,7 +318,7 @@ def get_live_schema():
             _schema_text = response.text
 
             print(
-                f"✅ Schema live scaricato "
+                "✅ Schema live scaricato "
                 f"({len(_schema_text)} caratteri)",
                 flush=True,
             )
@@ -374,7 +328,7 @@ def get_live_schema():
         except Exception as error:
 
             print(
-                f"⚠️ Errore download schema: "
+                f"❌ Errore schema live: "
                 f"{error}",
                 flush=True,
             )
@@ -400,8 +354,8 @@ def get_input_fields(type_name):
     if not match:
 
         print(
-            f"⚠️ {type_name} non trovato "
-            "nello schema",
+            f"⚠️ {type_name} "
+            "non trovato nello schema",
             flush=True,
         )
 
@@ -412,7 +366,10 @@ def get_input_fields(type_name):
     depth = 1
     position = start
 
-    while position < len(schema) and depth:
+    while (
+        position < len(schema)
+        and depth
+    ):
 
         if schema[position] == "{":
             depth += 1
@@ -432,7 +389,10 @@ def get_input_fields(type_name):
 
         line = line.strip()
 
-        if not line or line.startswith("#"):
+        if not line:
+            continue
+
+        if line.startswith("#"):
             continue
 
         field_match = re.match(
@@ -471,98 +431,98 @@ def inspect_live_schema():
         "createDirectOfferInput"
     )
 
-    if prepare_fields:
+    if not prepare_fields:
+        return False
 
-        print(
-            "   prepareOfferInput:",
-            flush=True,
-        )
-
-        for field in sorted(
-            prepare_fields
-        ):
-
-            print(
-                f"      • {field}",
-                flush=True,
-            )
-
-    if create_fields:
-
-        print(
-            "   createDirectOfferInput:",
-            flush=True,
-        )
-
-        for field in sorted(
-            create_fields
-        ):
-
-            print(
-                f"      • {field}",
-                flush=True,
-            )
+    if not create_fields:
+        return False
 
     required_prepare = {
         "receiveAssetIds",
+        "receiverSlug",
         "sendAssetIds",
         "sendAmount",
-        "receiverSlug",
-        "settlementCurrencies",
     }
 
     required_create = {
         "approvals",
         "receiveAssetIds",
+        "receiverSlug",
         "sendAssetIds",
         "sendAmount",
-        "receiverSlug",
     }
 
-    if not required_prepare.issubset(
+    missing_prepare = (
+        required_prepare
+        - prepare_fields
+    )
+
+    missing_create = (
+        required_create
+        - create_fields
+    )
+
+    if missing_prepare:
+
+        print(
+            "❌ Campi mancanti "
+            "prepareOfferInput: "
+            f"{', '.join(sorted(missing_prepare))}",
+            flush=True,
+        )
+
+        return False
+
+    if missing_create:
+
+        print(
+            "❌ Campi mancanti "
+            "createDirectOfferInput: "
+            f"{', '.join(sorted(missing_create))}",
+            flush=True,
+        )
+
+        return False
+
+    print(
+        "   prepareOfferInput:",
+        flush=True,
+    )
+
+    for field in sorted(
         prepare_fields
     ):
 
         print(
-            "⚠️ SCHEMA prepareOfferInput "
-            "INATTESO",
+            f"      • {field}",
             flush=True,
         )
 
-    if not required_create.issubset(
+    print(
+        "   createDirectOfferInput:",
+        flush=True,
+    )
+
+    for field in sorted(
         create_fields
     ):
 
         print(
-            "⚠️ SCHEMA createDirectOfferInput "
-            "INATTESO",
+            f"      • {field}",
             flush=True,
         )
 
-    if (
-        required_prepare.issubset(
-            prepare_fields
-        )
-        and
-        required_create.issubset(
-            create_fields
-        )
-    ):
-
-        print(
-            "✅ SCHEMA OFFER CONFERMATO",
-            flush=True,
-        )
-
-        print(
-            "🟢 Schema corrente compatibile.",
-            flush=True,
-        )
-
-    return (
-        prepare_fields,
-        create_fields,
+    print(
+        "✅ SCHEMA OFFER CONFERMATO",
+        flush=True,
     )
+
+    print(
+        "🟢 Schema corrente compatibile.",
+        flush=True,
+    )
+
+    return True
 
 
 # ============================================================
@@ -589,34 +549,32 @@ def check_account():
     if not user:
 
         print(
-            "❌ Account Sorare non verificato",
+            "❌ Account Sorare "
+            "non verificato",
             flush=True,
         )
 
         return False
 
-    nickname = (
-        user.get("nickname")
-        or user.get("slug")
-        or "Sconosciuto"
-    )
-
     print(
-        f"✅ Sorare: {nickname}",
+        "✅ Sorare: "
+        f"{user.get('nickname') or user.get('slug')}",
         flush=True,
     )
 
     if user.get("starkKey"):
 
         print(
-            "🔐 Stark key account: PRESENTE",
+            "🔐 Stark key account: "
+            "PRESENTE",
             flush=True,
         )
 
     else:
 
         print(
-            "⚠️ Stark key account: ASSENTE",
+            "⚠️ Stark key account: "
+            "NON DISPONIBILE",
             flush=True,
         )
 
@@ -624,7 +582,7 @@ def check_account():
 
 
 # ============================================================
-# PENDING OFFERS
+# OFFERS
 # ============================================================
 
 def get_offers():
@@ -674,15 +632,13 @@ def get_offers():
         or {}
     )
 
-    connection = (
-        user.get(
-            "pendingTokenOffersReceived"
-        )
-        or {}
-    )
-
     return (
-        connection.get("nodes")
+        (
+            user.get(
+                "pendingTokenOffersReceived"
+            )
+            or {}
+        ).get("nodes")
         or []
     )
 
@@ -740,7 +696,8 @@ def card_details(asset_ids):
     if not data:
 
         print(
-            "❌ Nessuna risposta da anyCards",
+            "❌ Nessuna risposta "
+            "da anyCards",
             flush=True,
         )
 
@@ -749,7 +706,8 @@ def card_details(asset_ids):
     if data.get("errors"):
 
         print(
-            "❌ Errore GraphQL card_details:",
+            "❌ Errore GraphQL "
+            "card_details:",
             flush=True,
         )
 
@@ -791,7 +749,6 @@ def get_usd_eur_rate():
             now - _usd_eur_cache_time
             < USD_EUR_CACHE_SECONDS
         ):
-
             return _usd_eur_cache
 
         try:
@@ -828,17 +785,12 @@ def get_usd_eur_rate():
                 .get("EUR")
             )
 
-            rate = safe_decimal(rate)
+            rate = float(rate)
 
-            if rate is None or rate <= 0:
-
-                print(
-                    "❌ Cambio USD/EUR "
-                    "non valido",
-                    flush=True,
+            if rate <= 0:
+                raise ValueError(
+                    "Cambio USD/EUR non valido"
                 )
-
-                return None
 
             _usd_eur_cache = rate
             _usd_eur_cache_time = now
@@ -854,23 +806,36 @@ def get_usd_eur_rate():
         except Exception as error:
 
             print(
-                f"❌ Errore cambio USD/EUR: "
-                f"{error}",
+                f"❌ Errore cambio "
+                f"USD/EUR: {error}",
                 flush=True,
             )
 
             return None
 
 
+# ============================================================
+# USD CENTS -> EUR CENTS
+# ============================================================
+
 def usd_cents_to_eur_cents(
     usd_cents
 ):
 
-    value = safe_decimal(
-        usd_cents
-    )
+    try:
 
-    if value is None or value <= 0:
+        usd_cents = float(
+            str(usd_cents).strip()
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        return None
+
+    if usd_cents <= 0:
         return None
 
     rate = get_usd_eur_rate()
@@ -878,22 +843,17 @@ def usd_cents_to_eur_cents(
     if rate is None:
         return None
 
-    eur_cents = (
-        value * rate
-    ).quantize(
-        Decimal("1"),
-        rounding=ROUND_HALF_UP,
-    )
-
     eur_cents = int(
-        eur_cents
+        round(
+            usd_cents * rate
+        )
     )
 
     if eur_cents <= 0:
         return None
 
     print(
-        f"💵 {usd_cents} USD cents "
+        f"💵 {usd_cents:.0f} USD cents "
         f"→ {eur_cents} EUR cents",
         flush=True,
     )
@@ -905,104 +865,95 @@ def usd_cents_to_eur_cents(
 # PRICE EXTRACTION
 # ============================================================
 
-def extract_fiat_price_eur_cents(
+def extract_offer_eur_cents(
     amounts
 ):
     """
-    REGOLA FONDAMENTALE.
+    PREZZO FIAT SOLTANTO.
 
-    Per il floor FIAT utilizziamo:
+    Priorità:
 
     1. eurCents
-    2. usdCents -> USD/EUR
+    2. usdCents -> EUR
 
-    NON utilizziamo:
+    MAI:
 
     - wei
+    - ETH
+    - WETH
+    - ETHER
     - referenceCurrency=WEI
-    - referenceCurrency=ETH
-    - conversioni crypto arbitrarie
 
-    Motivo:
-    il bot deve confrontare il floor con il range
-    EUR €0.32 - €0.70 e la controproposta viene
-    costruita in EUR.
+    Quindi una offer con:
 
-    Quindi un prezzo crypto non verificabile come
-    prezzo fiat viene classificato UNKNOWN_PRICE.
+        eurCents = null
+        usdCents = null
+        wei = ...
+        referenceCurrency = WEI
+
+    NON ha un prezzo verificabile.
+
+    Risultato:
+        None
     """
 
     if not isinstance(
         amounts,
         dict,
     ):
-
         return None
 
-    eur_cents = amounts.get(
+    # ========================================================
+    # 1. EUR CENTS
+    # ========================================================
+
+    eur = amounts.get(
         "eurCents"
     )
 
-    usd_cents = amounts.get(
+    if eur is not None:
+
+        try:
+
+            eur = int(
+                str(eur).strip()
+            )
+
+            if eur > 0:
+
+                print(
+                    f"💶 Prezzo EUR: "
+                    f"€{eur / 100:.2f}",
+                    flush=True,
+                )
+
+                return eur
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            pass
+
+    # ========================================================
+    # 2. USD CENTS
+    # ========================================================
+
+    usd = amounts.get(
         "usdCents"
     )
 
-    reference_currency = str(
-        amounts.get(
-            "referenceCurrency"
-        )
-        or ""
-    ).strip().upper()
-
-    wei = amounts.get(
-        "wei"
-    )
-
-    # ========================================================
-    # 1. EUR DIRETTO
-    # ========================================================
-
-    eur_value = safe_int(
-        eur_cents
-    )
-
-    if (
-        eur_value is not None
-        and
-        eur_value > 0
-    ):
-
-        print(
-            f"💶 Prezzo EUR diretto: "
-            f"€{eur_value / 100:.2f}",
-            flush=True,
-        )
-
-        return eur_value
-
-    # ========================================================
-    # 2. USD CENTS -> EUR
-    # ========================================================
-
-    usd_value = safe_int(
-        usd_cents
-    )
-
-    if (
-        usd_value is not None
-        and
-        usd_value > 0
-    ):
+    if usd is not None:
 
         print(
             f"💵 Prezzo USD cents: "
-            f"{usd_value}",
+            f"{usd}",
             flush=True,
         )
 
         converted = (
             usd_cents_to_eur_cents(
-                usd_value
+                usd
             )
         )
 
@@ -1017,87 +968,40 @@ def extract_fiat_price_eur_cents(
             return converted
 
         print(
-            "⚠️ USD presente ma "
-            "conversione impossibile",
+            "⚠️ USD cents presenti "
+            "ma conversione impossibile",
             flush=True,
         )
 
     # ========================================================
-    # 3. CRYPTO — MAI USARE PER IL FLOOR FIAT
+    # 3. WEI
     # ========================================================
 
-    if wei is not None:
+    if amounts.get("wei") is not None:
 
         print(
-            "🚫 WEI IGNORATO PER IL FLOOR FIAT",
-            flush=True,
-        )
-
-        print(
-            f"   referenceCurrency="
-            f"'{reference_currency}'",
+            "🚫 WEI ESCLUSO "
+            "dal floor FIAT",
             flush=True,
         )
 
         print(
-            "   🛑 Nessuna conversione "
-            "wei → EUR effettuata.",
+            "🚫 referenceCurrency="
+            f"{amounts.get('referenceCurrency')}",
             flush=True,
         )
 
     # ========================================================
-    # 4. UNKNOWN
+    # UNKNOWN
     # ========================================================
+
+    print(
+        "🛑 Prezzo FIAT "
+        "non verificabile",
+        flush=True,
+    )
 
     return None
-
-
-# ============================================================
-# CARD MATCH
-# ============================================================
-
-def card_matches_target(
-    card,
-    player_slug,
-    rarity,
-    season,
-):
-
-    if not isinstance(
-        card,
-        dict,
-    ):
-
-        return False
-
-    card_player = (
-        card.get("anyPlayer")
-        or {}
-    )
-
-    card_player_slug = slug(
-        card_player.get("slug")
-    )
-
-    card_rarity = str(
-        card.get("rarityTyped")
-        or ""
-    ).strip().lower()
-
-    card_season = safe_int(
-        card.get("seasonYear")
-    )
-
-    return (
-        card_player_slug
-        == player_slug
-        and
-        card_rarity
-        == rarity
-        and
-        card_season
-        == season
-    )
 
 
 # ============================================================
@@ -1111,21 +1015,32 @@ def get_live_floor(card):
         or {}
     )
 
-    player_slug = slug(
+    player_slug = str(
         player.get("slug")
-    )
+        or ""
+    ).strip().lower()
 
     rarity = str(
         card.get("rarityTyped")
         or ""
     ).strip().lower()
 
-    season = safe_int(
-        card.get("seasonYear")
+    season = card.get(
+        "seasonYear"
     )
 
+    try:
+        season = int(season)
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        season = None
+
     print(
-        "      🔎 FLOOR LIVE SINGLE SALE",
+        "      🔎 FLOOR LIVE "
+        "SINGLE SALE",
         flush=True,
     )
 
@@ -1148,35 +1063,16 @@ def get_live_floor(card):
     )
 
     if not player_slug:
-
-        print(
-            "      ❌ playerSlug mancante",
-            flush=True,
-        )
-
         return None
 
     if not rarity:
-
-        print(
-            "      ❌ rarità mancante",
-            flush=True,
-        )
-
         return None
 
     if season is None:
-
-        print(
-            "      ❌ stagione mancante",
-            flush=True,
-        )
-
         return None
 
     cursor = None
     page = 0
-
     prices = []
 
     while True:
@@ -1286,7 +1182,9 @@ def get_live_floor(card):
         )
 
         nodes = (
-            connection.get("nodes")
+            connection.get(
+                "nodes"
+            )
             or []
         )
 
@@ -1297,11 +1195,6 @@ def get_live_floor(card):
         )
 
         for offer in nodes:
-
-            offer_id = str(
-                offer.get("id")
-                or ""
-            )
 
             sender_side = (
                 offer.get(
@@ -1317,41 +1210,81 @@ def get_live_floor(card):
                 or []
             )
 
-            # ------------------------------------------------
-            # SINGLE SALE = ESATTAMENTE UNA CARTA
-            # ------------------------------------------------
+            compatible = False
 
-            if len(offer_cards) != 1:
+            for offer_card in offer_cards:
 
-                print(
-                    f"         ⏭️ {offer_id}: "
-                    f"ignorata, "
-                    f"{len(offer_cards)} carte",
-                    flush=True,
+                offer_rarity = str(
+                    offer_card.get(
+                        "rarityTyped"
+                    )
+                    or ""
+                ).strip().lower()
+
+                offer_season = (
+                    offer_card.get(
+                        "seasonYear"
+                    )
                 )
 
+                try:
+
+                    offer_season = int(
+                        offer_season
+                    )
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+
+                    offer_season = None
+
+                offer_player = (
+                    offer_card.get(
+                        "anyPlayer"
+                    )
+                    or {}
+                )
+
+                offer_player_slug = str(
+                    offer_player.get(
+                        "slug"
+                    )
+                    or ""
+                ).strip().lower()
+
+                # --------------------------------------------
+                # GIOCATORE
+                # --------------------------------------------
+
+                if (
+                    offer_player_slug
+                    and
+                    offer_player_slug
+                    != player_slug
+                ):
+                    continue
+
+                # --------------------------------------------
+                # RARITÀ
+                # --------------------------------------------
+
+                if offer_rarity != rarity:
+                    continue
+
+                # --------------------------------------------
+                # STAGIONE
+                # --------------------------------------------
+
+                if offer_season != season:
+                    continue
+
+                compatible = True
+                break
+
+            if not compatible:
                 continue
-
-            offer_card = (
-                offer_cards[0]
-            )
-
-            # ------------------------------------------------
-            # MATCH ESATTO
-            # ------------------------------------------------
-
-            if not card_matches_target(
-                offer_card,
-                player_slug,
-                rarity,
-                season,
-            ):
-
-                continue
-
-            # ------------------------------------------------
-            # IL PREZZO È QUELLO CHE IL BUYER PAGA
-            # ------------------------------------------------
 
             receiver_side = (
                 offer.get(
@@ -1367,35 +1300,8 @@ def get_live_floor(card):
                 or {}
             )
 
-            # ------------------------------------------------
-            # LOG DIAGNOSTICO
-            # ------------------------------------------------
-
-            print(
-                f"         🎯 MATCH: "
-                f"{offer_id}",
-                flush=True,
-            )
-
-            print(
-                "            amounts:",
-                flush=True,
-            )
-
-            print(
-                json.dumps(
-                    amounts,
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-
-            # ------------------------------------------------
-            # PREZZO FIAT
-            # ------------------------------------------------
-
             price = (
-                extract_fiat_price_eur_cents(
+                extract_offer_eur_cents(
                     amounts
                 )
             )
@@ -1403,42 +1309,39 @@ def get_live_floor(card):
             if price is None:
 
                 print(
-                    "         ⚠️ MATCH "
-                    "SENZA PREZZO FIAT "
-                    "VERIFICABILE",
+                    "         ⚠️ Offerta "
+                    "compatibile ma prezzo "
+                    "non convertibile",
+                    flush=True,
+                )
+
+                print(
+                    f"            🆔 "
+                    f"{offer.get('id')}",
+                    flush=True,
+                )
+
+                print(
+                    "            💱 amounts:",
+                    flush=True,
+                )
+
+                print(
+                    json.dumps(
+                        amounts,
+                        ensure_ascii=False,
+                    ),
                     flush=True,
                 )
 
                 continue
 
-            # ------------------------------------------------
-            # RANGE DI SICUREZZA
-            # ------------------------------------------------
-            #
-            # Non eliminiamo prezzi fuori range:
-            # un floor può essere €1.50.
-            #
-            # Li raccogliamo comunque perché stiamo
-            # cercando il vero minimo.
-            # ------------------------------------------------
-
             prices.append(
                 (
                     price,
-                    offer_id,
+                    offer.get("id"),
                 )
             )
-
-            print(
-                f"            💰 "
-                f"Prezzo verificato: "
-                f"€{price / 100:.2f}",
-                flush=True,
-            )
-
-        # ----------------------------------------------------
-        # PAGINATION
-        # ----------------------------------------------------
 
         page_info = (
             connection.get(
@@ -1471,22 +1374,19 @@ def get_live_floor(card):
         cursor = next_cursor
 
     # ========================================================
-    # NESSUN PREZZO
+    # FLOOR
     # ========================================================
 
     if not prices:
 
         print(
-            "      ❌ Nessun prezzo FIAT "
-            "verificabile trovato",
+            "      ❌ Nessuna LIVE SINGLE "
+            "SALE compatibile con "
+            "prezzo FIAT disponibile",
             flush=True,
         )
 
         return None
-
-    # ========================================================
-    # MINIMO REALE
-    # ========================================================
 
     prices.sort(
         key=lambda item: item[0]
@@ -1496,29 +1396,20 @@ def get_live_floor(card):
     offer_id = prices[0][1]
 
     print(
-        "=" * 40,
-        flush=True,
-    )
-
-    print(
-        f"      💰 FLOOR FIAT VERIFICATO: "
+        f"      💰 FLOOR LIVE: "
         f"€{floor / 100:.2f}",
         flush=True,
     )
 
     print(
-        f"         🆔 {offer_id}",
+        f"         🆔 offerta floor: "
+        f"{offer_id}",
         flush=True,
     )
 
     print(
-        f"         📊 offerte compatibili: "
+        f"         📊 compatibili: "
         f"{len(prices)}",
-        flush=True,
-    )
-
-    print(
-        "=" * 40,
         flush=True,
     )
 
@@ -1541,20 +1432,18 @@ def is_kulenovic(card):
             KID.lower()
         )
 
-    asset_id = str(
-        card.get("assetId")
-        or ""
-    ).lower()
-
-    card_slug = str(
-        card.get("slug")
-        or ""
-    ).lower()
-
     return (
-        asset_id in wanted
+        str(
+            card.get("assetId")
+            or ""
+        ).lower()
+        in wanted
         or
-        card_slug in wanted
+        str(
+            card.get("slug")
+            or ""
+        ).lower()
+        in wanted
     )
 
 
@@ -1573,7 +1462,6 @@ def get_competitions(card):
         club,
         dict,
     ):
-
         return []
 
     result = []
@@ -1589,7 +1477,6 @@ def get_competitions(card):
             competition,
             dict,
         ):
-
             continue
 
         value = slug(
@@ -1602,9 +1489,7 @@ def get_competitions(card):
             result.append(value)
 
     return list(
-        dict.fromkeys(
-            result
-        )
+        dict.fromkeys(result)
     )
 
 
@@ -1694,26 +1579,33 @@ def valid_card(card):
         or {}
     )
 
-    age = safe_int(
-        player.get("age")
-    )
+    try:
 
-    print(
-        f"   📄 {name}",
-        flush=True,
-    )
+        age = int(
+            player.get("age")
+        )
 
-    if age is None:
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        print(
+            f"   📄 {name}",
+            flush=True,
+        )
 
         print(
             "      ❌ Età non disponibile",
             flush=True,
         )
 
-        return (
-            False,
-            "invalid",
-        )
+        return False, "invalid"
+
+    print(
+        f"   📄 {name}",
+        flush=True,
+    )
 
     print(
         f"      🎂 Età: {age}",
@@ -1728,14 +1620,11 @@ def valid_card(card):
 
         print(
             f"      ❌ Età troppo alta "
-            f"(limite: < {MAX_AGE})",
+            f"(richiesto < {MAX_AGE})",
             flush=True,
         )
 
-        return (
-            False,
-            "invalid",
-        )
+        return False, "invalid"
 
     # --------------------------------------------------------
     # RARITY
@@ -1748,13 +1637,10 @@ def valid_card(card):
             flush=True,
         )
 
-        return (
-            False,
-            "invalid",
-        )
+        return False, "invalid"
 
     # --------------------------------------------------------
-    # FLOOR
+    # PRICE
     # --------------------------------------------------------
 
     price = get_live_floor(
@@ -1764,26 +1650,23 @@ def valid_card(card):
     if price is None:
 
         print(
-            "      ⚠️ FLOOR FIAT NON TROVATO",
+            "      ⚠️ FLOOR NON VERIFICABILE",
             flush=True,
         )
 
         print(
-            "      🟡 Carta NON classificata "
-            "come non idonea",
+            "      🟡 NON viene "
+            "considerata non idonea",
             flush=True,
         )
 
         print(
-            "      🟡 Offerta lasciata "
-            "IN SOSPESO",
+            "      🟡 Offerta "
+            "LASCIATA IN SOSPESO",
             flush=True,
         )
 
-        return (
-            False,
-            "unknown_price",
-        )
+        return False, "unknown_price"
 
     print(
         f"      💰 Floor: "
@@ -1806,10 +1689,7 @@ def valid_card(card):
             flush=True,
         )
 
-        return (
-            False,
-            "invalid",
-        )
+        return False, "invalid"
 
     # --------------------------------------------------------
     # COMPETITION
@@ -1819,10 +1699,7 @@ def valid_card(card):
         card
     ):
 
-        return (
-            False,
-            "invalid",
-        )
+        return False, "invalid"
 
     competitions = get_competitions(
         card
@@ -1836,10 +1713,7 @@ def valid_card(card):
         flush=True,
     )
 
-    return (
-        True,
-        "valid",
-    )
+    return True, "valid"
 
 
 # ============================================================
@@ -1867,7 +1741,8 @@ def reject_offer(offer):
     if DRY_RUN:
 
         print(
-            "🟡 DRY RUN: rifiuto simulato",
+            "🟡 DRY RUN: "
+            "rifiuto simulato",
             flush=True,
         )
 
@@ -1899,43 +1774,15 @@ def reject_offer(offer):
         }
     })
 
-    if not data:
-
-        print(
-            "❌ Nessuna risposta rejectOffer",
-            flush=True,
-        )
-
-        return False
-
-    if data.get("errors"):
-
-        print(
-            "❌ rejectOffer GRAPHQL ERROR",
-            flush=True,
-        )
-
-        for error in data["errors"]:
-
-            print(
-                json.dumps(
-                    error,
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-
-        return False
-
     result = (
-        (data.get("data") or {})
-        .get("rejectOffer")
-    )
+        (data or {}).get("data") or {}
+    ).get("rejectOffer")
 
     if not result:
 
         print(
-            "❌ Risposta rejectOffer vuota",
+            "❌ Risposta rejectOffer "
+            "vuota",
             flush=True,
         )
 
@@ -1967,7 +1814,7 @@ def reject_offer(offer):
 
 
 # ============================================================
-# SIGN AUTHORIZATIONS
+# SIGN
 # ============================================================
 
 def sign_authorizations(
@@ -2009,6 +1856,7 @@ function build(a) {
     const r = a.request;
 
     if (!r) {
+
         throw new Error(
             "AuthorizationRequest mancante"
         );
@@ -2020,7 +1868,10 @@ function build(a) {
         &&
         r.amount != null
     ) {
-        r.amount = BigInt(r.amount);
+
+        r.amount = BigInt(
+            r.amount
+        );
     }
 
     const signature =
@@ -2133,8 +1984,7 @@ process.stdout.write(
     except json.JSONDecodeError:
 
         raise RuntimeError(
-            "Output firma Node.js "
-            "non valido"
+            "Risposta firma non valida"
         )
 
 
@@ -2155,20 +2005,11 @@ def build_prepare_offer_input(
     if not fields:
 
         raise RuntimeError(
-            "Impossibile leggere "
-            "prepareOfferInput"
+            "prepareOfferInput "
+            "non disponibile"
         )
 
     result = {}
-
-    # --------------------------------------------------------
-    # IMPORTANTISSIMO:
-    #
-    # Stiamo facendo una DIRECT OFFER:
-    #
-    # noi riceviamo le carte
-    # noi inviamo EUR
-    # --------------------------------------------------------
 
     if "receiveAssetIds" in fields:
 
@@ -2201,17 +2042,13 @@ def build_prepare_offer_input(
 
         result[
             "settlementCurrencies"
-        ] = [
-            "EUR"
-        ]
+        ] = ["EUR"]
 
     if "clientMutationId" in fields:
 
         result[
             "clientMutationId"
-        ] = str(
-            uuid.uuid4()
-        )
+        ] = str(uuid.uuid4())
 
     return result
 
@@ -2234,8 +2071,8 @@ def build_create_direct_offer_input(
     if not fields:
 
         raise RuntimeError(
-            "Impossibile leggere "
-            "createDirectOfferInput"
+            "createDirectOfferInput "
+            "non disponibile"
         )
 
     result = {}
@@ -2250,9 +2087,7 @@ def build_create_direct_offer_input(
 
         result[
             "dealId"
-        ] = str(
-            uuid.uuid4()
-        )
+        ] = str(uuid.uuid4())
 
     if "sendAssetIds" in fields:
 
@@ -2285,9 +2120,7 @@ def build_create_direct_offer_input(
 
         result[
             "clientMutationId"
-        ] = str(
-            uuid.uuid4()
-        )
+        ] = str(uuid.uuid4())
 
     return result
 
@@ -2312,9 +2145,7 @@ def counter_offer(
     ).strip()
 
     asset_ids = [
-        str(
-            card.get("assetId")
-        ).strip()
+        str(card.get("assetId")).strip()
         for card in cards
         if card.get("assetId")
     ]
@@ -2331,7 +2162,8 @@ def counter_offer(
     if not asset_ids:
 
         print(
-            "❌ Nessuna carta da ricevere",
+            "❌ Nessuna carta "
+            "da ricevere",
             flush=True,
         )
 
@@ -2344,8 +2176,8 @@ def counter_offer(
 
     print(
         f"🟢 Controproposta: "
-        f"{len(asset_ids)} carta/e → "
-        f"€{amount / 100:.2f}",
+        f"{len(asset_ids)} carta/e "
+        f"→ €{amount / 100:.2f}",
         flush=True,
     )
 
@@ -2368,16 +2200,6 @@ def counter_offer(
         )
 
         return True
-
-    if not STARK:
-
-        print(
-            "❌ SORARE_STARK_PRIVATE_KEY "
-            "mancante",
-            flush=True,
-        )
-
-        return False
 
     # ========================================================
     # PREPARE
@@ -2501,7 +2323,7 @@ def counter_offer(
 
         print(
             "❌ prepareOffer "
-            "GRAPHQL GLOBAL ERROR:",
+            "GRAPHQL ERROR:",
             flush=True,
         )
 
@@ -2631,7 +2453,7 @@ def counter_offer(
 
         debug["approvals"] = (
             f"{len(approvals)} "
-            f"authorization(s)"
+            "authorization(s)"
         )
 
     print(
@@ -2684,7 +2506,7 @@ def counter_offer(
 
         print(
             "❌ createDirectOffer "
-            "GRAPHQL GLOBAL ERROR:",
+            "GRAPHQL ERROR:",
             flush=True,
         )
 
@@ -2746,8 +2568,8 @@ def counter_offer(
     if not offer_id:
 
         print(
-            "❌ Nessuna offerta creata "
-            "da Sorare",
+            "❌ Nessuna offerta "
+            "creata da Sorare",
             flush=True,
         )
 
@@ -2784,7 +2606,7 @@ def counter_offer(
 
 
 # ============================================================
-# UNKNOWN PRICE RETRY
+# UNKNOWN PRICE
 # ============================================================
 
 def should_retry_unknown(
@@ -2875,7 +2697,7 @@ def process_offer(
     )
 
     # --------------------------------------------------------
-    # RETRY
+    # RETRY UNKNOWN
     # --------------------------------------------------------
 
     if not should_retry_unknown(
@@ -2883,8 +2705,8 @@ def process_offer(
     ):
 
         print(
-            "⏳ Floor ancora sconosciuto: "
-            "attendo prossimo tentativo",
+            "⏳ Floor ancora "
+            "sconosciuto: attendo",
             flush=True,
         )
 
@@ -2940,10 +2762,6 @@ def process_offer(
         flush=True,
     )
 
-    # --------------------------------------------------------
-    # CARTE OFFERTE
-    # --------------------------------------------------------
-
     ids = [
         card.get("assetId")
         for card in sender_cards
@@ -2963,10 +2781,6 @@ def process_offer(
 
         return
 
-    # --------------------------------------------------------
-    # DETTAGLI
-    # --------------------------------------------------------
-
     cards = card_details(
         ids
     )
@@ -2982,18 +2796,14 @@ def process_offer(
         return
 
     print(
-        f"🔎 Controllo {len(cards)} carta/e",
+        f"🔎 Controllo "
+        f"{len(cards)} carta/e",
         flush=True,
     )
 
     valid_cards = []
 
     has_unknown_price = False
-    invalid_cards = 0
-
-    # --------------------------------------------------------
-    # VALIDAZIONE
-    # --------------------------------------------------------
 
     for card in cards:
 
@@ -3013,15 +2823,11 @@ def process_offer(
 
                 has_unknown_price = True
 
-            else:
-
-                invalid_cards += 1
-
         except Exception as error:
 
             print(
-                f"❌ Errore controllo carta: "
-                f"{error}",
+                f"❌ Errore controllo "
+                f"carta: {error}",
                 flush=True,
             )
 
@@ -3034,43 +2840,41 @@ def process_offer(
     )
 
     # ========================================================
-    # PRICE UNKNOWN
+    # UNKNOWN
     # ========================================================
 
     if has_unknown_price:
 
         print(
             "⚠️ ALMENO UNA CARTA "
-            "NON HA UN FLOOR FIAT "
-            "VERIFICABILE.",
+            "HA PREZZO NON VERIFICABILE",
             flush=True,
         )
 
         print(
-            "🟡 NESSUNA AZIONE AUTOMATICA.",
+            "🟡 NESSUNA AZIONE",
             flush=True,
         )
 
         print(
             "🟡 OFFERTA LASCIATA "
-            "IN SOSPESO.",
+            "IN SOSPESO",
             flush=True,
         )
 
         print(
-            "🛑 Niente rifiuto.",
+            "🛑 Niente rifiuto",
             flush=True,
         )
 
         print(
-            "🛑 Niente controproposta.",
+            "🛑 Niente controproposta",
             flush=True,
         )
 
         print(
-            "🔁 Verrà ritentata "
-            f"tra circa "
-            f"{UNKNOWN_PRICE_RETRY}s.",
+            f"🔁 Retry tra "
+            f"{UNKNOWN_PRICE_RETRY}s",
             flush=True,
         )
 
@@ -3083,12 +2887,12 @@ def process_offer(
     if not valid_cards:
 
         print(
-            "❌ Nessuna carta idonea.",
+            "❌ Nessuna carta idonea",
             flush=True,
         )
 
         print(
-            "🔴 Rifiuto dell'offerta.",
+            "🔴 Rifiuto dell'offerta",
             flush=True,
         )
 
@@ -3103,7 +2907,7 @@ def process_offer(
         return
 
     # ========================================================
-    # CARTA VALIDA
+    # CARTE VALIDE
     # ========================================================
 
     rejected = (
@@ -3120,7 +2924,7 @@ def process_offer(
         )
 
     # ========================================================
-    # CONTROPROPOSTA
+    # COUNTER
     # ========================================================
 
     if counter_offer(
@@ -3130,14 +2934,9 @@ def process_offer(
 
         print(
             "🟢 Controproposta "
-            "completata con successo.",
+            "completata",
             flush=True,
         )
-
-        # ----------------------------------------------------
-        # Dopo aver creato la controproposta,
-        # rifiutiamo l'originale.
-        # ----------------------------------------------------
 
         if reject_offer(
             offer
@@ -3151,21 +2950,22 @@ def process_offer(
 
             print(
                 "⚠️ Controproposta creata "
-                "ma impossibile rifiutare "
-                "l'offerta originale.",
+                "ma offerta originale "
+                "non rifiutata",
                 flush=True,
             )
 
     else:
 
         print(
-            "🔴 Controproposta NON creata.",
+            "🔴 Controproposta "
+            "NON creata",
             flush=True,
         )
 
         print(
             "🟡 Offerta originale "
-            "lasciata IN SOSPESO.",
+            "lasciata IN SOSPESO",
             flush=True,
         )
 
@@ -3188,14 +2988,14 @@ def worker():
     )
 
     print(
-        f"💰 Pagamento: "
+        "💰 Pagamento: "
         f"€{PAY_PER_CARD / 100:.2f} "
-        f"per carta",
+        "per carta",
         flush=True,
     )
 
     print(
-        f"📊 Range floor: "
+        "📊 Range floor: "
         f"€{MIN_PRICE / 100:.2f} - "
         f"€{MAX_PRICE / 100:.2f}",
         flush=True,
@@ -3235,13 +3035,15 @@ def worker():
     )
 
     print(
-        "🚫 WEI: ESCLUSO dal floor FIAT",
+        "🚫 WEI: ESCLUSO "
+        "dal floor FIAT",
         flush=True,
     )
 
     print(
         "🚫 referenceCurrency=WEI "
-        "NON viene interpretato come ETH",
+        "NON viene interpretato "
+        "come ETH",
         flush=True,
     )
 
@@ -3305,7 +3107,15 @@ def worker():
     # SCHEMA
     # --------------------------------------------------------
 
-    inspect_live_schema()
+    if not inspect_live_schema():
+
+        print(
+            "❌ Schema incompatibile. "
+            "Worker fermato.",
+            flush=True,
+        )
+
+        return
 
     # --------------------------------------------------------
     # LOOP
@@ -3346,7 +3156,8 @@ def worker():
         except Exception as error:
 
             print(
-                f"❌ Worker: {error}",
+                f"❌ Worker: "
+                f"{error}",
                 flush=True,
             )
 
@@ -3370,11 +3181,13 @@ def start_worker():
 
         _worker_started = True
 
-        threading.Thread(
+        thread = threading.Thread(
             target=worker,
             name="sorare-worker",
             daemon=True,
-        ).start()
+        )
+
+        thread.start()
 
         print(
             "✅ Thread Sorare avviato.",
@@ -3426,16 +3239,14 @@ def home():
         "price_mode":
             "LIVE_SINGLE_SALE_EXACT_PLAYER_RARITY_SEASON",
 
-        "price_fiat_priority": [
-            "eurCents",
-            "usdCents"
-        ],
+        "price_eur_mode":
+            "EUR_DIRECT_OR_USD_CONVERTED",
 
         "usd_conversion":
             True,
 
         "usd_conversion_mode":
-            "LIVE_USD_EUR_RATE_WITH_CACHE",
+            "USD_CENTS_TO_EUR",
 
         "usd_eur_cache_seconds":
             USD_EUR_CACHE_SECONDS,
@@ -3443,11 +3254,8 @@ def home():
         "wei_conversion":
             False,
 
-        "wei_used_for_fiat_floor":
-            False,
-
-        "reference_currency_wei":
-            "IGNORED",
+        "wei_excluded_from_fiat_floor":
+            True,
 
         "latest_english_auction_fallback":
             False,
