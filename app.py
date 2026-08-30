@@ -739,7 +739,7 @@ def valid_card(card):
 
         print(
             "      🟡 Prezzo sconosciuto "
-            "→ PENDING",
+            "→ RIFIUTO",
             flush=True,
         )
 
@@ -1556,10 +1556,18 @@ def process_offer(offer):
     if unknown:
 
         print(
-            "🟡 Prezzo non verificabile "
-            "→ offerta lasciata PENDING",
+            "🔴 Prezzo non verificabile "
+            "→ rifiuto offerta",
             flush=True,
         )
+
+        if reject_offer(
+            offer
+        ):
+
+            completed(
+                offer_id
+            )
 
         return
 
