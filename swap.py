@@ -21,42 +21,30 @@ COVERAGE_URL = "https://sorare.com/coverage"
 TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 
+# IMPORTANTE:
+# KID deve essere l'ASSET ID DEL TUO KULENOVIC.
+#
+# NON usare lo slug del giocatore per identificare
+# la tua carta, perché altri manager possono possedere
+# altri Kulenovic.
+KID = os.getenv("KULENOVIC_ID", "").strip()
+
 BOT_VERSION = "1.1-SWAP"
 
 INTERVAL = 10
 TIMEOUT = 25
-
 UNKNOWN_PRICE_RETRY = 60
+
 
 # ============================================================
 # STESSI PARAMETRI AUTOBUY
 # ============================================================
 
-MIN_PRICE = 32
-MAX_PRICE = 70
-
+MIN_PRICE = 32          # €0.32
+MAX_PRICE = 70          # €0.70
 MAX_AGE = 28
 
 MIN_LIVE_LISTINGS = 5
-
-# ============================================================
-# KULENOVIC
-#
-# IMPORTANTE:
-# Kulenovic è ESCLUSIVO dell'AUTOBUY.
-#
-# Lo Swap Bot NON deve mai gestire un'offerta
-# nella quale Kulenovic compare in uno dei due lati.
-# ============================================================
-
-KSLUG = "sandro-kulenovic-2025-limited-385"
-
-KASSET = (
-    "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
-    "6796b6c0ed10ba0a6"
-)
-
-KID = os.getenv("KULENOVIC_ID", "").strip()
 
 
 # ============================================================
@@ -97,79 +85,41 @@ def normalize(value):
 
 
 # ============================================================
-# KULENOVIC PROTECTION
+# KULENOVIC
 # ============================================================
 
-def is_kulenovic(card):
+def is_my_kulenovic(card):
     """
-    Ritorna True se la carta è Kulenovic.
+    Restituisce True SOLO se la carta è il TUO Kulenovic.
 
-    Il controllo viene fatto su:
-    - assetId
-    - slug
+    È fondamentale NON controllare semplicemente lo slug
+    del giocatore, perché un manager potrebbe offrirci
+    un altro Kulenovic.
+
+    Il controllo principale è quindi KID = assetId della
+    tua specifica carta.
     """
 
-    wanted = {
-        normalize(KSLUG),
-        normalize(KASSET)
-    }
+    if not KID:
+        print(
+            "⚠️ KULENOVIC_ID non configurato: "
+            "impossibile proteggere il Kulenovic",
+            flush=True
+        )
 
-    if KID:
-        wanted.add(normalize(KID))
+        # Fail-safe:
+        # senza KID NON consideriamo nessuna carta come
+        # sicuramente nostra.
+        return False
+
+    card_asset_id = normalize(
+        card.get("assetId")
+    )
 
     return (
-        normalize(card.get("assetId")) in wanted
-        or normalize(card.get("slug")) in wanted
+        card_asset_id
+        and card_asset_id == normalize(KID)
     )
-
-
-def offer_contains_kulenovic(offer):
-    """
-    Controlla ENTRAMBI i lati dell'offerta.
-
-    senderSide:
-        carte che il manager ci offre
-
-    receiverSide:
-        carte che il manager vuole da noi
-
-    Se Kulenovic compare in uno qualsiasi dei due lati,
-    lo Swap Bot deve ignorare completamente l'offerta.
-    """
-
-    sender_side = (
-        offer.get("senderSide")
-        or {}
-    )
-
-    receiver_side = (
-        offer.get("receiverSide")
-        or {}
-    )
-
-    cards_they_give = (
-        sender_side.get("anyCards")
-        or []
-    )
-
-    cards_we_give = (
-        receiver_side.get("anyCards")
-        or []
-    )
-
-    if any(
-        is_kulenovic(card)
-        for card in cards_they_give
-    ):
-        return True, "KULENOVIC_TRA_CARTE_OFFERTE"
-
-    if any(
-        is_kulenovic(card)
-        for card in cards_we_give
-    ):
-        return True, "KULENOVIC_TRA_CARTE_RICHIESTE"
-
-    return False, None
 
 
 # ============================================================
@@ -264,7 +214,6 @@ def load_coverage(force=False):
 def headers():
 
     if not TOKEN:
-
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato"
         )
@@ -272,7 +221,6 @@ def headers():
     token = TOKEN
 
     if not token.lower().startswith("bearer "):
-
         token = "Bearer " + token
 
     h = {
@@ -645,7 +593,10 @@ def price_eur_cents(amounts):
     if not isinstance(amounts, dict):
         return None
 
-    # EUR diretto
+    # -------------------------
+    # EUR DIRECT
+    # -------------------------
+
     try:
 
         eur = int(
@@ -661,7 +612,10 @@ def price_eur_cents(amounts):
     ):
         pass
 
+    # -------------------------
     # USD -> EUR
+    # -------------------------
+
     try:
 
         usd = float(
@@ -687,7 +641,10 @@ def price_eur_cents(amounts):
                 )
             )
 
-    # WEI NON USATO
+    # -------------------------
+    # WEI ESCLUSO
+    # -------------------------
+
     if amounts.get("wei") is not None:
 
         print(
@@ -868,7 +825,7 @@ def get_live_floor(card):
             prices.append(price)
 
     # ========================================================
-    # STESSA PROTEZIONE AUTOBUY
+    # MINIMO 5 LISTING
     # ========================================================
 
     if len(prices) < MIN_LIVE_LISTINGS:
@@ -959,7 +916,7 @@ def covered_competitions(card):
 
 
 # ============================================================
-# VALID CARD
+# VALID CARD - STESSI FILTRI AUTOBUY
 # ============================================================
 
 def valid_card(card):
@@ -980,9 +937,9 @@ def valid_card(card):
         flush=True
     )
 
-    # --------------------------------------------------------
+    # -------------------------
     # ETÀ
-    # --------------------------------------------------------
+    # -------------------------
 
     try:
 
@@ -1016,9 +973,9 @@ def valid_card(card):
 
         return False, "invalid"
 
-    # --------------------------------------------------------
+    # -------------------------
     # RARITÀ
-    # --------------------------------------------------------
+    # -------------------------
 
     rarity = normalize(
         card.get("rarityTyped")
@@ -1033,9 +990,9 @@ def valid_card(card):
 
         return False, "invalid"
 
-    # --------------------------------------------------------
+    # -------------------------
     # FLOOR
-    # --------------------------------------------------------
+    # -------------------------
 
     price, reason = get_live_floor(
         card
@@ -1044,7 +1001,8 @@ def valid_card(card):
     if reason == "invalid":
 
         print(
-            "      ❌ Meno di 5 inserzioni",
+            "      ❌ Meno di "
+            "5 inserzioni valide",
             flush=True
         )
 
@@ -1065,9 +1023,9 @@ def valid_card(card):
         flush=True
     )
 
-    # --------------------------------------------------------
+    # -------------------------
     # RANGE AUTOBUY
-    # --------------------------------------------------------
+    # -------------------------
 
     if not (
         MIN_PRICE
@@ -1083,9 +1041,9 @@ def valid_card(card):
 
         return False, "invalid"
 
-    # --------------------------------------------------------
+    # -------------------------
     # COVERAGE
-    # --------------------------------------------------------
+    # -------------------------
 
     active, covered, not_covered = (
         covered_competitions(card)
@@ -1223,72 +1181,6 @@ def analyze_swap(offer):
         if offer_id in processed:
             return
 
-    # ========================================================
-    # PROTEZIONE KULENOVIC
-    #
-    # IMPORTANTE:
-    #
-    # Se Kulenovic è presente nell'offerta, lo Swap Bot
-    # NON deve fare assolutamente nulla.
-    #
-    # NON chiamiamo completed().
-    #
-    # In questo modo l'offerta resta disponibile per
-    # l'AutoBuy.
-    # ========================================================
-
-    contains_kulenovic, reason = (
-        offer_contains_kulenovic(
-            offer
-        )
-    )
-
-    if contains_kulenovic:
-
-        print(
-            "\n🛑 OFFERTA CON KULENOVIC",
-            flush=True
-        )
-
-        if reason == "KULENOVIC_TRA_CARTE_RICHIESTE":
-
-            print(
-                "   🎯 Kulenovic è richiesto "
-                "dal manager",
-                flush=True
-            )
-
-            print(
-                "   🤖 Gestione riservata "
-                "all'AUTOBUY",
-                flush=True
-            )
-
-        else:
-
-            print(
-                "   ⚠️ Kulenovic è presente "
-                "tra le carte offerte",
-                flush=True
-            )
-
-            print(
-                "   🚫 Swap Bot ignora "
-                "completamente l'offerta",
-                flush=True
-            )
-
-        print(
-            "   🔓 NON marcata come processed",
-            flush=True
-        )
-
-        return
-
-    # ========================================================
-    # RETRY PREZZI SCONOSCIUTI
-    # ========================================================
-
     if not retry_unknown(offer_id):
         return
 
@@ -1303,13 +1195,13 @@ def analyze_swap(offer):
     )
 
     # ========================================================
-    # DIREZIONE
+    # DIREZIONE CORRETTA
     #
     # senderSide:
-    #   carte che IL MANAGER ci offre
+    #   carte + cash che IL MANAGER offre a noi
     #
     # receiverSide:
-    #   nostre carte che IL MANAGER vuole
+    #   carte che NOI dovremmo dare al manager
     # ========================================================
 
     cards_they_give = (
@@ -1322,7 +1214,10 @@ def analyze_swap(offer):
         or []
     )
 
-    # Non è uno swap se manca una parte
+    # ========================================================
+    # NON È UNO SWAP
+    # ========================================================
+
     if not cards_they_give:
 
         completed(offer_id)
@@ -1334,8 +1229,7 @@ def analyze_swap(offer):
         return
 
     print(
-        "\n"
-        + "=" * 65,
+        "\n" + "=" * 65,
         flush=True
     )
 
@@ -1362,7 +1256,7 @@ def analyze_swap(offer):
     )
 
     # ========================================================
-    # ID CARTE
+    # ASSET IDS
     # ========================================================
 
     give_ids = [
@@ -1383,7 +1277,7 @@ def analyze_swap(offer):
         return
 
     # ========================================================
-    # DETTAGLI CARTE
+    # CARD DETAILS
     # ========================================================
 
     cards_we_give_details = card_details(
@@ -1421,48 +1315,50 @@ def analyze_swap(offer):
         return
 
     # ========================================================
-    # ULTERIORE PROTEZIONE
+    # CONTROLLO FONDAMENTALE
     #
-    # Controlliamo anche i dettagli ottenuti da GraphQL.
+    # IL TUO KULENOVIC NON PUÒ MAI ESSERE CEDUTO.
     #
-    # Se Kulenovic viene identificato qui, interrompiamo
-    # immediatamente senza completed().
+    # ATTENZIONE:
+    # non blocchiamo "Kulenovic" in generale.
+    #
+    # Se il manager offre UN ALTRO Kulenovic:
+    #   → viene valutato normalmente.
+    #
+    # Se il manager richiede IL TUO Kulenovic:
+    #   → swap rifiutato/ignorato.
     # ========================================================
 
-    if any(
-        is_kulenovic(card)
+    my_kulenovic_requested = any(
+        is_my_kulenovic(card)
         for card in cards_we_give_details
-    ):
+    )
+
+    if my_kulenovic_requested:
 
         print(
-            "🛑 KULENOVIC IDENTIFICATO "
-            "TRA LE NOSTRE CARTE",
+            "\n🚫 PROTEZIONE KULENOVIC",
             flush=True
         )
 
         print(
-            "   🤖 Gestione riservata "
-            "all'AUTOBUY",
-            flush=True
-        )
-
-        return
-
-    if any(
-        is_kulenovic(card)
-        for card in cards_they_give_details
-    ):
-
-        print(
-            "🛑 KULENOVIC IDENTIFICATO "
-            "TRA LE CARTE OFFERTE",
+            "   Il manager sta richiedendo "
+            "IL TUO Kulenovic.",
             flush=True
         )
 
         print(
-            "   🚫 Swap Bot ignora l'offerta",
+            "   ❌ Questo Kulenovic "
+            "non può MAI essere ceduto.",
             flush=True
         )
+
+        print(
+            "   🛑 SWAP NON APPROVABILE",
+            flush=True
+        )
+
+        completed(offer_id)
 
         return
 
@@ -1493,7 +1389,7 @@ def analyze_swap(offer):
 
             print(
                 "   🟡 Floor sconosciuto "
-                "→ SWAP NON VALUTABILE",
+                "→ SWAP PENDING",
                 flush=True
             )
 
@@ -1507,26 +1403,35 @@ def analyze_swap(offer):
             flush=True
         )
 
-    # Evita divisione per zero
-    if total_given_floor <= 0:
-
-        print(
-            "❌ Floor totale ceduto "
-            "non valido",
-            flush=True
-        )
-
-        return
-
     # ========================================================
     # FLOOR CARTE CHE RICEVI
     #
-    # Applichiamo ESATTAMENTE gli stessi parametri AutoBuy.
+    # QUI KULENOVIC DI UN ALTRO MANAGER
+    # VIENE TRATTATO NORMALMENTE.
     # ========================================================
 
     total_received_floor = 0
 
     for card in cards_they_give_details:
+
+        name = (
+            card.get("name")
+            or card.get("slug")
+            or "Carta"
+        )
+
+        print(
+            f"\n📥 RICEVO: {name}",
+            flush=True
+        )
+
+        # ----------------------------------------------------
+        # NOTA:
+        # NON controlliamo is_my_kulenovic() qui.
+        #
+        # Se è un Kulenovic appartenente al manager,
+        # viene valutato normalmente.
+        # ----------------------------------------------------
 
         ok, reason = valid_card(
             card
@@ -1546,8 +1451,8 @@ def analyze_swap(offer):
 
             print(
                 "❌ Una carta ricevuta "
-                "non soddisfa i parametri "
-                "AutoBuy",
+                "non soddisfa i "
+                "parametri AutoBuy",
                 flush=True
             )
 
@@ -1560,8 +1465,8 @@ def analyze_swap(offer):
 
             return
 
-        floor, floor_reason = (
-            get_live_floor(card)
+        floor, floor_reason = get_live_floor(
+            card
         )
 
         if floor is None:
@@ -1576,11 +1481,17 @@ def analyze_swap(offer):
 
         total_received_floor += floor
 
+        print(
+            f"   💰 Floor ricevuto: "
+            f"€{floor / 100:.2f}",
+            flush=True
+        )
+
     # ========================================================
     # CASH
     #
-    # Il denaro offerto dal manager viene aggiunto al
-    # valore delle carte ricevute.
+    # Il denaro offerto dal manager viene aggiunto
+    # al floor delle carte ricevute.
     # ========================================================
 
     cash_eur = get_cash_offered_eur_cents(
@@ -1617,8 +1528,7 @@ def analyze_swap(offer):
     )
 
     print(
-        "\n"
-        + "-" * 65,
+        "\n" + "-" * 65,
         flush=True
     )
 
@@ -1659,13 +1569,31 @@ def analyze_swap(offer):
     )
 
     # ========================================================
+    # SICUREZZA EXTRA
+    #
+    # Non deve mai essere possibile avere un valore ceduto
+    # pari a zero.
+    # ========================================================
+
+    if total_given_floor <= 0:
+
+        print(
+            "❌ Floor ceduto non valido",
+            flush=True
+        )
+
+        completed(offer_id)
+
+        return
+
+    # ========================================================
     # DECISIONE
     # ========================================================
 
     if total_received < minimum_required:
 
         print(
-            "\n❌ SWAP RIFIUTATO",
+            "\n❌ SWAP NON APPROVABILE",
             flush=True
         )
 
@@ -1682,7 +1610,7 @@ def analyze_swap(offer):
     if total_received > maximum_allowed:
 
         print(
-            "\n❌ SWAP RIFIUTATO",
+            "\n❌ SWAP NON APPROVABILE",
             flush=True
         )
 
@@ -1720,8 +1648,12 @@ def analyze_swap(offer):
     )
 
     print(
-        "🛑 MODALITÀ ANALISI: "
-        "NESSUNA AZIONE ESEGUITA",
+        "🛑 MODALITÀ ANALISI:",
+        flush=True
+    )
+
+    print(
+        "   NESSUNA AZIONE ESEGUITA",
         flush=True
     )
 
@@ -1752,13 +1684,30 @@ def worker():
     )
 
     print(
-        "🎯 KULENOVIC: "
-        "RISERVATO ESCLUSIVAMENTE AUTOBUY",
+        "🔒 IL TUO KULENOVIC: "
+        "MAI CEDIBILE",
         flush=True
     )
 
+    if KID:
+
+        print(
+            "🔑 KULENOVIC_ID: "
+            "CONFIGURATO",
+            flush=True
+        )
+
+    else:
+
+        print(
+            "⚠️ KULENOVIC_ID: "
+            "NON CONFIGURATO",
+            flush=True
+        )
+
     print(
-        f"🎂 Età: < {MAX_AGE}",
+        "🎂 Età: "
+        f"< {MAX_AGE}",
         flush=True
     )
 
@@ -1794,28 +1743,20 @@ def worker():
     )
 
     print(
-        "💶 Cash incluso nel valore ricevuto",
+        "💶 Cash incluso "
+        "nel valore ricevuto",
         flush=True
     )
 
     print(
-        "🛡️ Kulenovic mai ceduto dallo Swap Bot",
+        "🚫 Nessuna accettazione "
+        "automatica",
         flush=True
     )
 
     print(
-        "🛡️ Offerte con Kulenovic ignorate "
-        "e NON marcate processed",
-        flush=True
-    )
-
-    print(
-        "🚫 Nessuna accettazione automatica",
-        flush=True
-    )
-
-    print(
-        "🚫 Nessun rifiuto automatico",
+        "🚫 Nessun rifiuto "
+        "automatico",
         flush=True
     )
 
@@ -1837,10 +1778,14 @@ def worker():
         return
 
     print(
-        f"🏆 Competizioni coperte: "
-        f"{len(covered)}",
+        f"🏆 Competizioni Football "
+        f"coperte: {len(covered)}",
         flush=True
     )
+
+    # ========================================================
+    # ACCOUNT
+    # ========================================================
 
     if not check_account():
         return
@@ -1936,18 +1881,21 @@ def home():
 
     return jsonify({
 
-        "status": "online",
+        "status":
+            "online",
 
-        "bot": "sorare-swap",
+        "bot":
+            "sorare-swap",
 
-        "version": BOT_VERSION,
+        "version":
+            BOT_VERSION,
 
-        "mode": "ANALYSIS_ONLY",
+        "mode":
+            "ANALYSIS_ONLY",
 
         "interval_seconds":
             INTERVAL,
 
-        # AutoBuy parameters
         "min_price_cents":
             MIN_PRICE,
 
@@ -1960,47 +1908,30 @@ def home():
         "min_live_listings":
             MIN_LIVE_LISTINGS,
 
-        # Swap parameters
         "swap_min_multiplier":
             SWAP_MIN_MULTIPLIER,
 
         "swap_max_multiplier":
             SWAP_MAX_MULTIPLIER,
 
-        "swap_min_percent":
-            20,
-
-        "swap_max_percent":
-            25,
-
         "cash_included":
             True,
 
-        # Kulenovic
-        "kulenovic_protected":
+        "my_kulenovic_protected":
             True,
 
-        "kulenovic_role":
-            "AUTOBUY_ONLY",
+        "my_kulenovic_id_configured":
+            bool(KID),
 
-        "offers_with_kulenovic":
-            "IGNORED_BY_SWAP_BOT",
-
-        "kulenovic_marked_processed":
-            False,
-
-        # Actions
         "automatic_accept":
             False,
 
         "automatic_reject":
             False,
 
-        # Coverage
         "covered_competitions_count":
             len(covered),
 
-        # Price
         "price_mode":
             "LIVE_SINGLE_SALE_EXACT_PLAYER_RARITY_SEASON",
 
@@ -2023,7 +1954,8 @@ def health():
 
     return jsonify({
 
-        "status": "ok",
+        "status":
+            "ok",
 
         "bot":
             "sorare-swap",
@@ -2034,8 +1966,11 @@ def health():
         "mode":
             "ANALYSIS_ONLY",
 
-        "kulenovic_protected":
-            True
+        "my_kulenovic_protected":
+            True,
+
+        "my_kulenovic_id_configured":
+            bool(KID)
     })
 
 
