@@ -26,6 +26,7 @@ AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 KID = os.getenv("KULENOVIC_ID", "").strip()
 
+
 # ============================================================
 # SICUREZZA
 #
@@ -35,8 +36,8 @@ KID = os.getenv("KULENOVIC_ID", "").strip()
 #
 # SWAP_AUTO_ACCEPT:
 #   false = lo swap viene valutato ma NON accettato
-#   true  = se DRY_RUN=false, lo swap approvabile
-#           viene accettato automaticamente
+#   true  = se DRY_RUN=false, lo swap approvabile viene
+#           accettato automaticamente
 # ============================================================
 
 DRY_RUN = os.getenv(
@@ -64,8 +65,6 @@ MAX_AGE = 28
 INTERVAL = 10
 TIMEOUT = 25
 
-UNKNOWN_PRICE_RETRY = 60
-
 MIN_LIVE_LISTINGS = 5
 
 
@@ -81,7 +80,7 @@ SWAP_MAX_MULTIPLIER = 1.25
 # VERSIONE
 # ============================================================
 
-BOT_VERSION = "21.0-SWAP"
+BOT_VERSION = "22.0-SWAP-NO-RETRY"
 
 
 # ============================================================
@@ -98,10 +97,13 @@ KASSET = (
 
 # ============================================================
 # STATE
+#
+# Ogni offerta viene processata una sola volta per runtime.
+#
+# NON esiste più nessun sistema di retry del prezzo.
 # ============================================================
 
 processed = set()
-unknown_price = {}
 
 state_lock = threading.Lock()
 
@@ -138,7 +140,40 @@ COVERAGE_CACHE_SECONDS = 3600
 # ============================================================
 
 def normalize(value):
+
     return str(value or "").strip().lower()
+
+
+# ============================================================
+# MARK OFFER AS PROCESSED
+#
+# L'offerta viene aggiunta allo stato una sola volta.
+#
+# IMPORTANTE:
+# questo stato vive nella memoria del processo.
+# Dopo un restart del servizio, il set viene ricreato.
+# ============================================================
+
+def mark_processed(offer_id):
+
+    if not offer_id:
+        return
+
+    with state_lock:
+
+        processed.add(
+            normalize(offer_id)
+        )
+
+
+def is_processed(offer_id):
+
+    if not offer_id:
+        return False
+
+    with state_lock:
+
+        return normalize(offer_id) in processed
 
 
 # ============================================================
@@ -433,16 +468,11 @@ def check_account():
 # ============================================================
 # OFFERTE PENDENTI
 #
-# IMPORTANTE:
-#
 # senderSide:
 #   carte + cash che IL MANAGER CI OFFRE
 #
 # receiverSide:
 #   carte + cash che IL MANAGER RICHIEDE
-#
-# Per lo SWAP il cash viene solamente LETTO.
-# Il bot NON aggiunge cash.
 # ============================================================
 
 def get_offers():
@@ -714,7 +744,7 @@ def price_eur_cents(amounts):
                 round(usd * rate)
             )
 
-    # WEI volutamente escluso
+    # WEI escluso
 
     if amounts.get("wei") is not None:
 
@@ -728,11 +758,6 @@ def price_eur_cents(amounts):
 
 # ============================================================
 # CASH OFFERTO DAL MANAGER
-#
-# Questo NON crea denaro.
-#
-# Legge solamente il cash presente
-# nel senderSide dell'offerta.
 # ============================================================
 
 def get_cash_offered_eur_cents(offer):
@@ -760,6 +785,14 @@ def get_cash_offered_eur_cents(offer):
 
 # ============================================================
 # LIVE FLOOR
+#
+# Restituisce:
+#
+#   (floor, "valid")
+#   (None, "unknown_price")
+#   (None, "invalid")
+#
+# NON esiste più alcun retry.
 # ============================================================
 
 def get_live_floor(card):
@@ -938,7 +971,7 @@ def get_live_floor(card):
             f"      ⚠️ Inserzioni valide: "
             f"{len(prices)}/"
             f"{MIN_LIVE_LISTINGS}"
-            f" → CARTA ESCLUSA",
+            f" → PREZZO NON DISPONIBILE",
             flush=True
         )
 
@@ -1056,6 +1089,12 @@ def covered_competitions(card):
 
 # ============================================================
 # VALID CARD
+#
+# Usata per le carte che il manager ci offre.
+#
+# IMPORTANTE:
+# Se il prezzo non è disponibile, la carta NON è valida
+# e viene esclusa dalla controproposta.
 # ============================================================
 
 def valid_card(card):
@@ -1134,18 +1173,18 @@ def valid_card(card):
     if price_reason == "invalid":
 
         print(
-            "      ❌ Meno di 5 "
-            "inserzioni valide",
+            "      ❌ Prezzo non disponibile "
+            "o meno di 5 inserzioni",
             flush=True
         )
 
-        return False, "invalid"
+        return False, "unknown_price"
 
     if price is None:
 
         print(
-            "      🟡 Prezzo sconosciuto "
-            "→ PENDING",
+            "      ❌ Prezzo sconosciuto "
+            "→ CARTA ESCLUSA",
             flush=True
         )
 
@@ -1324,11 +1363,6 @@ def reject_offer(offer):
 
 # ============================================================
 # SIGN AUTHORIZATIONS
-#
-# Manteniamo il meccanismo già funzionante
-# del tuo 20.7.
-#
-# Il tipo viene controllato esplicitamente.
 # ============================================================
 
 def sign_authorizations(authorizations):
@@ -2082,10 +2116,6 @@ def accept_offer(
 
         return False
 
-    # --------------------------------------------------------
-    # DRY RUN
-    # --------------------------------------------------------
-
     if DRY_RUN:
 
         print(
@@ -2101,10 +2131,6 @@ def accept_offer(
 
         return True
 
-    # --------------------------------------------------------
-    # PREPARE
-    # --------------------------------------------------------
-
     authorizations, exchange_rate_id = (
         prepare_accept_offer(
             offer_id
@@ -2114,10 +2140,6 @@ def accept_offer(
     if not authorizations:
 
         return False
-
-    # --------------------------------------------------------
-    # SIGN
-    # --------------------------------------------------------
 
     try:
 
@@ -2143,10 +2165,6 @@ def accept_offer(
         )
 
         return False
-
-    # --------------------------------------------------------
-    # ACCEPT
-    # --------------------------------------------------------
 
     accept_input = {
 
@@ -2257,60 +2275,6 @@ def accept_offer(
 
 
 # ============================================================
-# RETRY / STATE
-# ============================================================
-
-def retry_unknown(
-    offer_id
-):
-
-    now = time.time()
-
-    with state_lock:
-
-        last = unknown_price.get(
-            offer_id
-        )
-
-        if last is None:
-
-            unknown_price[
-                offer_id
-            ] = now
-
-            return True
-
-        if (
-            now - last
-            >= UNKNOWN_PRICE_RETRY
-        ):
-
-            unknown_price[
-                offer_id
-            ] = now
-
-            return True
-
-    return False
-
-
-def completed(
-    offer_id
-):
-
-    with state_lock:
-
-        processed.add(
-            offer_id
-        )
-
-        unknown_price.pop(
-            offer_id,
-            None
-        )
-
-
-# ============================================================
 # SWAP DETECTION
 # ============================================================
 
@@ -2330,8 +2294,6 @@ def is_swap_offer(
         or []
     )
 
-    # Uno swap richiede carte su entrambe le parti.
-
     return bool(
         sender_cards
         and receiver_cards
@@ -2349,6 +2311,16 @@ def is_swap_offer(
 #
 # CASH:
 #   SOLO QUELLO GIÀ PRESENTE NEL senderSide
+#
+# NUOVA REGOLA PREZZO:
+#
+#   - prezzo nostra carta sconosciuto:
+#       SWAP RIFIUTATO
+#
+#   - prezzo carta del manager sconosciuto:
+#       CARTA ESCLUSA
+#
+# NON ESISTE RETRY.
 # ============================================================
 
 def analyze_swap(
@@ -2363,17 +2335,25 @@ def analyze_swap(
 
         return
 
-    with state_lock:
-
-        if offer_id in processed:
-
-            return
-
-    if not retry_unknown(
+    if is_processed(
         offer_id
     ):
 
         return
+
+    # ========================================================
+    # BLOCCO IMMEDIATO
+    #
+    # L'offerta viene considerata processata appena entra
+    # nella funzione.
+    #
+    # In questo modo non viene ripresa al ciclo successivo,
+    # anche se una successiva operazione dovesse fallire.
+    # ========================================================
+
+    mark_processed(
+        offer_id
+    )
 
     sender_side = (
         offer.get("senderSide")
@@ -2454,8 +2434,13 @@ def analyze_swap(
 
     if not give_ids or not receive_ids:
 
-        completed(
-            offer_id
+        print(
+            "❌ ID carte mancanti → SWAP RIFIUTATO",
+            flush=True
+        )
+
+        reject_offer(
+            offer
         )
 
         return
@@ -2482,9 +2467,18 @@ def analyze_swap(
     ):
 
         print(
-            "⚠️ Impossibile verificare "
+            "❌ Impossibile verificare "
             "tutte le nostre carte",
             flush=True
+        )
+
+        print(
+            "🔴 SWAP RIFIUTATO",
+            flush=True
+        )
+
+        reject_offer(
+            offer
         )
 
         return
@@ -2495,9 +2489,18 @@ def analyze_swap(
     ):
 
         print(
-            "⚠️ Impossibile verificare "
+            "❌ Impossibile verificare "
             "tutte le carte ricevute",
             flush=True
+        )
+
+        print(
+            "🔴 SWAP RIFIUTATO",
+            flush=True
+        )
+
+        reject_offer(
+            offer
         )
 
         return
@@ -2537,13 +2540,9 @@ def analyze_swap(
                 flush=True
             )
 
-            if reject_offer(
+            reject_offer(
                 offer
-            ):
-
-                completed(
-                    offer_id
-                )
+            )
 
             return
 
@@ -2578,6 +2577,11 @@ def analyze_swap(
 
     # ========================================================
     # FLOOR NOSTRE CARTE
+    #
+    # Se il prezzo di una nostra carta non è disponibile,
+    # NON possiamo calcolare correttamente il valore ceduto.
+    #
+    # Quindi lo swap viene rifiutato immediatamente.
     # ========================================================
 
     total_given_floor = 0
@@ -2602,9 +2606,23 @@ def analyze_swap(
         if floor is None:
 
             print(
-                "   🟡 Floor sconosciuto "
-                "→ SWAP PENDING",
+                "   ❌ Floor sconosciuto",
                 flush=True
+            )
+
+            print(
+                "   🔴 IMPOSSIBILE VALUTARE "
+                "IL VALORE CEDUTO",
+                flush=True
+            )
+
+            print(
+                "🔴 SWAP RIFIUTATO",
+                flush=True
+            )
+
+            reject_offer(
+                offer
             )
 
             return
@@ -2619,14 +2637,27 @@ def analyze_swap(
 
     # ========================================================
     # FLOOR CARTE MANAGER
+    #
+    # Qui NON rifiutiamo tutto lo swap se una carta non ha
+    # prezzo.
+    #
+    # La carta viene semplicemente esclusa dal nuovo deal.
     # ========================================================
+
+    valid_received_cards = []
 
     total_received_floor = 0
 
     for card in cards_they_give_details:
 
+        name = (
+            card.get("name")
+            or card.get("slug")
+            or "Carta"
+        )
+
         print(
-            "\n📥 RICEVIAMO",
+            f"\n📥 RICEVIAMO: {name}",
             flush=True
         )
 
@@ -2634,38 +2665,35 @@ def analyze_swap(
             card
         )
 
-        if reason == "unknown_price":
-
-            print(
-                "🟡 Floor sconosciuto "
-                "→ SWAP PENDING",
-                flush=True
-            )
-
-            return
-
         if not ok:
 
-            print(
-                "❌ Una carta ricevuta "
-                "non soddisfa i parametri",
-                flush=True
-            )
+            if reason == "unknown_price":
 
-            print(
-                "🔴 SWAP RIFIUTATO",
-                flush=True
-            )
-
-            if reject_offer(
-                offer
-            ):
-
-                completed(
-                    offer_id
+                print(
+                    "   🟡 Prezzo non disponibile",
+                    flush=True
                 )
 
-            return
+                print(
+                    "   🚫 CARTA ESCLUSA "
+                    "DALLA CONTROPROPOSTA",
+                    flush=True
+                )
+
+                continue
+
+            print(
+                "   ❌ Carta non valida",
+                flush=True
+            )
+
+            print(
+                "   🚫 CARTA ESCLUSA "
+                "DALLA CONTROPROPOSTA",
+                flush=True
+            )
+
+            continue
 
         floor, floor_reason = (
             get_live_floor(card)
@@ -2674,22 +2702,57 @@ def analyze_swap(
         if floor is None:
 
             print(
-                "🟡 Floor non verificabile "
-                "→ SWAP PENDING",
+                "   🟡 Floor non disponibile",
                 flush=True
             )
 
-            return
+            print(
+                "   🚫 CARTA ESCLUSA "
+                "DALLA CONTROPROPOSTA",
+                flush=True
+            )
+
+            continue
+
+        valid_received_cards.append(
+            card
+        )
 
         total_received_floor += floor
+
+        print(
+            f"   💰 Floor ricevuta: "
+            f"€{floor / 100:.2f}",
+            flush=True
+        )
+
+    # ========================================================
+    # SE NESSUNA CARTA RICEVUTA È VALIDA
+    # ========================================================
+
+    if not valid_received_cards:
+
+        print(
+            "\n❌ NESSUNA CARTA RICEVIBILE",
+            flush=True
+        )
+
+        print(
+            "🔴 SWAP RIFIUTATO",
+            flush=True
+        )
+
+        reject_offer(
+            offer
+        )
+
+        return
 
     # ========================================================
     # CASH
     #
-    # SOLO CASH GIÀ PRESENTE
-    # NELL'OFFERTA DEL MANAGER.
-    #
-    # IL BOT NON AGGIUNGE NULLA.
+    # Solo cash già presente nel senderSide.
+    # Il bot NON aggiunge cash.
     # ========================================================
 
     cash_eur = (
@@ -2739,7 +2802,8 @@ def analyze_swap(
     )
 
     print(
-        f"📥 FLOOR CARTE RICEVUTE: "
+        f"📥 FLOOR CARTE RICEVUTE "
+        f"UTILIZZABILI: "
         f"€{total_received_floor / 100:.2f}",
         flush=True
     )
@@ -2779,8 +2843,13 @@ def analyze_swap(
             flush=True
         )
 
-        completed(
-            offer_id
+        print(
+            "🔴 SWAP RIFIUTATO",
+            flush=True
+        )
+
+        reject_offer(
+            offer
         )
 
         return
@@ -2802,13 +2871,9 @@ def analyze_swap(
             flush=True
         )
 
-        if reject_offer(
+        reject_offer(
             offer
-        ):
-
-            completed(
-                offer_id
-            )
+        )
 
         return
 
@@ -2825,13 +2890,9 @@ def analyze_swap(
             flush=True
         )
 
-        if reject_offer(
+        reject_offer(
             offer
-        ):
-
-            completed(
-                offer_id
-            )
+        )
 
         return
 
@@ -2877,10 +2938,6 @@ def analyze_swap(
             flush=True
         )
 
-        completed(
-            offer_id
-        )
-
         return
 
     print(
@@ -2892,8 +2949,9 @@ def analyze_swap(
         offer
     ):
 
-        completed(
-            offer_id
+        print(
+            "✅ Accettazione completata",
+            flush=True
         )
 
     else:
@@ -2906,6 +2964,19 @@ def analyze_swap(
 
 # ============================================================
 # AUTOBUY PROCESS
+#
+# NUOVA LOGICA:
+#
+# Ogni carta viene valutata singolarmente.
+#
+# Se il prezzo non viene trovato:
+#   → carta esclusa
+#
+# Le altre carte possono comunque entrare
+# nella controproposta.
+#
+# Se nessuna carta rimane:
+#   → offerta rifiutata.
 # ============================================================
 
 def process_autobuy_offer(
@@ -2920,17 +2991,19 @@ def process_autobuy_offer(
 
         return
 
-    with state_lock:
-
-        if offer_id in processed:
-
-            return
-
-    if not retry_unknown(
+    if is_processed(
         offer_id
     ):
 
         return
+
+    # ========================================================
+    # BLOCCO IMMEDIATO
+    # ========================================================
+
+    mark_processed(
+        offer_id
+    )
 
     receiver_cards = (
         (offer.get("receiverSide") or {})
@@ -2945,10 +3018,6 @@ def process_autobuy_offer(
         is_kulenovic(c)
         for c in receiver_cards
     ):
-
-        completed(
-            offer_id
-        )
 
         return
 
@@ -2986,8 +3055,18 @@ def process_autobuy_offer(
 
     if not ids:
 
-        completed(
-            offer_id
+        print(
+            "❌ Nessuna carta ricevuta",
+            flush=True
+        )
+
+        print(
+            "🔴 OFFERTA RIFIUTATA",
+            flush=True
+        )
+
+        reject_offer(
+            offer
         )
 
         return
@@ -2999,15 +3078,27 @@ def process_autobuy_offer(
     if len(cards) != len(ids):
 
         print(
-            "⚠️ Impossibile verificare "
+            "❌ Impossibile verificare "
             "tutte le carte",
             flush=True
         )
 
+        print(
+            "🔴 OFFERTA RIFIUTATA",
+            flush=True
+        )
+
+        reject_offer(
+            offer
+        )
+
         return
 
+    # ========================================================
+    # VALUTAZIONE INDIVIDUALE
+    # ========================================================
+
     valid = []
-    unknown = False
 
     for card in cards:
 
@@ -3021,9 +3112,23 @@ def process_autobuy_offer(
 
                 valid.append(card)
 
-            elif reason == "unknown_price":
+                continue
 
-                unknown = True
+            if reason == "unknown_price":
+
+                print(
+                    "🟡 Prezzo non disponibile "
+                    "→ CARTA ESCLUSA",
+                    flush=True
+                )
+
+                continue
+
+            print(
+                "🚫 Carta non valida "
+                "→ CARTA ESCLUSA",
+                flush=True
+            )
 
         except Exception as e:
 
@@ -3032,47 +3137,50 @@ def process_autobuy_offer(
                 flush=True
             )
 
-            return
+            print(
+                "🚫 Carta esclusa",
+                flush=True
+            )
 
     # ========================================================
-    # UNKNOWN
-    # ========================================================
-
-    if unknown:
-
-        print(
-            "🟡 Prezzo non verificabile "
-            "→ offerta PENDING",
-            flush=True
-        )
-
-        return
-
-    # ========================================================
-    # NESSUNA CARTA
+    # NESSUNA CARTA VALIDA
     # ========================================================
 
     if not valid:
 
         print(
-            "🔴 Nessuna carta valida "
-            "→ rifiuto",
+            "\n🔴 NESSUNA CARTA VALIDA",
             flush=True
         )
 
-        if reject_offer(
-            offer
-        ):
+        print(
+            "🔴 OFFERTA RIFIUTATA",
+            flush=True
+        )
 
-            completed(
-                offer_id
-            )
+        reject_offer(
+            offer
+        )
 
         return
 
     # ========================================================
     # CONTROPROPOSTA
     # ========================================================
+
+    print(
+        f"\n✅ Carte utilizzabili: "
+        f"{len(valid)}/{len(cards)}",
+        flush=True
+    )
+
+    if len(valid) < len(cards):
+
+        print(
+            "🚫 Una o più carte sono state "
+            "escluse dalla controproposta",
+            flush=True
+        )
 
     if counter_offer(
         offer,
@@ -3083,8 +3191,10 @@ def process_autobuy_offer(
             offer
         ):
 
-            completed(
-                offer_id
+            print(
+                "✅ Offerta originale "
+                "rifiutata dopo la controproposta",
+                flush=True
             )
 
         else:
@@ -3098,9 +3208,17 @@ def process_autobuy_offer(
     else:
 
         print(
-            "🟡 Controproposta fallita "
-            "→ originale PENDING",
+            "❌ Controproposta fallita",
             flush=True
+        )
+
+        print(
+            "🔴 Offerta originale rifiutata",
+            flush=True
+        )
+
+        reject_offer(
+            offer
         )
 
 
@@ -3114,11 +3232,27 @@ def process_autobuy_offer(
 #
 # 2. Altrimenti se il manager vuole il nostro Kulenovic:
 #       → AUTOBUY
+#
+# Ogni ramo marca l'offerta come processata.
 # ============================================================
 
 def process_offer(
     offer
 ):
+
+    offer_id = normalize(
+        offer.get("id")
+    )
+
+    if not offer_id:
+
+        return
+
+    if is_processed(
+        offer_id
+    ):
+
+        return
 
     sender_cards = (
         (offer.get("senderSide") or {})
@@ -3161,6 +3295,17 @@ def process_offer(
         )
 
         return
+
+    # ========================================================
+    # OFFERTA NON INTERESSANTE
+    #
+    # La marchiamo comunque come processata per evitare
+    # che venga rivalutata a ogni ciclo.
+    # ========================================================
+
+    mark_processed(
+        offer_id
+    )
 
 
 # ============================================================
@@ -3264,14 +3409,8 @@ def worker():
     )
 
     print(
-        "🛡️ PRICE UNKNOWN: "
-        "LEAVE PENDING",
-        flush=True
-    )
-
-    print(
-        f"🔁 RETRY UNKNOWN: "
-        f"{UNKNOWN_PRICE_RETRY}s",
+        "🚫 PRICE UNKNOWN: "
+        "NO RETRY / CARTA ESCLUSA",
         flush=True
     )
 
@@ -3343,10 +3482,20 @@ def worker():
 
                 except Exception as e:
 
+                    offer_id = normalize(
+                        offer.get("id")
+                    )
+
                     print(
-                        f"❌ Errore offerta: "
-                        f"{e}",
+                        f"❌ Errore offerta "
+                        f"{offer_id}: {e}",
                         flush=True
+                    )
+
+                    # Anche in caso di errore imprevisto,
+                    # l'offerta NON viene riprocessata.
+                    mark_processed(
+                        offer_id
                     )
 
             time.sleep(
@@ -3404,6 +3553,12 @@ def home():
 
         covered = set(
             coverage_cache
+        )
+
+    with state_lock:
+
+        processed_count = len(
+            processed
         )
 
     return jsonify({
@@ -3490,10 +3645,16 @@ def home():
             False,
 
         "unknown_price_action":
-            "LEAVE_PENDING",
+            "EXCLUDE_CARD_NO_RETRY",
 
         "unknown_price_retry_seconds":
-            UNKNOWN_PRICE_RETRY,
+            False,
+
+        "offer_reprocessing":
+            False,
+
+        "processed_offers_in_memory":
+            processed_count,
 
         "prepare_offer_type":
             False,
@@ -3513,6 +3674,12 @@ def health():
 
         coverage_loaded = bool(
             coverage_cache
+        )
+
+    with state_lock:
+
+        processed_count = len(
+            processed
         )
 
     return jsonify({
@@ -3536,7 +3703,13 @@ def health():
             DRY_RUN,
 
         "swap_auto_accept":
-            SWAP_AUTO_ACCEPT
+            SWAP_AUTO_ACCEPT,
+
+        "offer_reprocessing":
+            False,
+
+        "processed_offers_in_memory":
+            processed_count
     })
 
 
