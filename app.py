@@ -795,6 +795,11 @@ def counter_offer(offer, cards):
         print("🟡 DRY RUN: controproposta simulata", flush=True)
         return True
 
+    # ========================================================
+    # CORREZIONE:
+    # settlementCurrencies NON viene più inviato.
+    # ========================================================
+
     inp = {
         "receiveAssetIds": ids,
         "sendAssetIds": [],
@@ -803,7 +808,6 @@ def counter_offer(offer, cards):
             "currency": "EUR"
         },
         "receiverSlug": receiver,
-        "settlementCurrencies": ["EUR"],
         "clientMutationId": str(uuid.uuid4())
     }
 
