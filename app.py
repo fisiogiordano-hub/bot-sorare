@@ -24,14 +24,17 @@ STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 KID = os.getenv("KULENOVIC_ID", "").strip()
 
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+
 SWAP_AUTO_ACCEPT = os.getenv(
-    "SWAP_AUTO_ACCEPT", "false"
+    "SWAP_AUTO_ACCEPT",
+    "false"
 ).lower() == "true"
 
 MIN_PRICE = 32
 MAX_PRICE = 70
 PAY_PER_CARD = 20
 MAX_AGE = 28
+
 INTERVAL = 10
 TIMEOUT = 25
 MIN_LIVE_LISTINGS = 5
@@ -43,7 +46,7 @@ UNKNOWN_RETRY = 60
 USD_CACHE = 300
 COVERAGE_CACHE = 3600
 
-BOT_VERSION = "22.2-SWAP"
+BOT_VERSION = "22.3-SWAP"
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -96,7 +99,9 @@ def should_process(offer_id):
 
 def headers():
     if not TOKEN:
-        raise RuntimeError("SORARE_JWT_TOKEN non configurato")
+        raise RuntimeError(
+            "SORARE_JWT_TOKEN non configurato"
+        )
 
     token = TOKEN
 
@@ -279,6 +284,7 @@ def check_account():
             "❌ Account Sorare non verificato",
             flush=True
         )
+
         return False
 
     print(
@@ -420,7 +426,8 @@ def card_details(asset_ids):
         return []
 
     return (
-        ((data.get("data") or {}).get("anyCards"))
+        ((data.get("data") or {})
+        .get("anyCards"))
         or []
     )
 
@@ -434,7 +441,10 @@ def usd_eur():
 
     now = time.time()
 
-    if usd_rate and now - usd_time < USD_CACHE:
+    if (
+        usd_rate
+        and now - usd_time < USD_CACHE
+    ):
         return usd_rate
 
     try:
@@ -451,7 +461,8 @@ def usd_eur():
             return None
 
         rate = float(
-            (r.json().get("rates") or {}).get("EUR")
+            (r.json().get("rates") or {})
+            .get("EUR")
         )
 
         if rate <= 0:
@@ -476,7 +487,9 @@ def price_eur(amounts):
         return None
 
     try:
-        eur = int(amounts.get("eurCents"))
+        eur = int(
+            amounts.get("eurCents")
+        )
 
         if eur > 0:
             return eur
@@ -599,15 +612,16 @@ def live_floor(card):
                     (c.get("anyPlayer") or {})
                     .get("slug")
                 ) == player_slug
+
                 and norm(
                     c.get("rarityTyped")
                 ) == rarity
+
                 and c_season == season
             ):
                 p = price_eur(
                     (offer.get("receiverSide") or {})
-                    .get("amounts")
-                    or {}
+                    .get("amounts") or {}
                 )
 
                 if p is not None:
@@ -632,7 +646,9 @@ def is_kulenovic(card):
     }
 
     if KID:
-        wanted.add(KID.lower())
+        wanted.add(
+            KID.lower()
+        )
 
     return (
         norm(card.get("assetId")) in wanted
@@ -657,8 +673,10 @@ def has_coverage(card):
             club.get("activeCompetitions")
             or []
         )
-        if isinstance(c, dict)
-        and c.get("slug")
+        if (
+            isinstance(c, dict)
+            and c.get("slug")
+        )
     ]
 
     coverage = load_coverage()
@@ -690,9 +708,12 @@ def valid_card(card):
     if age >= MAX_AGE:
         return False, "invalid"
 
-    if norm(
-        card.get("rarityTyped")
-    ).upper() != "LIMITED":
+    if (
+        norm(
+            card.get("rarityTyped")
+        ).upper()
+        != "LIMITED"
+    ):
         return False, "invalid"
 
     floor = live_floor(card)
@@ -726,6 +747,7 @@ def reject_offer(offer):
             "🟡 DRY RUN: reject simulato",
             flush=True
         )
+
         return True
 
     data = graphql("""
@@ -766,6 +788,33 @@ def reject_offer(offer):
     )
 
     return True
+
+
+# ============================================================
+# EXCHANGE RATE
+# ============================================================
+
+def get_exchange_rate_id():
+    data = graphql("""
+        query {
+            config {
+                exchangeRate {
+                    id
+                }
+            }
+        }
+    """)
+
+    rate = (
+        (((data or {}).get("data") or {})
+        .get("config") or {})
+        .get("exchangeRate")
+    )
+
+    if not rate:
+        return None
+
+    return rate.get("id")
 
 
 # ============================================================
@@ -811,7 +860,8 @@ function sign(a) {
     if (
         r.__typename ===
         "StarkexTransferAuthorizationRequest"
-        && r.amount != null
+        &&
+        r.amount != null
     ) {
         r.amount = BigInt(r.amount);
     }
@@ -898,11 +948,13 @@ process.stdout.write(
             or "Firma fallita"
         )
 
-    return json.loads(p.stdout)
+    return json.loads(
+        p.stdout
+    )
 
 
 # ============================================================
-# AUTOBUY
+# AUTOBUY / COUNTER OFFER
 # ============================================================
 
 def counter_offer(offer, cards):
@@ -939,14 +991,39 @@ def counter_offer(offer, cards):
         return True
 
     # ========================================================
+    # OTTIENI EXCHANGE RATE
+    # ========================================================
+
+    exchange_rate_id = get_exchange_rate_id()
+
+    if not exchange_rate_id:
+        print(
+            "❌ Impossibile ottenere "
+            "exchangeRateId",
+            flush=True
+        )
+
+        return False
+
+    print(
+        f"💱 Exchange rate ID: "
+        f"{exchange_rate_id}",
+        flush=True
+    )
+
+    # ========================================================
     # PREPARE OFFER
     #
     # IMPORTANTE:
-    # nessun settlementCurrencies.
+    #
+    # exchangeRateId va qui.
+    #
+    # settlementCurrencies NON va qui.
     # ========================================================
 
-    inp = {
+    prepare_input = {
         "receiveAssetIds": ids,
+
         "sendAssetIds": [],
 
         "sendAmount": {
@@ -955,6 +1032,8 @@ def counter_offer(offer, cards):
         },
 
         "receiverSlug": receiver,
+
+        "exchangeRateId": exchange_rate_id,
 
         "clientMutationId": str(
             uuid.uuid4()
@@ -972,8 +1051,7 @@ def counter_offer(offer, cards):
                     request {
                         __typename
 
-                        ... on
-                        StarkexTransferAuthorizationRequest {
+                        ... on StarkexTransferAuthorizationRequest {
                             amount
                             condition
                             expirationTimestamp
@@ -990,8 +1068,7 @@ def counter_offer(offer, cards):
                             }
                         }
 
-                        ... on
-                        StarkexLimitOrderAuthorizationRequest {
+                        ... on StarkexLimitOrderAuthorizationRequest {
                             vaultIdSell
                             vaultIdBuy
                             amountSell
@@ -1008,8 +1085,7 @@ def counter_offer(offer, cards):
                             }
                         }
 
-                        ... on
-                        MangopayWalletTransferAuthorizationRequest {
+                        ... on MangopayWalletTransferAuthorizationRequest {
                             nonce
                             amount
                             currency
@@ -1025,7 +1101,7 @@ def counter_offer(offer, cards):
             }
         }
     """, {
-        "input": inp
+        "input": prepare_input
     })
 
     result = (
@@ -1036,19 +1112,21 @@ def counter_offer(offer, cards):
     if not result:
         print(
             "❌ prepareOffer: "
-            "nessuna risposta",
+            "nessun risultato",
             flush=True
         )
 
         return False
 
-    if result.get("errors"):
+    errors = result.get("errors") or []
+
+    if errors:
         print(
             "❌ prepareOffer errors:",
             json.dumps(
-                result["errors"],
+                errors,
                 ensure_ascii=False
-            )[:3000],
+            ),
             flush=True
         )
 
@@ -1068,6 +1146,16 @@ def counter_offer(offer, cards):
 
         return False
 
+    print(
+        f"🔐 Authorization ricevute: "
+        f"{len(auth)}",
+        flush=True
+    )
+
+    # ========================================================
+    # FIRMA
+    # ========================================================
+
     try:
         approvals = sign_authorizations(auth)
 
@@ -1082,19 +1170,17 @@ def counter_offer(offer, cards):
     # ========================================================
     # CREATE DIRECT OFFER
     #
-    # settlementCurrencies NON esiste qui.
+    # IMPORTANTISSIMO:
+    #
+    # settlementCurrencies è stato ELIMINATO.
+    #
+    # createDirectOfferInput NON lo accetta.
     # ========================================================
 
-    create = {
-        "approvals": approvals,
-
-        "dealId": str(
-            uuid.uuid4()
-        ),
+    create_input = {
+        "receiveAssetIds": ids,
 
         "sendAssetIds": [],
-
-        "receiveAssetIds": ids,
 
         "sendAmount": {
             "amount": str(amount),
@@ -1103,22 +1189,24 @@ def counter_offer(offer, cards):
 
         "receiverSlug": receiver,
 
+        "approvals": approvals,
+
+        "dealId": str(
+            uuid.uuid4()
+        ),
+
         "clientMutationId": str(
             uuid.uuid4()
         )
     }
 
-    print(
-        "🚀 CREATE DIRECT OFFER: "
-        "settlementCurrencies ASSENTE",
-        flush=True
-    )
-
     data = graphql("""
         mutation CreateDirectOffer(
             $input: createDirectOfferInput!
         ) {
-            createDirectOffer(input: $input) {
+            createDirectOffer(
+                input: $input
+            ) {
                 tokenOffer {
                     id
                     blockchainId
@@ -1131,7 +1219,7 @@ def counter_offer(offer, cards):
             }
         }
     """, {
-        "input": create
+        "input": create_input
     })
 
     result = (
@@ -1142,19 +1230,21 @@ def counter_offer(offer, cards):
     if not result:
         print(
             "❌ createDirectOffer: "
-            "nessuna risposta",
+            "nessun risultato",
             flush=True
         )
 
         return False
 
-    if result.get("errors"):
+    errors = result.get("errors") or []
+
+    if errors:
         print(
             "❌ createDirectOffer errors:",
             json.dumps(
-                result["errors"],
+                errors,
                 ensure_ascii=False
-            )[:3000],
+            ),
             flush=True
         )
 
@@ -1168,7 +1258,7 @@ def counter_offer(offer, cards):
     if not token_offer.get("id"):
         print(
             "❌ createDirectOffer: "
-            "tokenOffer non creato",
+            "tokenOffer mancante",
             flush=True
         )
 
@@ -1182,6 +1272,10 @@ def counter_offer(offer, cards):
 
     return True
 
+
+# ============================================================
+# AUTOBUY
+# ============================================================
 
 def process_autobuy(offer):
     offer_id = norm(
@@ -1200,10 +1294,10 @@ def process_autobuy(offer):
         or []
     )
 
-    # ========================================================
-    # SE IL MANAGER VUOLE KULENOVIC:
+    # --------------------------------------------------------
+    # SE CHIEDONO KULENOVIC:
     # SEMPRE AUTOBUY
-    # ========================================================
+    # --------------------------------------------------------
 
     if not any(
         is_kulenovic(c)
@@ -1273,7 +1367,8 @@ def process_autobuy(offer):
 
     if not valid:
         print(
-            "🔴 Nessuna carta valida → RIFIUTO",
+            "🔴 Nessuna carta valida "
+            "→ RIFIUTO",
             flush=True
         )
 
@@ -1295,25 +1390,6 @@ def process_autobuy(offer):
 # ============================================================
 # ACCEPT SWAP
 # ============================================================
-
-def get_exchange_rate_id():
-    data = graphql("""
-        query {
-            config {
-                exchangeRate {
-                    id
-                }
-            }
-        }
-    """)
-
-    return (
-        (((data or {}).get("data") or {})
-        .get("config") or {})
-        .get("exchangeRate", {})
-        .get("id")
-    )
-
 
 def prepare_accept(offer_id):
     rate = get_exchange_rate_id()
@@ -1338,8 +1414,7 @@ def prepare_accept(offer_id):
                     request {
                         __typename
 
-                        ... on
-                        StarkexTransferAuthorizationRequest {
+                        ... on StarkexTransferAuthorizationRequest {
                             amount
                             condition
                             expirationTimestamp
@@ -1356,8 +1431,7 @@ def prepare_accept(offer_id):
                             }
                         }
 
-                        ... on
-                        StarkexLimitOrderAuthorizationRequest {
+                        ... on StarkexLimitOrderAuthorizationRequest {
                             vaultIdSell
                             vaultIdBuy
                             amountSell
@@ -1374,8 +1448,7 @@ def prepare_accept(offer_id):
                             }
                         }
 
-                        ... on
-                        MangopayWalletTransferAuthorizationRequest {
+                        ... on MangopayWalletTransferAuthorizationRequest {
                             nonce
                             amount
                             currency
@@ -1406,8 +1479,7 @@ def prepare_accept(offer_id):
         return None, None
 
     return (
-        result.get("authorizations")
-        or [],
+        result.get("authorizations") or [],
         rate
     )
 
@@ -1463,6 +1535,7 @@ def accept_offer(offer):
     """, {
         "input": {
             "approvals": approvals,
+
             "offerId": offer_id,
 
             "settlementInfo": {
@@ -1544,8 +1617,13 @@ def process_swap(offer):
         flush=True
     )
 
-    give = card_details(give_ids)
-    receive = card_details(receive_ids)
+    give = card_details(
+        give_ids
+    )
+
+    receive = card_details(
+        receive_ids
+    )
 
     if (
         len(give) != len(give_ids)
@@ -1563,7 +1641,7 @@ def process_swap(offer):
         return
 
     # ========================================================
-    # KULENOVIC NON PUÒ MAI ESSERE CEDUTO
+    # BARRIERA 1: KULENOVIC MAI CEDIBILE
     # ========================================================
 
     if any(
@@ -1587,7 +1665,7 @@ def process_swap(offer):
         return
 
     # ========================================================
-    # SECONDA BARRIERA
+    # BARRIERA 2
     # ========================================================
 
     if any(
@@ -1669,13 +1747,12 @@ def process_swap(offer):
         total_received += floor
 
     # ========================================================
-    # CASH PRESENTE NELL'OFFERTA
+    # CASH GIÀ PRESENTE
     # ========================================================
 
     cash = price_eur(
         (offer.get("senderSide") or {})
-        .get("amounts")
-        or {}
+        .get("amounts") or {}
     ) or 0
 
     total_received += cash
@@ -1756,6 +1833,7 @@ def process_swap(offer):
         )
 
         mark_done(offer_id)
+
         return
 
     if accept_offer(offer):
@@ -1810,7 +1888,8 @@ def worker():
     )
 
     print(
-        f"📦 VERSIONE BOT: {BOT_VERSION}",
+        f"📦 VERSIONE BOT: "
+        f"{BOT_VERSION}",
         flush=True
     )
 
@@ -1894,8 +1973,8 @@ def worker():
     )
 
     print(
-        "🎯 KULENOVIC RICHIESTO → "
-        "SEMPRE AUTOBUY",
+        "🎯 KULENOVIC RICHIESTO "
+        "→ SEMPRE AUTOBUY",
         flush=True
     )
 
@@ -1939,15 +2018,20 @@ def worker():
 
             for offer in offers:
                 try:
-                    process_offer(offer)
+                    process_offer(
+                        offer
+                    )
 
                 except Exception as e:
                     print(
-                        f"❌ Errore offerta: {e}",
+                        f"❌ Errore offerta: "
+                        f"{e}",
                         flush=True
                     )
 
-            time.sleep(INTERVAL)
+            time.sleep(
+                INTERVAL
+            )
 
         except Exception as e:
             print(
@@ -1955,7 +2039,9 @@ def worker():
                 flush=True
             )
 
-            time.sleep(INTERVAL)
+            time.sleep(
+                INTERVAL
+            )
 
 
 # ============================================================
@@ -1998,7 +2084,9 @@ def home():
         "status": "online",
         "bot": "sorare",
         "version": BOT_VERSION,
+
         "dry_run": DRY_RUN,
+
         "swap_auto_accept":
             SWAP_AUTO_ACCEPT,
 
@@ -2060,12 +2148,16 @@ def health():
         "status": "ok",
         "bot": "running",
         "version": BOT_VERSION,
+
         "worker_started":
             worker_started,
+
         "coverage_loaded":
             loaded,
+
         "dry_run":
             DRY_RUN,
+
         "swap_auto_accept":
             SWAP_AUTO_ACCEPT
     })
