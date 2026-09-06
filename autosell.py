@@ -21,15 +21,17 @@ TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
-# ------------------------------------------------------------
+
+# ============================================================
 # SICUREZZA
-# ------------------------------------------------------------
+# ============================================================
 
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 
-# ------------------------------------------------------------
+
+# ============================================================
 # PARAMETRI AUTOSELL
-# ------------------------------------------------------------
+# ============================================================
 
 MIN_PRICE = 32          # €0.32
 MAX_PRICE = 70          # €0.70
@@ -43,11 +45,12 @@ LISTING_DURATION = 7 * 24 * 60 * 60   # 7 giorni
 INTERVAL = 15
 TIMEOUT = 30
 
-BOT_VERSION = "24.0-AUTOSELL-LINEUP-CORRECT"
+BOT_VERSION = "25.0-AUTOSELL-LIMITED-ONLY"
 
-# ------------------------------------------------------------
+
+# ============================================================
 # KULENOVIC
-# ------------------------------------------------------------
+# ============================================================
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -58,9 +61,10 @@ KASSET = (
 
 KID = os.getenv("KULENOVIC_ID", "").strip()
 
-# ------------------------------------------------------------
+
+# ============================================================
 # STATO
-# ------------------------------------------------------------
+# ============================================================
 
 worker_started = False
 worker_lock = threading.Lock()
@@ -86,13 +90,24 @@ def card_name(card):
 
 
 def card_label(card):
+
     name = card_name(card)
+
+    player = (
+        card.get("anyPlayer")
+        or {}
+    )
+
+    display_name = (
+        player.get("displayName")
+        or name
+    )
 
     rarity = card.get("rarityTyped")
     season = card.get("seasonYear")
     serial = card.get("serialNumber")
 
-    parts = [name]
+    parts = [display_name]
 
     if season:
         parts.append(str(season))
@@ -107,6 +122,7 @@ def card_label(card):
 
 
 def format_eur(cents):
+
     if cents is None:
         return "N/D"
 
@@ -118,6 +134,7 @@ def format_eur(cents):
 # ============================================================
 
 def headers():
+
     if not TOKEN:
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato"
@@ -148,6 +165,7 @@ def headers():
 # ============================================================
 
 def graphql(query, variables=None):
+
     payload = {
         "query": query,
         "variables": variables or {}
@@ -156,6 +174,7 @@ def graphql(query, variables=None):
     for attempt in range(3):
 
         try:
+
             response = requests.post(
                 URL,
                 json=payload,
@@ -203,7 +222,9 @@ def graphql(query, variables=None):
 
             try:
                 data = response.json()
+
             except Exception:
+
                 print(
                     "❌ Risposta non JSON",
                     flush=True
@@ -288,63 +309,183 @@ def check_account():
 
 # ============================================================
 # GALLERY
+#
+# IMPORTANTE:
+# Recuperiamo TUTTE le pagine.
+# Il filtro LIMITED viene applicato subito dopo.
 # ============================================================
 
 def get_gallery():
 
-    data = graphql("""
-        query MyCards($first: Int) {
-            currentUser {
-                cards(
-                    first: $first
-                    ownedByMe: true
-                    sport: FOOTBALL
-                ) {
-                    nodes {
-                        assetId
-                        slug
-                        name
-                        rarityTyped
-                        seasonYear
-                        serialNumber
+    all_cards = []
 
-                        anyPlayer {
+    cursor = None
+    page = 0
+
+    while True:
+
+        page += 1
+
+        data = graphql("""
+            query MyCards(
+                $first: Int
+                $after: String
+            ) {
+                currentUser {
+                    cards(
+                        first: $first
+                        after: $after
+                        ownedByMe: true
+                        sport: FOOTBALL
+                    ) {
+                        nodes {
+                            assetId
                             slug
-                            displayName
-                            age
+                            name
+                            rarityTyped
+                            seasonYear
+                            serialNumber
+
+                            anyPlayer {
+                                slug
+                                displayName
+                                age
+                            }
+
+                            liveSingleSaleOffer {
+                                id
+                                status
+                            }
                         }
 
-                        liveSingleSaleOffer {
-                            id
-                            status
+                        pageInfo {
+                            hasNextPage
+                            endCursor
                         }
-                    }
-
-                    pageInfo {
-                        hasNextPage
-                        endCursor
                     }
                 }
             }
-        }
-    """, {
-        "first": 50
-    })
+        """, {
+            "first": 50,
+            "after": cursor
+        })
 
-    if not data or data.get("errors"):
-        return None
+        if not data or data.get("errors"):
 
-    user = (
-        ((data.get("data") or {}).get("currentUser"))
-        or {}
+            print(
+                "❌ Impossibile leggere "
+                "la gallery",
+                flush=True
+            )
+
+            return None
+
+        user = (
+            ((data.get("data") or {}).get("currentUser"))
+            or {}
+        )
+
+        cards_data = (
+            user.get("cards")
+            or {}
+        )
+
+        nodes = (
+            cards_data.get("nodes")
+            or []
+        )
+
+        all_cards.extend(nodes)
+
+        page_info = (
+            cards_data.get("pageInfo")
+            or {}
+        )
+
+        has_next = bool(
+            page_info.get("hasNextPage")
+        )
+
+        next_cursor = (
+            page_info.get("endCursor")
+        )
+
+        print(
+            f"📄 Gallery pagina {page}: "
+            f"{len(nodes)} carte",
+            flush=True
+        )
+
+        # Fine paginazione
+        if not has_next or not next_cursor:
+            break
+
+        # Protezione anti-loop
+        if next_cursor == cursor:
+
+            print(
+                "⚠️ Cursor invariato → "
+                "interrompo paginazione",
+                flush=True
+            )
+
+            break
+
+        cursor = next_cursor
+
+        # Protezione assoluta
+        if len(all_cards) >= 5000:
+
+            print(
+                "⚠️ Limite sicurezza gallery "
+                "5000 carte raggiunto",
+                flush=True
+            )
+
+            break
+
+    print(
+        f"📦 Carte gallery totali: "
+        f"{len(all_cards)}",
+        flush=True
     )
 
-    cards = (
-        (user.get("cards") or {}).get("nodes")
-        or []
+    return all_cards
+
+
+# ============================================================
+# SOLO LIMITED
+#
+# Questa funzione elimina immediatamente:
+# COMMON
+# RARE
+# SUPER_RARE
+# UNIQUE
+# ecc.
+#
+# Restano ESCLUSIVAMENTE le LIMITED.
+# ============================================================
+
+def filter_limited(cards):
+
+    if not cards:
+        return []
+
+    limited = [
+        card
+        for card in cards
+        if norm(
+            card.get("rarityTyped")
+        ) == "limited"
+    ]
+
+    print(
+        f"🏆 LIMITED DA ANALIZZARE: "
+        f"{len(limited)}",
+        flush=True
     )
 
-    return cards
+    return limited
 
 
 # ============================================================
@@ -352,15 +493,6 @@ def get_gallery():
 # ============================================================
 
 def get_lineup_asset_ids():
-
-    """
-    Sorare espone direttamente:
-        currentUser.blockchainCardsInLineups
-
-    La documentazione dello schema lo descrive come:
-    carte blockchain dell'utente impegnate in lineup
-    per fixture live o upcoming.
-    """
 
     data = graphql("""
         query CardsInLineups {
@@ -402,7 +534,9 @@ def card_in_lineup(card, lineup_ids):
     if lineup_ids is None:
         return None
 
-    asset_id = norm(card.get("assetId"))
+    asset_id = norm(
+        card.get("assetId")
+    )
 
     if not asset_id:
         return None
@@ -564,13 +698,16 @@ def live_floor(card):
     )
 
     try:
+
         season = int(
             card.get("seasonYear")
         )
+
     except (
         TypeError,
         ValueError
     ):
+
         return None
 
     if not player_slug:
@@ -672,15 +809,18 @@ def live_floor(card):
             )
 
             try:
+
                 market_season = int(
                     market_card.get(
                         "seasonYear"
                     )
                 )
+
             except (
                 TypeError,
                 ValueError
             ):
+
                 continue
 
             if (
@@ -733,18 +873,7 @@ def live_floor(card):
 def validate_card(card, lineup_ids):
 
     # --------------------------------------------------------
-    # KULENOVIC
-    # --------------------------------------------------------
-
-    if is_kulenovic(card):
-
-        return False, {
-            "code": "KULENOVIC",
-            "message": "KULENOVIC MAI IN VENDITA"
-        }
-
-    # --------------------------------------------------------
-    # RARITY
+    # SICUREZZA ASSOLUTA: SOLO LIMITED
     # --------------------------------------------------------
 
     rarity = norm(
@@ -760,6 +889,17 @@ def validate_card(card, lineup_ids):
         }
 
     # --------------------------------------------------------
+    # KULENOVIC
+    # --------------------------------------------------------
+
+    if is_kulenovic(card):
+
+        return False, {
+            "code": "KULENOVIC",
+            "message": "KULENOVIC MAI IN VENDITA"
+        }
+
+    # --------------------------------------------------------
     # ETÀ
     # --------------------------------------------------------
 
@@ -769,9 +909,11 @@ def validate_card(card, lineup_ids):
     )
 
     try:
+
         age = int(
             player.get("age")
         )
+
     except (
         TypeError,
         ValueError
@@ -864,10 +1006,7 @@ def validate_card(card, lineup_ids):
 # LOG ESCLUSIONE
 # ============================================================
 
-def print_rejection(
-    card,
-    info
-):
+def print_rejection(card, info):
 
     label = card_label(card)
 
@@ -877,10 +1016,12 @@ def print_rejection(
     )
 
     if not info:
+
         print(
             "   └─ Motivo: verifica fallita",
             flush=True
         )
+
         return
 
     code = info.get("code")
@@ -999,11 +1140,13 @@ def sign_authorizations(authorizations):
     )
 
     if not node:
+
         raise RuntimeError(
             "Node.js non disponibile"
         )
 
     if not STARK:
+
         raise RuntimeError(
             "SORARE_STARK_PRIVATE_KEY "
             "non configurata"
@@ -1137,10 +1280,7 @@ process.stdout.write(
 # PREPARA VENDITA
 # ============================================================
 
-def prepare_sale(
-    card,
-    price
-):
+def prepare_sale(card, price):
 
     asset_id = str(
         card.get("assetId")
@@ -1148,6 +1288,7 @@ def prepare_sale(
     ).strip()
 
     if not asset_id:
+
         print(
             "❌ AssetId mancante",
             flush=True
@@ -1282,11 +1423,7 @@ def prepare_sale(
 # CREA LISTING
 # ============================================================
 
-def create_sale(
-    card,
-    price,
-    approvals
-):
+def create_sale(card, price, approvals):
 
     asset_id = str(
         card.get("assetId")
@@ -1400,10 +1537,7 @@ def create_sale(
 # VENDITA
 # ============================================================
 
-def sell_card(
-    card,
-    price
-):
+def sell_card(card, price):
 
     label = card_label(card)
 
@@ -1478,10 +1612,18 @@ def sell_card(
 # PROCESSA CARTA
 # ============================================================
 
-def process_card(
-    card,
-    lineup_ids
-):
+def process_card(card, lineup_ids):
+
+    # ========================================================
+    # SICUREZZA ASSOLUTA:
+    # NON ANALIZZARE NIENTE CHE NON SIA LIMITED
+    # ========================================================
+
+    if norm(
+        card.get("rarityTyped")
+    ) != "limited":
+
+        return
 
     label = card_label(card)
 
@@ -1501,6 +1643,10 @@ def process_card(
     )
 
     if existing_offer:
+
+        status = norm(
+            existing_offer.get("status")
+        )
 
         print(
             f"⏳ {label} → già in vendita",
@@ -1592,7 +1738,7 @@ def worker():
     )
 
     print(
-        f"📦 MODULO: INDIPENDENTE",
+        "📦 MODULO: INDIPENDENTE",
         flush=True
     )
 
@@ -1705,18 +1851,12 @@ def worker():
             )
 
             # ------------------------------------------------
-            # GALLERY
+            # GALLERY COMPLETA
             # ------------------------------------------------
 
-            cards = get_gallery()
+            all_cards = get_gallery()
 
-            if cards is None:
-
-                print(
-                    "❌ Impossibile leggere "
-                    "la gallery",
-                    flush=True
-                )
+            if all_cards is None:
 
                 time.sleep(
                     INTERVAL
@@ -1724,10 +1864,12 @@ def worker():
 
                 continue
 
-            print(
-                f"📦 Carte gallery: "
-                f"{len(cards)}",
-                flush=True
+            # ------------------------------------------------
+            # SOLO LIMITED
+            # ------------------------------------------------
+
+            cards = filter_limited(
+                all_cards
             )
 
             # ------------------------------------------------
@@ -1766,7 +1908,7 @@ def worker():
             )
 
             # ------------------------------------------------
-            # PROCESSA
+            # PROCESSA SOLO LIMITED
             # ------------------------------------------------
 
             for card in cards:
@@ -1787,8 +1929,6 @@ def worker():
                         flush=True
                     )
 
-                # Piccola pausa per non
-                # martellare l'API
                 time.sleep(0.25)
 
             print(
@@ -1849,18 +1989,26 @@ def start_worker():
 def home():
 
     return jsonify({
+
         "status": "online",
+
         "bot": "sorare-autosell",
+
         "version": BOT_VERSION,
+
         "dry_run": DRY_RUN,
 
-        "min_price_cents": MIN_PRICE,
-        "max_price_cents": MAX_PRICE,
+        "min_price_cents":
+            MIN_PRICE,
+
+        "max_price_cents":
+            MAX_PRICE,
 
         "min_live_listings":
             MIN_LIVE_LISTINGS,
 
-        "max_age": MAX_AGE,
+        "max_age":
+            MAX_AGE,
 
         "listing_duration_seconds":
             LISTING_DURATION,
@@ -1897,11 +2045,16 @@ def home():
 def health():
 
     return jsonify({
+
         "status": "ok",
+
         "bot": "autosell",
+
         "version": BOT_VERSION,
+
         "worker_started":
             worker_started,
+
         "dry_run":
             DRY_RUN
     })
