@@ -1734,6 +1734,12 @@ def start_worker():
             flush=True
         )
 
+        # ====================================================
+        # AUTOSELL - MODULO SEPARATO
+        # ====================================================
+
+        autosell.start()
+
 
 @app.get("/")
 def home():
