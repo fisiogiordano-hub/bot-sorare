@@ -11,7 +11,9 @@ from flask import Flask, jsonify
 
 # ============================================================
 # AUTOSELL SORARE - MODULO INDIPENDENTE
-# SOLANA + STARKEX SAFE
+# SOLO VENDITA
+# NESSUN AUTOBUY
+# NESSUN SWAP
 # ============================================================
 
 app = Flask(__name__)
@@ -21,14 +23,9 @@ URL = "https://api.sorare.com/graphql"
 TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 
-# Questa è la private key Sorare esportata dal wallet.
-# Viene usata:
-# - direttamente per StarkEx
-# - per derivare deterministicamente la chiave Solana
-SORARE_PRIVATE_KEY = os.getenv(
-    "SORARE_STARK_PRIVATE_KEY",
-    ""
-).strip()
+# Chiave privata Sorare/Ethereum esportata dal wallet Sorare.
+# NON è una private key Solana separata.
+STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
 
 # ============================================================
@@ -84,9 +81,6 @@ KID = os.getenv(
 worker_started = False
 worker_lock = threading.Lock()
 
-processed = set()
-processed_lock = threading.Lock()
-
 
 # ============================================================
 # UTILITY
@@ -121,9 +115,7 @@ def card_label(card):
         parts.append(str(rarity))
 
     if serial:
-        parts.append(
-            f"#{serial}"
-        )
+        parts.append(f"#{serial}")
 
     return " • ".join(parts)
 
@@ -156,9 +148,7 @@ def headers():
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": (
-            f"Sorare-AutoSell/{BOT_VERSION}"
-        )
+        "User-Agent": f"Sorare-AutoSell/{BOT_VERSION}",
     }
 
     if AUD:
@@ -175,7 +165,7 @@ def graphql(query, variables=None):
 
     payload = {
         "query": query,
-        "variables": variables or {}
+        "variables": variables or {},
     }
 
     for attempt in range(3):
@@ -186,20 +176,19 @@ def graphql(query, variables=None):
                 URL,
                 json=payload,
                 headers=headers(),
-                timeout=TIMEOUT
+                timeout=TIMEOUT,
             )
 
             print(
-                f"🌐 Sorare HTTP "
-                f"{response.status_code}",
-                flush=True
+                f"🌐 Sorare HTTP {response.status_code}",
+                flush=True,
             )
 
             if response.status_code == 429:
 
                 retry_after = response.headers.get(
                     "Retry-After",
-                    str(attempt + 2)
+                    str(attempt + 2),
                 )
 
                 try:
@@ -210,40 +199,34 @@ def graphql(query, variables=None):
                 wait = min(wait, 15)
 
                 print(
-                    f"⏳ Rate limit → "
-                    f"attendo {wait}s",
-                    flush=True
+                    f"⏳ Rate limit → attendo {wait}s",
+                    flush=True,
                 )
 
                 time.sleep(wait)
-
                 continue
 
             if response.status_code != 200:
 
                 print(
-                    "❌ HTTP: "
-                    + response.text[:1000],
-                    flush=True
+                    "❌ HTTP: " + response.text[:1000],
+                    flush=True,
                 )
 
                 time.sleep(attempt + 1)
-
                 continue
 
             try:
-
                 data = response.json()
 
             except Exception:
 
                 print(
                     "❌ Risposta non JSON",
-                    flush=True
+                    flush=True,
                 )
 
                 time.sleep(attempt + 1)
-
                 continue
 
             if data.get("errors"):
@@ -252,9 +235,9 @@ def graphql(query, variables=None):
                     "❌ GraphQL:",
                     json.dumps(
                         data["errors"],
-                        ensure_ascii=False
+                        ensure_ascii=False,
                     )[:3000],
-                    flush=True
+                    flush=True,
                 )
 
             return data
@@ -263,7 +246,7 @@ def graphql(query, variables=None):
 
             print(
                 f"❌ GraphQL exception: {exc}",
-                flush=True
+                flush=True,
             )
 
             time.sleep(attempt + 1)
@@ -296,7 +279,7 @@ def check_account():
 
         print(
             "❌ Account Sorare non verificato",
-            flush=True
+            flush=True,
         )
 
         return False
@@ -304,7 +287,7 @@ def check_account():
     print(
         f"✅ Account: "
         f"{user.get('nickname') or user.get('slug')}",
-        flush=True
+        flush=True,
     )
 
     print(
@@ -314,18 +297,8 @@ def check_account():
             if user.get("starkKey")
             else "NON DISPONIBILE"
         ),
-        flush=True
+        flush=True,
     )
-
-    if not SORARE_PRIVATE_KEY:
-
-        print(
-            "❌ SORARE_STARK_PRIVATE_KEY "
-            "non configurata",
-            flush=True
-        )
-
-        return False
 
     return True
 
@@ -389,14 +362,14 @@ def get_gallery():
             }
         """, {
             "first": 50,
-            "after": after
+            "after": after,
         })
 
         if not data:
 
             print(
                 "❌ Gallery: risposta assente",
-                flush=True
+                flush=True,
             )
 
             return None
@@ -405,31 +378,25 @@ def get_gallery():
 
             print(
                 "❌ Gallery: GraphQL error",
-                flush=True
+                flush=True,
             )
 
             return None
 
         user = (
             ((data.get("data") or {})
-            .get("currentUser"))
+             .get("currentUser"))
             or {}
         )
 
-        cards_data = (
-            user.get("cards")
-            or {}
-        )
+        cards_data = user.get("cards") or {}
 
-        nodes = (
-            cards_data.get("nodes")
-            or []
-        )
+        nodes = cards_data.get("nodes") or []
 
         print(
             f"📄 Gallery pagina {page}: "
             f"{len(nodes)} carte",
-            flush=True
+            flush=True,
         )
 
         total_gallery_count += len(nodes)
@@ -443,17 +410,14 @@ def get_gallery():
                 print(
                     f"🔒 {card_label(card)} "
                     f"→ IN CASSAFORTE, esclusa",
-                    flush=True
+                    flush=True,
                 )
 
                 continue
 
             all_cards.append(card)
 
-        page_info = (
-            cards_data.get("pageInfo")
-            or {}
-        )
+        page_info = cards_data.get("pageInfo") or {}
 
         if not page_info.get("hasNextPage"):
             break
@@ -468,19 +432,19 @@ def get_gallery():
     print(
         f"📦 Carte gallery totali: "
         f"{total_gallery_count}",
-        flush=True
+        flush=True,
     )
 
     print(
         f"🔒 Carte in Cassaforte escluse: "
         f"{sealed_count}",
-        flush=True
+        flush=True,
     )
 
     print(
         f"📦 Carte NON sealed disponibili: "
         f"{len(all_cards)}",
-        flush=True
+        flush=True,
     )
 
     limited_cards = []
@@ -497,7 +461,7 @@ def get_gallery():
     print(
         f"🏆 LIMITED DA ANALIZZARE: "
         f"{len(limited_cards)}",
-        flush=True
+        flush=True,
     )
 
     return limited_cards
@@ -523,7 +487,7 @@ def get_lineup_asset_ids():
 
         print(
             "🛡️ LINEUP: risposta assente",
-            flush=True
+            flush=True,
         )
 
         return None
@@ -532,14 +496,14 @@ def get_lineup_asset_ids():
 
         print(
             "🛡️ LINEUP: GraphQL error",
-            flush=True
+            flush=True,
         )
 
         return None
 
     user = (
         ((data.get("data") or {})
-        .get("currentUser"))
+         .get("currentUser"))
         or {}
     )
 
@@ -551,7 +515,7 @@ def get_lineup_asset_ids():
 
         print(
             "🛡️ LINEUP: campo assente",
-            flush=True
+            flush=True,
         )
 
         return None
@@ -560,7 +524,7 @@ def get_lineup_asset_ids():
 
         print(
             "🛡️ LINEUP: formato inatteso",
-            flush=True
+            flush=True,
         )
 
         return None
@@ -573,7 +537,7 @@ def get_lineup_asset_ids():
 
 
 # ============================================================
-# CONTROLLO LINEUP
+# IDENTIFICATORI CARTA
 # ============================================================
 
 def card_lineup_identifiers(card):
@@ -621,16 +585,16 @@ def is_kulenovic(card):
 
     wanted = {
         norm(KSLUG),
-        norm(KASSET)
+        norm(KASSET),
     }
 
     if KID:
         wanted.add(norm(KID))
 
-    card_identifiers = card_lineup_identifiers(card)
+    identifiers = card_lineup_identifiers(card)
 
     return bool(
-        card_identifiers.intersection(wanted)
+        identifiers.intersection(wanted)
     )
 
 
@@ -663,9 +627,9 @@ def usd_eur():
             "https://api.frankfurter.app/latest",
             params={
                 "from": "USD",
-                "to": "EUR"
+                "to": "EUR",
             },
-            timeout=10
+            timeout=10,
         )
 
         if response.status_code != 200:
@@ -690,7 +654,7 @@ def usd_eur():
 
         print(
             f"❌ USD/EUR: {exc}",
-            flush=True
+            flush=True,
         )
 
         return None
@@ -714,10 +678,7 @@ def price_eur(amounts):
         if eur > 0:
             return eur
 
-    except (
-        TypeError,
-        ValueError
-    ):
+    except (TypeError, ValueError):
         pass
 
     try:
@@ -726,10 +687,7 @@ def price_eur(amounts):
             amounts.get("usdCents")
         )
 
-    except (
-        TypeError,
-        ValueError
-    ):
+    except (TypeError, ValueError):
 
         usd = 0
 
@@ -738,10 +696,7 @@ def price_eur(amounts):
         rate = usd_eur()
 
         if rate:
-
-            return int(
-                round(usd * rate)
-            )
+            return int(round(usd * rate))
 
     return None
 
@@ -752,10 +707,7 @@ def price_eur(amounts):
 
 def live_floor(card):
 
-    player = (
-        card.get("anyPlayer")
-        or {}
-    )
+    player = card.get("anyPlayer") or {}
 
     player_slug = norm(
         player.get("slug")
@@ -771,10 +723,7 @@ def live_floor(card):
             card.get("seasonYear")
         )
 
-    except (
-        TypeError,
-        ValueError
-    ):
+    except (TypeError, ValueError):
 
         return None
 
@@ -822,7 +771,7 @@ def live_floor(card):
         }
     """, {
         "playerSlug": player_slug,
-        "first": 50
+        "first": 50,
     })
 
     if not data:
@@ -880,10 +829,7 @@ def live_floor(card):
                     market_card.get("seasonYear")
                 )
 
-            except (
-                TypeError,
-                ValueError
-            ):
+            except (TypeError, ValueError):
 
                 continue
 
@@ -914,10 +860,9 @@ def live_floor(card):
 
         print(
             f"   └─ ⚠️ Solo "
-            f"{len(prices)}/"
-            f"{MIN_LIVE_LISTINGS} "
+            f"{len(prices)}/{MIN_LIVE_LISTINGS} "
             f"inserzioni live",
-            flush=True
+            flush=True,
         )
 
         return None
@@ -935,14 +880,14 @@ def validate_card(card, lineup_ids):
 
         return False, {
             "code": "VAULT",
-            "message": "carta presente in Cassaforte"
+            "message": "carta presente in Cassaforte",
         }
 
     if is_kulenovic(card):
 
         return False, {
             "code": "KULENOVIC",
-            "message": "KULENOVIC MAI IN VENDITA"
+            "message": "KULENOVIC MAI IN VENDITA",
         }
 
     rarity = norm(
@@ -954,31 +899,26 @@ def validate_card(card, lineup_ids):
         return False, {
             "code": "RARITY",
             "message": "rarità diversa da LIMITED",
-            "rarity": rarity or "N/D"
+            "rarity": rarity or "N/D",
         }
 
     in_lineup = card_in_lineup(
         card,
-        lineup_ids
+        lineup_ids,
     )
 
     if in_lineup is None:
 
         return False, {
             "code": "LINEUP_UNKNOWN",
-            "message": (
-                "impossibile verificare la lineup"
-            )
+            "message": "impossibile verificare la lineup",
         }
 
     if in_lineup:
 
         return False, {
             "code": "LINEUP",
-            "message": (
-                "carta presente in una "
-                "lineup live/upcoming"
-            )
+            "message": "carta presente in lineup",
         }
 
     floor = live_floor(card)
@@ -991,7 +931,7 @@ def validate_card(card, lineup_ids):
                 "meno di "
                 f"{MIN_LIVE_LISTINGS} "
                 "inserzioni live valide"
-            )
+            ),
         }
 
     if floor < MIN_PRICE:
@@ -999,7 +939,7 @@ def validate_card(card, lineup_ids):
         return False, {
             "code": "PRICE_LOW",
             "message": "floor sotto il minimo",
-            "floor": floor
+            "floor": floor,
         }
 
     if floor > MAX_PRICE:
@@ -1007,12 +947,12 @@ def validate_card(card, lineup_ids):
         return False, {
             "code": "PRICE_HIGH",
             "message": "floor sopra il massimo",
-            "floor": floor
+            "floor": floor,
         }
 
     return True, {
         "rarity": rarity,
-        "floor": floor
+        "floor": floor,
     }
 
 
@@ -1026,14 +966,14 @@ def print_rejection(card, info):
 
     print(
         f"🚫 {label} → esclusa",
-        flush=True
+        flush=True,
     )
 
     if not info:
 
         print(
             "   └─ Motivo: verifica fallita",
-            flush=True
+            flush=True,
         )
 
         return
@@ -1044,19 +984,19 @@ def print_rejection(card, info):
 
         print(
             "   └─ Motivo: CARTA IN CASSAFORTE",
-            flush=True
+            flush=True,
         )
 
         print(
             "      Sicurezza: NON VENDERE",
-            flush=True
+            flush=True,
         )
 
     elif code == "KULENOVIC":
 
         print(
             "   └─ Motivo: KULENOVIC MAI IN VENDITA",
-            flush=True
+            flush=True,
         )
 
     elif code == "RARITY":
@@ -1064,19 +1004,19 @@ def print_rejection(card, info):
         print(
             f"   └─ Motivo: rarità "
             f"{info.get('rarity')}",
-            flush=True
+            flush=True,
         )
 
     elif code == "LINEUP":
 
         print(
             "   └─ Motivo: CARTA IN LINEUP",
-            flush=True
+            flush=True,
         )
 
         print(
             "      Sicurezza: NON VENDERE",
-            flush=True
+            flush=True,
         )
 
     elif code == "LINEUP_UNKNOWN":
@@ -1084,12 +1024,12 @@ def print_rejection(card, info):
         print(
             "   └─ Motivo: controllo lineup "
             "non verificabile",
-            flush=True
+            flush=True,
         )
 
         print(
             "      Sicurezza: NON VENDERE",
-            flush=True
+            flush=True,
         )
 
     elif code == "PRICE_UNKNOWN":
@@ -1097,7 +1037,7 @@ def print_rejection(card, info):
         print(
             "   └─ Motivo: prezzo live "
             "non verificabile",
-            flush=True
+            flush=True,
         )
 
     elif code == "PRICE_LOW":
@@ -1105,13 +1045,13 @@ def print_rejection(card, info):
         print(
             f"   ├─ Floor: "
             f"{format_eur(info.get('floor'))}",
-            flush=True
+            flush=True,
         )
 
         print(
             f"   └─ Minimo: "
             f"{format_eur(MIN_PRICE)}",
-            flush=True
+            flush=True,
         )
 
     elif code == "PRICE_HIGH":
@@ -1119,13 +1059,13 @@ def print_rejection(card, info):
         print(
             f"   ├─ Floor: "
             f"{format_eur(info.get('floor'))}",
-            flush=True
+            flush=True,
         )
 
         print(
             f"   └─ Massimo: "
             f"{format_eur(MAX_PRICE)}",
-            flush=True
+            flush=True,
         )
 
     else:
@@ -1133,23 +1073,21 @@ def print_rejection(card, info):
         print(
             f"   └─ Motivo: "
             f"{info.get('message', 'sconosciuto')}",
-            flush=True
+            flush=True,
         )
 
 
 # ============================================================
-# FIRMA AUTORIZZAZIONI
+# FIRMA AUTHORIZATION
 #
 # SUPPORTA:
+#
 # - StarkexTransferAuthorizationRequest
 # - StarkexLimitOrderAuthorizationRequest
 # - MangopayWalletTransferAuthorizationRequest
 # - SolanaTokenTransferAuthorizationRequest
 #
-# NON SUPPORTA:
-# - autobuy
-# - swap
-# - altre operazioni
+# Per Solana NON viene usato @sorare/crypto.
 # ============================================================
 
 def sign_authorizations(authorizations):
@@ -1165,19 +1103,15 @@ def sign_authorizations(authorizations):
             "Node.js non disponibile"
         )
 
-    if not SORARE_PRIVATE_KEY:
+    if not STARK:
 
         raise RuntimeError(
-            "SORARE_STARK_PRIVATE_KEY "
-            "non configurata"
+            "SORARE_STARK_PRIVATE_KEY non configurata"
         )
 
     script = r'''
 const fs = require("fs");
-
-const {
-    signAuthorizationRequest
-} = require("@sorare/crypto");
+const crypto = require("crypto");
 
 const {
     createSignableMessage,
@@ -1185,13 +1119,8 @@ const {
 } = require("@solana/kit");
 
 const {
-    HDKey
-} = require("micro-key-producer/slip10.js");
-
-const {
-    createKeyPairFromPrivateKeyBytes,
-    createSignerFromKeyPair,
-} = require("@solana/kit");
+    deriveSolanaSigner,
+} = require("./solanaKeyPair");
 
 
 const input = JSON.parse(
@@ -1199,86 +1128,19 @@ const input = JSON.parse(
 );
 
 
-// ========================================================
-// SOLANA KEY DERIVATION
-// ========================================================
+function signStarkex(a, privateKey) {
 
-const SOLANA_DERIVATION_PATH = "m/44'/501'/0'/0'";
-
-
-async function deriveSolanaSigner(ethereumPrivateKey) {
-
-    const cleanKey =
-        ethereumPrivateKey
-            .replace(/^0x/, "")
-            .trim();
-
-    if (!/^[0-9a-fA-F]{64}$/.test(cleanKey)) {
-
-        throw new Error(
-            "SORARE_STARK_PRIVATE_KEY non valida: "
-            + "attese 32 byte esadecimali"
-        );
-    }
-
-    const seed = Buffer.from(
-        cleanKey,
-        "hex"
-    );
-
-    const result =
-        HDKey
-            .fromMasterSeed(seed)
-            .derive(
-                SOLANA_DERIVATION_PATH
-            );
-
-    const derivedPrivateKeyBytes =
-        result.privateKey;
-
-    if (!derivedPrivateKeyBytes) {
-
-        throw new Error(
-            "Impossibile derivare "
-            + "la chiave privata Solana"
-        );
-    }
-
-    const keyPair =
-        await createKeyPairFromPrivateKeyBytes(
-            derivedPrivateKeyBytes
-        );
-
-    return createSignerFromKeyPair(
-        keyPair
-    );
-}
-
-
-// ========================================================
-// STARKEX / MANGOPAY
-// ========================================================
-
-function signStarkOrMangopay(a) {
+    const {
+        signAuthorizationRequest,
+    } = require("@sorare/crypto");
 
     const r = a.request;
 
     if (!r) {
-
         throw new Error(
             "AuthorizationRequest mancante"
         );
     }
-
-    console.error(
-        "🔐 Firma authorization:",
-        r.__typename || "UNKNOWN"
-    );
-
-    console.error(
-        "   Campi:",
-        Object.keys(r)
-    );
 
     if (
         r.__typename ===
@@ -1286,15 +1148,12 @@ function signStarkOrMangopay(a) {
         &&
         r.amount != null
     ) {
-
-        r.amount = BigInt(
-            r.amount
-        );
+        r.amount = BigInt(r.amount);
     }
 
     const signature =
         signAuthorizationRequest(
-            input.privateKey,
+            privateKey,
             r
         );
 
@@ -1312,8 +1171,8 @@ function signStarkOrMangopay(a) {
                 expirationTimestamp:
                     r.expirationTimestamp,
 
-                signature
-            }
+                signature,
+            },
         };
     }
 
@@ -1331,218 +1190,139 @@ function signStarkOrMangopay(a) {
                 expirationTimestamp:
                     r.expirationTimestamp,
 
-                signature
-            }
-        };
-    }
-
-    if (
-        r.__typename ===
-        "MangopayWalletTransferAuthorizationRequest"
-    ) {
-
-        return {
-            fingerprint: a.fingerprint,
-
-            mangopayWalletTransferApproval: {
-                nonce: r.nonce,
-                signature
-            }
+                signature,
+            },
         };
     }
 
     throw new Error(
-        "Authorization Stark/Mangopay non supportata: "
+        "Authorization StarkEx non supportata: "
         + r.__typename
     );
 }
 
 
-// ========================================================
-// SOLANA TOKEN TRANSFER
-// ========================================================
-
-async function signSolanaTokenTransfer(a) {
+async function signSolana(a, ethereumPrivateKey) {
 
     const r = a.request;
 
-    if (!r) {
+    const required = [
+        "transferProxyProgramAddress",
+        "merkleTreeAddress",
+        "leafIndex",
+        "nonce",
+        "expirationTimestamp",
+        "receiverAddress",
+        "originator",
+        "senderAddress",
+    ];
 
-        throw new Error(
-            "AuthorizationRequest mancante"
-        );
-    }
-
-    const {
-        leafIndex,
-        merkleTreeAddress,
-        originator,
-        receiverAddress,
-        senderAddress,
-        expirationTimestamp,
-        nonce,
-        transferProxyProgramAddress
-    } = r;
-
-
-    // ----------------------------------------------------
-    // VALIDAZIONE CAMPI
-    // ----------------------------------------------------
-
-    const required = {
-        leafIndex,
-        merkleTreeAddress,
-        originator,
-        receiverAddress,
-        senderAddress,
-        expirationTimestamp,
-        nonce,
-        transferProxyProgramAddress
-    };
-
-    for (const [
-        key,
-        value
-    ] of Object.entries(required)) {
+    for (const field of required) {
 
         if (
-            value === undefined
-            ||
-            value === null
-            ||
-            value === ""
+            r[field] === undefined ||
+            r[field] === null
         ) {
 
             throw new Error(
-                "Campo Solana mancante: "
-                + key
+                "Campo Solana mancante: " + field
             );
         }
     }
 
 
-    console.error(
-        "🔐 Firma Solana:",
-        r.__typename
-    );
-
-    console.error(
-        "   senderAddress:",
-        senderAddress
-    );
-
-    console.error(
-        "   receiverAddress:",
-        receiverAddress
-    );
-
-    console.error(
-        "   merkleTreeAddress:",
-        merkleTreeAddress
-    );
-
-    console.error(
-        "   leafIndex:",
-        leafIndex
-    );
-
-
-    // ----------------------------------------------------
-    // DERIVA CHIAVE SOLANA
-    // ----------------------------------------------------
+    // ========================================================
+    // DERIVAZIONE CHIAVE SOLANA
+    // ========================================================
 
     const signer =
         await deriveSolanaSigner(
-            input.privateKey
+            ethereumPrivateKey
         );
 
 
-    // ----------------------------------------------------
-    // CONTROLLO CRITICO
-    //
-    // La chiave derivata deve corrispondere
-    // al senderAddress dell'autorizzazione.
-    // ----------------------------------------------------
+    // ========================================================
+    // CONTROLLO ASSOLUTO SENDER
+    // ========================================================
 
     if (
         signer.address !==
-        senderAddress
+        r.senderAddress
     ) {
 
         throw new Error(
-            "Solana senderAddress mismatch. "
-            + "Chiave derivata: "
+            "Solana sender mismatch: derived "
             + signer.address
-            + " | Authorization senderAddress: "
-            + senderAddress
+            + " != request "
+            + r.senderAddress
         );
     }
 
 
-    // ----------------------------------------------------
+    // ========================================================
     // MESSAGE SORARE
-    //
-    // ATTENZIONE:
-    // assetId NON viene firmato.
-    // senderAddress NON viene firmato.
-    // '0x' è letterale.
-    // ----------------------------------------------------
+    // ========================================================
 
     const message = [
         "TRANSFER",
-        transferProxyProgramAddress,
-        merkleTreeAddress,
-        leafIndex.toString(),
-        nonce.toString(),
-        expirationTimestamp.toString(),
-        receiverAddress,
+        r.transferProxyProgramAddress,
+        r.merkleTreeAddress,
+        r.leafIndex.toString(),
+        r.nonce.toString(),
+        r.expirationTimestamp.toString(),
+        r.receiverAddress,
         "0x",
-        originator
+        r.originator,
     ].join(":");
 
 
     console.error(
-        "   Message costruito correttamente"
+        "🔐 Solana authorization"
+    );
+
+    console.error(
+        "   senderAddress: "
+        + r.senderAddress
+    );
+
+    console.error(
+        "   derivedAddress: "
+        + signer.address
+    );
+
+    console.error(
+        "   leafIndex: "
+        + r.leafIndex
+    );
+
+    console.error(
+        "   nonce: "
+        + r.nonce
     );
 
 
-    // ----------------------------------------------------
-    // UTF-8
-    // ----------------------------------------------------
-
-    const textEncoder =
-        new TextEncoder();
+    // ========================================================
+    // SHA-256
+    // ========================================================
 
     const messageBytes =
-        textEncoder.encode(
-            message
-        );
-
-
-    // ----------------------------------------------------
-    // SHA-256
-    //
-    // Si firma l'hash SHA-256, NON il testo.
-    // ----------------------------------------------------
+        new TextEncoder().encode(message);
 
     const messageHash =
-        await crypto.subtle.digest(
+        await crypto.webcrypto.subtle.digest(
             "SHA-256",
             messageBytes
         );
 
 
+    // ========================================================
+    // ED25519
+    // ========================================================
+
     const signableMessage =
         createSignableMessage(
-            new Uint8Array(
-                messageHash
-            )
+            new Uint8Array(messageHash)
         );
-
-
-    // ----------------------------------------------------
-    // ED25519
-    // ----------------------------------------------------
 
     const [
         signatures
@@ -1552,23 +1332,19 @@ async function signSolanaTokenTransfer(a) {
         ]);
 
 
+    // ========================================================
+    // BASE58
+    // ========================================================
+
     const signature =
         getBase58Decoder().decode(
             signatures[signer.address]
         );
 
 
-    if (!signature) {
-
-        throw new Error(
-            "Firma Solana vuota"
-        );
-    }
-
-
-    // ----------------------------------------------------
+    // ========================================================
     // APPROVAL SORARE
-    // ----------------------------------------------------
+    // ========================================================
 
     return {
         fingerprint: a.fingerprint,
@@ -1576,79 +1352,78 @@ async function signSolanaTokenTransfer(a) {
         solanaTokenTransferApproval: {
             signature,
 
-            nonce,
+            nonce: r.nonce,
 
-            expirationTimestamp
-        }
+            expirationTimestamp:
+                r.expirationTimestamp,
+        },
     };
 }
 
 
-// ========================================================
-// DISPATCH
-// ========================================================
-
-async function sign(a) {
-
-    const r = a.request;
-
-    if (!r) {
-
-        throw new Error(
-            "AuthorizationRequest mancante"
-        );
-    }
-
-    const type =
-        r.__typename;
-
-
-    // ----------------------------------------------------
-    // SOLANA
-    // ----------------------------------------------------
-
-    if (
-        type ===
-        "SolanaTokenTransferAuthorizationRequest"
-    ) {
-
-        return await signSolanaTokenTransfer(a);
-    }
-
-
-    // ----------------------------------------------------
-    // STARKEX / MANGOPAY
-    // ----------------------------------------------------
-
-    if (
-        type ===
-        "StarkexTransferAuthorizationRequest"
-        ||
-        type ===
-        "StarkexLimitOrderAuthorizationRequest"
-        ||
-        type ===
-        "MangopayWalletTransferAuthorizationRequest"
-    ) {
-
-        return signStarkOrMangopay(a);
-    }
-
-
-    // ----------------------------------------------------
-    // QUALSIASI ALTRO TIPO = BLOCCO
-    // ----------------------------------------------------
+async function signMangopay(a) {
 
     throw new Error(
-        "Authorization non supportata: "
-        + type
+        "MangopayWalletTransferAuthorizationRequest "
+        + "non implementata in questo modulo"
     );
 }
 
 
-// ========================================================
-// MAIN ASYNC
-// ========================================================
+async function signOne(a) {
+
+    const r = a.request;
+
+    if (!r || !r.__typename) {
+
+        throw new Error(
+            "Authorization request invalida"
+        );
+    }
+
+
+    if (
+        r.__typename ===
+        "SolanaTokenTransferAuthorizationRequest"
+    ) {
+
+        return await signSolana(
+            a,
+            input.privateKey
+        );
+    }
+
+
+    if (
+        r.__typename ===
+        "StarkexTransferAuthorizationRequest"
+        ||
+        r.__typename ===
+        "StarkexLimitOrderAuthorizationRequest"
+    ) {
+
+        return signStarkex(
+            a,
+            input.privateKey
+        );
+    }
+
+
+    if (
+        r.__typename ===
+        "MangopayWalletTransferAuthorizationRequest"
+    ) {
+
+        return await signMangopay(a);
+    }
+
+
+    throw new Error(
+        "Authorization non supportata: "
+        + r.__typename
+    );
+}
+
 
 (async () => {
 
@@ -1662,16 +1437,14 @@ async function sign(a) {
         ) {
 
             approvals.push(
-                await sign(
+                await signOne(
                     authorization
                 )
             );
         }
 
         process.stdout.write(
-            JSON.stringify(
-                approvals
-            )
+            JSON.stringify(approvals)
         );
 
     } catch (error) {
@@ -1692,22 +1465,25 @@ async function sign(a) {
         [
             node,
             "-e",
-            script
+            script,
         ],
         input=json.dumps({
-            "privateKey": SORARE_PRIVATE_KEY,
-            "authorizations": authorizations
+            "privateKey": STARK,
+            "authorizations": authorizations,
         }),
         text=True,
         capture_output=True,
-        timeout=TIMEOUT
+        timeout=TIMEOUT,
+        cwd=os.path.dirname(
+            os.path.abspath(__file__)
+        ),
     )
 
     if process.stderr:
 
         print(
             process.stderr.strip(),
-            flush=True
+            flush=True,
         )
 
     if process.returncode != 0:
@@ -1726,7 +1502,7 @@ async function sign(a) {
     except Exception as exc:
 
         raise RuntimeError(
-            "Output firma non JSON: "
+            "Output firma Node non valido: "
             + str(exc)
         )
 
@@ -1738,15 +1514,14 @@ async function sign(a) {
 def prepare_sale(card, price):
 
     asset_id = str(
-        card.get("assetId")
-        or ""
+        card.get("assetId") or ""
     ).strip()
 
     if not asset_id:
 
         print(
             "❌ AssetId mancante",
-            flush=True
+            flush=True,
         )
 
         return None
@@ -1765,10 +1540,6 @@ def prepare_sale(card, price):
                     request {
                         __typename
 
-                        # --------------------------------
-                        # STARKEX TRANSFER
-                        # --------------------------------
-
                         ... on StarkexTransferAuthorizationRequest {
                             amount
                             condition
@@ -1785,10 +1556,6 @@ def prepare_sale(card, price):
                                 tokenId
                             }
                         }
-
-                        # --------------------------------
-                        # STARKEX LIMIT ORDER
-                        # --------------------------------
 
                         ... on StarkexLimitOrderAuthorizationRequest {
                             vaultIdSell
@@ -1807,10 +1574,6 @@ def prepare_sale(card, price):
                             }
                         }
 
-                        # --------------------------------
-                        # MANGOPAY
-                        # --------------------------------
-
                         ... on MangopayWalletTransferAuthorizationRequest {
                             nonce
                             amount
@@ -1818,10 +1581,6 @@ def prepare_sale(card, price):
                             operationHash
                             mangopayWalletId
                         }
-
-                        # --------------------------------
-                        # SOLANA TOKEN TRANSFER
-                        # --------------------------------
 
                         ... on SolanaTokenTransferAuthorizationRequest {
                             assetId
@@ -1844,6 +1603,7 @@ def prepare_sale(card, price):
         }
     """, {
         "input": {
+
             "receiveAssetIds": [],
 
             "sendAssetIds": [
@@ -1852,7 +1612,7 @@ def prepare_sale(card, price):
 
             "receiveAmount": {
                 "amount": str(price),
-                "currency": "EUR"
+                "currency": "EUR",
             },
 
             "settlementCurrencies": [
@@ -1861,7 +1621,7 @@ def prepare_sale(card, price):
 
             "clientMutationId": str(
                 uuid.uuid4()
-            )
+            ),
         }
     })
 
@@ -1874,15 +1634,12 @@ def prepare_sale(card, price):
 
         print(
             "❌ prepareOffer: nessun risultato",
-            flush=True
+            flush=True,
         )
 
         return None
 
-    errors = (
-        result.get("errors")
-        or []
-    )
+    errors = result.get("errors") or []
 
     if errors:
 
@@ -1890,9 +1647,9 @@ def prepare_sale(card, price):
             "❌ prepareOffer:",
             json.dumps(
                 errors,
-                ensure_ascii=False
+                ensure_ascii=False,
             ),
-            flush=True
+            flush=True,
         )
 
         return None
@@ -1902,19 +1659,15 @@ def prepare_sale(card, price):
         or []
     )
 
-    # ========================================================
-    # DEBUG SICURO
-    # ========================================================
-
     print(
         "🔍 DEBUG AUTHORIZATIONS:",
-        flush=True
+        flush=True,
     )
 
     print(
         f"   └─ Totale authorization: "
         f"{len(authorizations)}",
-        flush=True
+        flush=True,
     )
 
     for i, auth in enumerate(authorizations):
@@ -1926,32 +1679,32 @@ def prepare_sale(card, price):
 
         print(
             f"   AUTH {i}:",
-            flush=True
+            flush=True,
         )
 
         print(
             f"   ├─ fingerprint: "
             f"{auth.get('fingerprint')}",
-            flush=True
+            flush=True,
         )
 
         print(
             f"   ├─ __typename: "
             f"{request.get('__typename')}",
-            flush=True
+            flush=True,
         )
 
         print(
             f"   └─ request fields: "
             f"{list(request.keys())}",
-            flush=True
+            flush=True,
         )
 
     if not authorizations:
 
         print(
             "❌ Nessuna authorization",
-            flush=True
+            flush=True,
         )
 
         return None
@@ -1966,13 +1719,10 @@ def prepare_sale(card, price):
 def create_sale(card, price, approvals):
 
     asset_id = str(
-        card.get("assetId")
-        or ""
+        card.get("assetId") or ""
     ).strip()
 
-    deal_id = str(
-        uuid.uuid4()
-    )
+    deal_id = str(uuid.uuid4())
 
     data = graphql("""
         mutation CreateSingleSale(
@@ -2006,7 +1756,7 @@ def create_sale(card, price, approvals):
 
             "receiveAmount": {
                 "amount": str(price),
-                "currency": "EUR"
+                "currency": "EUR",
             },
 
             "settlementCurrencies": [
@@ -2015,7 +1765,7 @@ def create_sale(card, price, approvals):
 
             "clientMutationId": str(
                 uuid.uuid4()
-            )
+            ),
         }
     })
 
@@ -2025,19 +1775,9 @@ def create_sale(card, price, approvals):
     )
 
     if not result:
-
-        print(
-            "❌ createSingleSaleOffer: "
-            "nessun risultato",
-            flush=True
-        )
-
         return False
 
-    errors = (
-        result.get("errors")
-        or []
-    )
+    errors = result.get("errors") or []
 
     if errors:
 
@@ -2045,9 +1785,9 @@ def create_sale(card, price, approvals):
             "❌ createSingleSaleOffer:",
             json.dumps(
                 errors,
-                ensure_ascii=False
+                ensure_ascii=False,
             ),
-            flush=True
+            flush=True,
         )
 
         return False
@@ -2061,7 +1801,7 @@ def create_sale(card, price, approvals):
 
         print(
             "❌ Listing non creato",
-            flush=True
+            flush=True,
         )
 
         return False
@@ -2069,13 +1809,13 @@ def create_sale(card, price, approvals):
     print(
         f"✅ LISTING CREATO: "
         f"{token_offer.get('id')}",
-        flush=True
+        flush=True,
     )
 
     print(
         f"   └─ Prezzo: "
         f"{format_eur(price)}",
-        flush=True
+        flush=True,
     )
 
     return True
@@ -2091,13 +1831,13 @@ def sell_card(card, price):
 
     print(
         f"💰 AUTOSELL: {label}",
-        flush=True
+        flush=True,
     )
 
     print(
         f"   └─ Floor live: "
         f"{format_eur(price)}",
-        flush=True
+        flush=True,
     )
 
     # --------------------------------------------------------
@@ -2109,13 +1849,13 @@ def sell_card(card, price):
         print(
             "🔒 CARTA IN CASSAFORTE → "
             "VENDITA BLOCCATA",
-            flush=True
+            flush=True,
         )
 
         return False
 
     # --------------------------------------------------------
-    # PROTEZIONE KULENOVIC
+    # KULENOVIC
     # --------------------------------------------------------
 
     if is_kulenovic(card):
@@ -2123,7 +1863,7 @@ def sell_card(card, price):
         print(
             "🛡️ KULENOVIC → "
             "VENDITA BLOCCATA",
-            flush=True
+            flush=True,
         )
 
         return False
@@ -2137,7 +1877,7 @@ def sell_card(card, price):
         print(
             "🟡 DRY_RUN=True → "
             "vendita SIMULATA",
-            flush=True
+            flush=True,
         )
 
         return True
@@ -2148,7 +1888,7 @@ def sell_card(card, price):
 
     authorizations = prepare_sale(
         card,
-        price
+        price,
     )
 
     if not authorizations:
@@ -2168,7 +1908,7 @@ def sell_card(card, price):
 
         print(
             f"❌ Firma vendita: {exc}",
-            flush=True
+            flush=True,
         )
 
         return False
@@ -2180,7 +1920,7 @@ def sell_card(card, price):
     return create_sale(
         card,
         price,
-        approvals
+        approvals,
     )
 
 
@@ -2194,7 +1934,7 @@ def process_card(card, lineup_ids):
 
     print(
         f"\n🔎 CONTROLLO: {label}",
-        flush=True
+        flush=True,
     )
 
     # --------------------------------------------------------
@@ -2206,7 +1946,7 @@ def process_card(card, lineup_ids):
         print(
             f"🔒 {label} → "
             f"IN CASSAFORTE, SKIP",
-            flush=True
+            flush=True,
         )
 
         return
@@ -2219,8 +1959,8 @@ def process_card(card, lineup_ids):
 
         print(
             f"🛡️ {label} → "
-            f"KULENOVIC, SKIP",
-            flush=True
+            f"KULENOVIC, MAI IN VENDITA",
+            flush=True,
         )
 
         return
@@ -2237,7 +1977,7 @@ def process_card(card, lineup_ids):
 
         print(
             f"⏳ {label} → già in vendita",
-            flush=True
+            flush=True,
         )
 
         return
@@ -2248,14 +1988,14 @@ def process_card(card, lineup_ids):
 
     valid, info = validate_card(
         card,
-        lineup_ids
+        lineup_ids,
     )
 
     if not valid:
 
         print_rejection(
             card,
-            info
+            info,
         )
 
         return
@@ -2268,19 +2008,19 @@ def process_card(card, lineup_ids):
 
     print(
         f"✅ {label} → VENDIBILE",
-        flush=True
+        flush=True,
     )
 
     print(
         f"   ├─ Rarità: "
         f"{info.get('rarity')}",
-        flush=True
+        flush=True,
     )
 
     print(
         f"   └─ Floor live: "
         f"{format_eur(price)}",
-        flush=True
+        flush=True,
     )
 
     # --------------------------------------------------------
@@ -2292,7 +2032,7 @@ def process_card(card, lineup_ids):
         print(
             f"🟢 {label} → "
             f"AUTOSELL COMPLETATO",
-            flush=True
+            flush=True,
         )
 
     else:
@@ -2300,7 +2040,7 @@ def process_card(card, lineup_ids):
         print(
             f"🔴 {label} → "
             f"AUTOSELL FALLITO",
-            flush=True
+            flush=True,
         )
 
 
@@ -2312,107 +2052,87 @@ def worker():
 
     print(
         "🤖 AUTOSELL AVVIATO",
-        flush=True
+        flush=True,
     )
 
     print(
         "📦 MODULO: INDIPENDENTE",
-        flush=True
+        flush=True,
     )
 
     print(
-        f"📦 VERSIONE: "
-        f"{BOT_VERSION}",
-        flush=True
+        f"📦 VERSIONE: {BOT_VERSION}",
+        flush=True,
+    )
+
+    print(
+        "🚫 AUTOBUY: DISATTIVATO",
+        flush=True,
+    )
+
+    print(
+        "🚫 SWAP: DISATTIVATO",
+        flush=True,
     )
 
     print(
         f"🧪 DRY_RUN={DRY_RUN}",
-        flush=True
+        flush=True,
     )
 
     print(
         f"💰 RANGE FLOOR: "
         f"€{MIN_PRICE / 100:.2f} - "
         f"€{MAX_PRICE / 100:.2f}",
-        flush=True
+        flush=True,
     )
 
     print(
         f"📊 INSERZIONI LIVE MINIME: "
         f"{MIN_LIVE_LISTINGS}",
-        flush=True
+        flush=True,
     )
 
     print(
         "⏱️ DURATA LISTING: 7 giorni",
-        flush=True
+        flush=True,
     )
 
     print(
         "🔒 KULENOVIC: MAI IN VENDITA",
-        flush=True
+        flush=True,
     )
 
     print(
         "🏆 SOLO LIMITED",
-        flush=True
+        flush=True,
     )
 
     print(
-        "🎂 FILTRO ETÀ: DISATTIVATO",
-        flush=True
+        "🏟️ CARTA SCHIERATA: MAI IN VENDITA",
+        flush=True,
     )
 
     print(
-        "🏟️ CARTA SCHIERATA: "
-        "MAI IN VENDITA",
-        flush=True
-    )
-
-    print(
-        "🔒 CARTE IN CASSAFORTE: "
-        "ESCLUSE A MONTE",
-        flush=True
-    )
-
-    print(
-        "🛡️ CONTROLLO LINEUP: "
-        "blockchainCardsInLineups",
-        flush=True
+        "🔒 CARTE IN CASSAFORTE: ESCLUSE",
+        flush=True,
     )
 
     print(
         "🛡️ LINEUP NON VERIFICABILE: "
         "BLOCCO VENDITA",
-        flush=True
+        flush=True,
     )
 
     print(
         "💰 PREZZO = FLOOR LIVE",
-        flush=True
+        flush=True,
     )
 
     print(
         "🌐 PRICE MATCH: "
         "player + rarity + season",
-        flush=True
-    )
-
-    print(
-        "🔗 SOLANA: "
-        "TOKEN TRANSFER SIGNING ABILITATO",
-        flush=True
-    )
-
-    print(
-        "🚫 AUTOBUY: DISABILITATO",
-        flush=True
-    )
-
-    print(
-        "🚫 SWAP: DISABILITATO",
-        flush=True
+        flush=True,
     )
 
     # --------------------------------------------------------
@@ -2423,7 +2143,7 @@ def worker():
 
         print(
             "🛑 AutoSell fermato",
-            flush=True
+            flush=True,
         )
 
         return
@@ -2438,18 +2158,17 @@ def worker():
 
             print(
                 "\n================================",
-                flush=True
+                flush=True,
             )
 
             print(
-                "🔄 AUTOSELL - "
-                "CONTROLLO GALLERY",
-                flush=True
+                "🔄 AUTOSELL - CONTROLLO GALLERY",
+                flush=True,
             )
 
             print(
                 "================================",
-                flush=True
+                flush=True,
             )
 
             cards = get_gallery()
@@ -2457,13 +2176,11 @@ def worker():
             if cards is None:
 
                 print(
-                    "❌ Impossibile leggere "
-                    "la gallery",
-                    flush=True
+                    "❌ Impossibile leggere la gallery",
+                    flush=True,
                 )
 
                 time.sleep(INTERVAL)
-
                 continue
 
             lineup_ids = get_lineup_asset_ids()
@@ -2471,27 +2188,23 @@ def worker():
             if lineup_ids is None:
 
                 print(
-                    "❌ Impossibile verificare "
-                    "le lineup",
-                    flush=True
+                    "❌ Impossibile verificare le lineup",
+                    flush=True,
                 )
 
                 print(
                     "🛡️ SICUREZZA: "
-                    "NESSUNA CARTA VERRÀ "
-                    "VENDUTA",
-                    flush=True
+                    "NESSUNA CARTA VERRÀ VENDUTA",
+                    flush=True,
                 )
 
                 time.sleep(INTERVAL)
-
                 continue
 
             print(
                 f"🛡️ Carte in lineup "
-                f"live/upcoming: "
-                f"{len(lineup_ids)}",
-                flush=True
+                f"live/upcoming: {len(lineup_ids)}",
+                flush=True,
             )
 
             for card in cards:
@@ -2504,18 +2217,7 @@ def worker():
                             f"🔒 {card_label(card)} "
                             f"→ IN CASSAFORTE, "
                             f"SKIP SICUREZZA",
-                            flush=True
-                        )
-
-                        continue
-
-                    if is_kulenovic(card):
-
-                        print(
-                            f"🛡️ {card_label(card)} "
-                            f"→ KULENOVIC, "
-                            f"SKIP SICUREZZA",
-                            flush=True
+                            flush=True,
                         )
 
                         continue
@@ -2528,16 +2230,15 @@ def worker():
 
                     process_card(
                         card,
-                        lineup_ids
+                        lineup_ids,
                     )
 
                 except Exception as exc:
 
                     print(
                         f"❌ Errore carta "
-                        f"{card_label(card)}: "
-                        f"{exc}",
-                        flush=True
+                        f"{card_label(card)}: {exc}",
+                        flush=True,
                     )
 
                 time.sleep(0.25)
@@ -2545,7 +2246,7 @@ def worker():
             print(
                 f"😴 Prossimo controllo "
                 f"tra {INTERVAL}s",
-                flush=True
+                flush=True,
             )
 
             time.sleep(INTERVAL)
@@ -2553,9 +2254,8 @@ def worker():
         except Exception as exc:
 
             print(
-                f"❌ Worker AutoSell: "
-                f"{exc}",
-                flush=True
+                f"❌ Worker AutoSell: {exc}",
+                flush=True,
             )
 
             time.sleep(INTERVAL)
@@ -2579,12 +2279,12 @@ def start_worker():
         threading.Thread(
             target=worker,
             name="autosell-worker",
-            daemon=True
+            daemon=True,
         ).start()
 
         print(
             "✅ Thread AutoSell avviato.",
-            flush=True
+            flush=True,
         )
 
 
@@ -2605,35 +2305,30 @@ def home():
 
         "dry_run": DRY_RUN,
 
-        "min_price_cents":
-            MIN_PRICE,
+        "autobuy": "DISABLED",
 
-        "max_price_cents":
-            MAX_PRICE,
+        "swap": "DISABLED",
 
-        "min_live_listings":
-            MIN_LIVE_LISTINGS,
+        "min_price_cents": MIN_PRICE,
 
-        "age_filter":
-            "DISABLED",
+        "max_price_cents": MAX_PRICE,
+
+        "min_live_listings": MIN_LIVE_LISTINGS,
+
+        "age_filter": "DISABLED",
 
         "listing_duration_seconds":
             LISTING_DURATION,
 
-        "listing_duration_days":
-            7,
+        "listing_duration_days": 7,
 
-        "kulenovic":
-            "NEVER_SELL",
+        "kulenovic": "NEVER_SELL",
 
-        "rarity":
-            "LIMITED_ONLY",
+        "rarity": "LIMITED_ONLY",
 
-        "vault_cards":
-            "EXCLUDED",
+        "vault_cards": "EXCLUDED",
 
-        "vault_field":
-            "sealed",
+        "vault_field": "sealed",
 
         "lineup_check":
             "blockchainCardsInLineups",
@@ -2650,20 +2345,8 @@ def home():
         "price_currency":
             "EUR",
 
-        "solana_signing":
-            "ENABLED",
-
-        "autobuy":
-            "DISABLED",
-
-        "swap":
-            "DISABLED",
-
-        "price_source":
-            "liveSingleSaleOffers",
-
         "worker_started":
-            worker_started
+            worker_started,
     })
 
 
@@ -2684,6 +2367,12 @@ def health():
         "dry_run":
             DRY_RUN,
 
+        "autobuy":
+            "DISABLED",
+
+        "swap":
+            "DISABLED",
+
         "rarity":
             "LIMITED_ONLY",
 
@@ -2698,15 +2387,6 @@ def health():
 
         "lineup_unknown_action":
             "BLOCK_SELL",
-
-        "solana_signing":
-            "ENABLED",
-
-        "autobuy":
-            "DISABLED",
-
-        "swap":
-            "DISABLED"
     })
 
 
@@ -2724,9 +2404,9 @@ if __name__ == "__main__":
         port=int(
             os.getenv(
                 "PORT",
-                "10000"
+                "10000",
             )
         ),
 
-        debug=False
+        debug=False,
     )
