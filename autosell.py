@@ -41,7 +41,7 @@ REQUEST_DELAY = float(
 
 TIMEOUT = 30
 
-BOT_VERSION = "38.1-SOLANA-0X-FIX"
+BOT_VERSION = "39.0-SOLANA-0X-FIX"
 
 
 # ============================================================
@@ -1121,19 +1121,19 @@ main().catch(error => {
 # ============================================================
 # SOLANA
 #
-# FIX:
-# SORARE_STARK_PRIVATE_KEY viene accettata nel formato:
+# MODIFICA PRINCIPALE:
 #
-#     0xABCDEF....
+# La private key Sorare viene accettata nel formato:
 #
-# La chiave viene interpretata come HEX.
+#     0x...
 #
-# NON vengono più provati path HD casuali.
-# La chiave viene usata direttamente come chiave
-# Solana ed25519.
+# Il prefisso 0x viene rimosso prima della conversione HEX.
 #
-# Il senderAddress restituito da Sorare viene verificato
-# prima della firma.
+# Viene utilizzato UN SOLO path:
+#
+#     m/44'/501'/0'/0'
+#
+# Non vengono più provati path alternativi.
 # ============================================================
 
 def sign_solana(authorization):
@@ -1197,11 +1197,129 @@ def sign_solana(authorization):
 const fs = require("fs");
 
 const {
-  createKeyPairSignerFromPrivateKeyBytes,
+  createKeyPairFromPrivateKeyBytes,
+  createSignerFromKeyPair,
   createSignableMessage,
   getBase58Decoder
 } = require("@solana/kit");
 
+const {
+  HDKey
+} = require("micro-key-producer/slip10.js");
+
+
+// ==========================================================
+// PATH SOLANA
+// ==========================================================
+
+const SOLANA_PATH =
+  "m/44'/501'/0'/0'";
+
+
+// ==========================================================
+// NORMALIZZA PRIVATE KEY
+// ==========================================================
+
+function normalizePrivateKey(value) {
+
+  let key =
+    String(value || "")
+      .trim();
+
+  // Accetta:
+  //
+  // 0x1234...
+  //
+  // oppure:
+  //
+  // 1234...
+  //
+  key =
+    key.replace(/^0x/i, "");
+
+  if (!key) {
+    throw new Error(
+      "SORARE_STARK_PRIVATE_KEY vuota"
+    );
+  }
+
+  if (!/^[0-9a-fA-F]+$/.test(key)) {
+    throw new Error(
+      "SORARE_STARK_PRIVATE_KEY "
+      + "non è una chiave HEX valida"
+    );
+  }
+
+  if (key.length % 2 !== 0) {
+    throw new Error(
+      "SORARE_STARK_PRIVATE_KEY "
+      + "ha un numero dispari di caratteri HEX"
+    );
+  }
+
+  const bytes =
+    Buffer.from(
+      key,
+      "hex"
+    );
+
+  if (bytes.length !== 32) {
+    throw new Error(
+      "SORARE_STARK_PRIVATE_KEY deve essere "
+      + "di 32 byte. Byte ricevuti: "
+      + bytes.length
+    );
+  }
+
+  return bytes;
+}
+
+
+// ==========================================================
+// DERIVAZIONE SOLANA
+// ==========================================================
+
+async function deriveSigner(privateKey) {
+
+  const seed =
+    normalizePrivateKey(
+      privateKey
+    );
+
+  console.error(
+    "🔎 Solana derivation path:",
+    SOLANA_PATH
+  );
+
+  const derived =
+    HDKey
+      .fromMasterSeed(seed)
+      .derive(SOLANA_PATH);
+
+  if (!derived.privateKey) {
+    throw new Error(
+      "La derivazione Solana "
+      + "non ha prodotto una private key"
+    );
+  }
+
+  const keyPair =
+    await createKeyPairFromPrivateKeyBytes(
+      derived.privateKey
+    );
+
+  const signer =
+    await createSignerFromKeyPair(
+      keyPair
+    );
+
+  return signer;
+}
+
+
+// ==========================================================
+// MAIN
+// ==========================================================
 
 async function main() {
 
@@ -1215,167 +1333,68 @@ async function main() {
   const request =
     authorization.request;
 
-
-  // ========================================================
-  // PRIVATE KEY
-  // ========================================================
-
-  let privateKey =
-    String(input.privateKey || "")
-      .trim();
-
-
-  /*
-   * La variabile Sorare può essere:
-   *
-   * 0xABCDEF...
-   *
-   * oppure:
-   *
-   * ABCDEF...
-   *
-   * Rimuoviamo esclusivamente il prefisso 0x.
-   */
-
-  privateKey =
-    privateKey.replace(/^0x/i, "");
-
-
-  if (!privateKey) {
-
-    throw new Error(
-      "SORARE_STARK_PRIVATE_KEY vuota"
-    );
-
-  }
-
-
-  if (!/^[0-9a-fA-F]+$/.test(privateKey)) {
-
-    throw new Error(
-      "SORARE_STARK_PRIVATE_KEY "
-      + "non è una chiave HEX valida"
-    );
-
-  }
-
-
-  if (privateKey.length % 2 !== 0) {
-
-    throw new Error(
-      "SORARE_STARK_PRIVATE_KEY "
-      + "ha lunghezza HEX dispari"
-    );
-
-  }
-
-
-  const keyBytes =
-    new Uint8Array(
-      Buffer.from(
-        privateKey,
-        "hex"
-      )
-    );
-
-
-  console.error(
-    "🔑 Solana key bytes:",
-    keyBytes.length
-  );
-
-
-  /*
-   * Supportiamo sia:
-   *
-   * 32 byte = seed ed25519
-   *
-   * 64 byte = secret key Solana
-   *
-   * Nel caso 64 byte utilizziamo i primi
-   * 32 byte, che rappresentano il seed.
-   */
-
-  let seed;
-
-  if (keyBytes.length === 32) {
-
-    seed = keyBytes;
-
-  } else if (keyBytes.length === 64) {
-
-    seed = keyBytes.slice(0, 32);
-
-  } else {
-
-    throw new Error(
-      "Lunghezza private key Solana non valida: "
-      + keyBytes.length
-      + " byte. "
-      + "Attesi 32 oppure 64 byte."
-    );
-
-  }
-
-
-  // ========================================================
-  // CREATE SOLANA SIGNER
-  // ========================================================
-
-  const signer =
-    await createKeyPairSignerFromPrivateKeyBytes(
-      seed
-    );
-
-
-  const derivedAddress =
-    signer.address;
-
-
-  const expectedAddress =
+  const expected =
     String(
-      request.senderAddress
+      request.senderAddress || ""
     ).trim();
+
+
+  if (!expected) {
+    throw new Error(
+      "senderAddress mancante nella "
+      + "authorization Solana"
+    );
+  }
 
 
   console.error(
     "📨 Sorare senderAddress:",
-    expectedAddress
+    expected
   );
+
+
+  // ========================================================
+  // DERIVA L'INDIRIZZO
+  // ========================================================
+
+  const signer =
+    await deriveSigner(
+      input.privateKey
+    );
+
 
   console.error(
     "🔑 Derived Solana address:",
-    derivedAddress
+    signer.address
   );
 
 
   // ========================================================
-  // CHECK ADDRESS
+  // VERIFICA SENDER
   // ========================================================
 
-  if (
-    derivedAddress !== expectedAddress
-  ) {
+  if (signer.address !== expected) {
 
     throw new Error(
       "SOLANA PRIVATE KEY NON CORRISPONDE "
       + "AL SENDER SORARE. "
-      + "La chiave fornita produce "
-      + derivedAddress
-      + " mentre Sorare richiede "
-      + expectedAddress
+      + "Path utilizzato: "
+      + SOLANA_PATH
+      + " | Derived: "
+      + signer.address
+      + " | Expected: "
+      + expected
     );
-
   }
 
 
   console.error(
-    "✅ Solana sender verificato"
+    "✅ Solana senderAddress verificato"
   );
 
 
   // ========================================================
-  // MESSAGE SORARE
+  // MESSAGGIO SORARE
   // ========================================================
 
   const message = [
@@ -1386,11 +1405,17 @@ async function main() {
 
     request.merkleTreeAddress,
 
-    request.leafIndex.toString(),
+    String(
+      request.leafIndex
+    ),
 
-    request.nonce.toString(),
+    String(
+      request.nonce
+    ),
 
-    request.expirationTimestamp.toString(),
+    String(
+      request.expirationTimestamp
+    ),
 
     request.receiverAddress,
 
@@ -1416,7 +1441,6 @@ async function main() {
       message
     );
 
-
   const messageHash =
     await crypto.subtle.digest(
       "SHA-256",
@@ -1425,7 +1449,7 @@ async function main() {
 
 
   // ========================================================
-  // SIGN
+  // ED25519
   // ========================================================
 
   const signableMessage =
@@ -1451,7 +1475,7 @@ async function main() {
 
 
   // ========================================================
-  // OUTPUT
+  // APPROVAL
   // ========================================================
 
   const output = {
@@ -1478,7 +1502,6 @@ async function main() {
   process.stdout.write(
     JSON.stringify(output)
   );
-
 }
 
 
@@ -1508,7 +1531,6 @@ main().catch(error => {
     )
 
     if process.stderr:
-
         print(
             process.stderr.strip(),
             flush=True,
