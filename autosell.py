@@ -323,20 +323,6 @@ def check_account():
 
 # ============================================================
 # GALLERY
-#
-# Recupera tutte le carte dell'account.
-#
-# IMPORTANTISSIMO:
-# le carte con sealed=True vengono escluse
-# IMMEDIATAMENTE.
-#
-# Quindi non arrivano mai a:
-#
-#   validate_card()
-#   card_in_lineup()
-#   live_floor()
-#   sell_card()
-#
 # ============================================================
 
 def get_gallery():
@@ -372,13 +358,6 @@ def get_gallery():
                             rarityTyped
                             seasonYear
                             serialNumber
-
-                            # ====================================================
-                            # VAULT / SEALED
-                            #
-                            # true = carta sigillata nella Cassaforte
-                            # ====================================================
-
                             sealed
 
                             anyPlayer {
@@ -446,15 +425,7 @@ def get_gallery():
 
         total_gallery_count += len(nodes)
 
-        # ====================================================
-        # FILTRO VAULT
-        # ====================================================
-
         for card in nodes:
-
-            # ------------------------------------------------
-            # CARTA IN CASSAFORTE
-            # ------------------------------------------------
 
             if card.get("sealed") is True:
 
@@ -467,10 +438,6 @@ def get_gallery():
                 )
 
                 continue
-
-            # ------------------------------------------------
-            # CARTA NON SEALED
-            # ------------------------------------------------
 
             all_cards.append(card)
 
@@ -493,10 +460,6 @@ def get_gallery():
 
         time.sleep(0.1)
 
-    # ========================================================
-    # STATISTICHE GALLERY
-    # ========================================================
-
     print(
         f"📦 Carte gallery totali: "
         f"{total_gallery_count}",
@@ -514,10 +477,6 @@ def get_gallery():
         f"{len(all_cards)}",
         flush=True
     )
-
-    # ========================================================
-    # FILTRO RIGOROSO LIMITED
-    # ========================================================
 
     limited_cards = []
 
@@ -545,16 +504,6 @@ def get_gallery():
 # ============================================================
 
 def get_lineup_asset_ids():
-
-    """
-    Recupera le carte blockchain impegnate
-    in lineup live/upcoming.
-
-    Se la query fallisce oppure restituisce None,
-    il controllo viene considerato NON VERIFICABILE.
-
-    In quel caso il bot blocca qualsiasi vendita.
-    """
 
     data = graphql("""
         query CardsInLineups {
@@ -630,16 +579,6 @@ def get_lineup_asset_ids():
 
 def card_lineup_identifiers(card):
 
-    """
-    Costruisce l'insieme degli identificativi
-    utilizzabili per il confronto.
-
-    Il principale rimane assetId.
-
-    Lo slug viene aggiunto come identificativo
-    secondario quando disponibile.
-    """
-
     identifiers = set()
 
     asset_id = norm(
@@ -664,10 +603,6 @@ def card_in_lineup(
     lineup_ids
 ):
 
-    # --------------------------------------------------------
-    # LINEUP NON VERIFICABILE
-    # --------------------------------------------------------
-
     if lineup_ids is None:
         return None
 
@@ -677,10 +612,6 @@ def card_in_lineup(
 
     if not identifiers:
         return None
-
-    # --------------------------------------------------------
-    # MATCH
-    # --------------------------------------------------------
 
     if identifiers.intersection(
         lineup_ids
@@ -791,7 +722,6 @@ def price_eur(amounts):
     ):
         return None
 
-    # EUR
     try:
 
         eur = int(
@@ -809,7 +739,6 @@ def price_eur(amounts):
     ):
         pass
 
-    # USD
     try:
 
         usd = float(
@@ -1048,17 +977,6 @@ def validate_card(
     lineup_ids
 ):
 
-    # --------------------------------------------------------
-    # SECONDA BARRIERA VAULT
-    # --------------------------------------------------------
-    #
-    # Normalmente le sealed sono già state eliminate
-    # da get_gallery().
-    #
-    # Se per qualsiasi motivo una sealed dovesse arrivare
-    # qui, viene comunque bloccata.
-    # --------------------------------------------------------
-
     if card.get("sealed") is True:
 
         return False, {
@@ -1068,10 +986,6 @@ def validate_card(
             )
         }
 
-    # --------------------------------------------------------
-    # KULENOVIC
-    # --------------------------------------------------------
-
     if is_kulenovic(card):
 
         return False, {
@@ -1080,10 +994,6 @@ def validate_card(
                 "KULENOVIC MAI IN VENDITA"
             )
         }
-
-    # --------------------------------------------------------
-    # RARITY
-    # --------------------------------------------------------
 
     rarity = norm(
         card.get("rarityTyped")
@@ -1098,14 +1008,6 @@ def validate_card(
             ),
             "rarity": rarity or "N/D"
         }
-
-    # --------------------------------------------------------
-    # NESSUN CONTROLLO ETA
-    # --------------------------------------------------------
-
-    # --------------------------------------------------------
-    # LINEUP
-    # --------------------------------------------------------
 
     in_lineup = card_in_lineup(
         card,
@@ -1131,10 +1033,6 @@ def validate_card(
                 "lineup live/upcoming"
             )
         }
-
-    # --------------------------------------------------------
-    # PREZZO
-    # --------------------------------------------------------
 
     floor = live_floor(
         card
@@ -1354,6 +1252,24 @@ function sign(a) {
         );
     }
 
+    // ========================================================
+    // DEBUG SICURO
+    // ========================================================
+
+    console.error(
+        "🔐 Firma authorization:",
+        r.__typename || "UNKNOWN"
+    );
+
+    console.error(
+        "   Campi:",
+        Object.keys(r)
+    );
+
+    // ========================================================
+    // CONVERSIONE AMOUNT
+    // ========================================================
+
     if (
         r.__typename ===
         "StarkexTransferAuthorizationRequest"
@@ -1363,11 +1279,19 @@ function sign(a) {
         r.amount = BigInt(r.amount);
     }
 
+    // ========================================================
+    // FIRMA
+    // ========================================================
+
     const signature =
         signAuthorizationRequest(
             input.privateKey,
             r
         );
+
+    // ========================================================
+    // APPROVAL
+    // ========================================================
 
     if (
         r.__typename ===
@@ -1450,6 +1374,17 @@ process.stdout.write(
         capture_output=True,
         timeout=TIMEOUT
     )
+
+    # ========================================================
+    # MOSTRA DEBUG NODE SENZA DATI SENSIBILI
+    # ========================================================
+
+    if process.stderr:
+
+        print(
+            process.stderr.strip(),
+            flush=True
+        )
 
     if process.returncode != 0:
 
@@ -1578,6 +1513,12 @@ def prepare_sale(
     )
 
     if not result:
+
+        print(
+            "❌ prepareOffer: nessun risultato",
+            flush=True
+        )
+
         return None
 
     errors = (
@@ -1604,6 +1545,53 @@ def prepare_sale(
         )
         or []
     )
+
+    # ========================================================
+    # DEBUG SICURO AUTHORIZATION
+    # ========================================================
+
+    print(
+        "🔍 DEBUG AUTHORIZATIONS:",
+        flush=True
+    )
+
+    print(
+        f"   └─ Totale authorization: "
+        f"{len(authorizations)}",
+        flush=True
+    )
+
+    for i, auth in enumerate(authorizations):
+
+        request = (
+            auth.get("request")
+            or {}
+        )
+
+        print(
+            f"   AUTH {i}:",
+            flush=True
+        )
+
+        print(
+            f"   ├─ fingerprint: "
+            f"{auth.get('fingerprint')}",
+            flush=True
+        )
+
+        print(
+            f"   ├─ __typename: "
+            f"{request.get('__typename')}",
+            flush=True
+        )
+
+        print(
+            f"   └─ request fields: "
+            f"{list(request.keys())}",
+            flush=True
+        )
+
+    # ========================================================
 
     if not authorizations:
 
@@ -1763,10 +1751,6 @@ def sell_card(
 
     # --------------------------------------------------------
     # SECONDA PROTEZIONE ASSOLUTA
-    # --------------------------------------------------------
-    #
-    # Anche se per errore una sealed arrivasse fino a qui,
-    # NON viene mai preparata né venduta.
     # --------------------------------------------------------
 
     if card.get("sealed") is True:
@@ -2086,10 +2070,6 @@ def worker():
                 flush=True
             )
 
-            # ------------------------------------------------
-            # GALLERY
-            # ------------------------------------------------
-
             cards = get_gallery()
 
             if cards is None:
@@ -2105,10 +2085,6 @@ def worker():
                 )
 
                 continue
-
-            # ------------------------------------------------
-            # LINEUP
-            # ------------------------------------------------
 
             lineup_ids = (
                 get_lineup_asset_ids()
@@ -2142,17 +2118,9 @@ def worker():
                 flush=True
             )
 
-            # ------------------------------------------------
-            # PROCESSA SOLO LIMITED NON SEALED
-            # ------------------------------------------------
-
             for card in cards:
 
                 try:
-
-                    # ====================================================
-                    # SECONDA BARRIERA VAULT
-                    # ====================================================
 
                     if card.get("sealed") is True:
 
@@ -2164,10 +2132,6 @@ def worker():
                         )
 
                         continue
-
-                    # ====================================================
-                    # SECONDA BARRIERA RARITY
-                    # ====================================================
 
                     if norm(
                         card.get(
