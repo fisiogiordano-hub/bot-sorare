@@ -46,7 +46,7 @@ LISTING_DURATION = 7 * 24 * 60 * 60   # 7 giorni
 INTERVAL = 15
 TIMEOUT = 30
 
-BOT_VERSION = "26.0-AUTOSELL-LIMITED-LINEUP-SAFE"
+BOT_VERSION = "27.0-AUTOSELL-LIMITED-LINEUP-VAULT-SAFE"
 
 
 # ============================================================
@@ -324,10 +324,19 @@ def check_account():
 # ============================================================
 # GALLERY
 #
-# SOLO LIMITED vengono restituite.
+# Recupera tutte le carte dell'account.
 #
-# Questo è il punto fondamentale:
-# le COMMON non vengono analizzate dal worker.
+# IMPORTANTISSIMO:
+# le carte con sealed=True vengono escluse
+# IMMEDIATAMENTE.
+#
+# Quindi non arrivano mai a:
+#
+#   validate_card()
+#   card_in_lineup()
+#   live_floor()
+#   sell_card()
+#
 # ============================================================
 
 def get_gallery():
@@ -336,6 +345,9 @@ def get_gallery():
 
     after = None
     page = 0
+
+    sealed_count = 0
+    total_gallery_count = 0
 
     while True:
 
@@ -361,6 +373,14 @@ def get_gallery():
                             seasonYear
                             serialNumber
 
+                            # ====================================================
+                            # VAULT / SEALED
+                            #
+                            # true = carta sigillata nella Cassaforte
+                            # ====================================================
+
+                            sealed
+
                             anyPlayer {
                                 slug
                                 displayName
@@ -384,7 +404,22 @@ def get_gallery():
             "after": after
         })
 
-        if not data or data.get("errors"):
+        if not data:
+
+            print(
+                "❌ Gallery: risposta assente",
+                flush=True
+            )
+
+            return None
+
+        if data.get("errors"):
+
+            print(
+                "❌ Gallery: GraphQL error",
+                flush=True
+            )
+
             return None
 
         user = (
@@ -409,7 +444,35 @@ def get_gallery():
             flush=True
         )
 
-        all_cards.extend(nodes)
+        total_gallery_count += len(nodes)
+
+        # ====================================================
+        # FILTRO VAULT
+        # ====================================================
+
+        for card in nodes:
+
+            # ------------------------------------------------
+            # CARTA IN CASSAFORTE
+            # ------------------------------------------------
+
+            if card.get("sealed") is True:
+
+                sealed_count += 1
+
+                print(
+                    f"🔒 {card_label(card)} "
+                    f"→ IN CASSAFORTE, esclusa",
+                    flush=True
+                )
+
+                continue
+
+            # ------------------------------------------------
+            # CARTA NON SEALED
+            # ------------------------------------------------
+
+            all_cards.append(card)
 
         page_info = (
             cards_data.get("pageInfo")
@@ -430,25 +493,31 @@ def get_gallery():
 
         time.sleep(0.1)
 
+    # ========================================================
+    # STATISTICHE GALLERY
+    # ========================================================
+
     print(
         f"📦 Carte gallery totali: "
+        f"{total_gallery_count}",
+        flush=True
+    )
+
+    print(
+        f"🔒 Carte in Cassaforte escluse: "
+        f"{sealed_count}",
+        flush=True
+    )
+
+    print(
+        f"📦 Carte NON sealed disponibili: "
         f"{len(all_cards)}",
         flush=True
     )
 
-    # --------------------------------------------------------
-    # FILTRO RIGOROSO
-    # --------------------------------------------------------
-    #
-    # Le COMMON vengono eliminate QUI.
-    #
-    # Quindi il worker successivamente non farà:
-    #
-    #   controllo Common
-    #   esclusione Common
-    #
-    # ma riceverà direttamente soltanto LIMITED.
-    # --------------------------------------------------------
+    # ========================================================
+    # FILTRO RIGOROSO LIMITED
+    # ========================================================
 
     limited_cards = []
 
@@ -459,6 +528,7 @@ def get_gallery():
         )
 
         if rarity == "limited":
+
             limited_cards.append(card)
 
     print(
@@ -480,8 +550,7 @@ def get_lineup_asset_ids():
     Recupera le carte blockchain impegnate
     in lineup live/upcoming.
 
-    IMPORTANTE:
-    se la query fallisce oppure restituisce None,
+    Se la query fallisce oppure restituisce None,
     il controllo viene considerato NON VERIFICABILE.
 
     In quel caso il bot blocca qualsiasi vendita.
@@ -567,7 +636,7 @@ def card_lineup_identifiers(card):
 
     Il principale rimane assetId.
 
-    Lo slug viene aggiunto solo come identificativo
+    Lo slug viene aggiunto come identificativo
     secondario quando disponibile.
     """
 
@@ -980,6 +1049,26 @@ def validate_card(
 ):
 
     # --------------------------------------------------------
+    # SECONDA BARRIERA VAULT
+    # --------------------------------------------------------
+    #
+    # Normalmente le sealed sono già state eliminate
+    # da get_gallery().
+    #
+    # Se per qualsiasi motivo una sealed dovesse arrivare
+    # qui, viene comunque bloccata.
+    # --------------------------------------------------------
+
+    if card.get("sealed") is True:
+
+        return False, {
+            "code": "VAULT",
+            "message": (
+                "carta presente in Cassaforte"
+            )
+        }
+
+    # --------------------------------------------------------
     # KULENOVIC
     # --------------------------------------------------------
 
@@ -994,13 +1083,6 @@ def validate_card(
 
     # --------------------------------------------------------
     # RARITY
-    # --------------------------------------------------------
-    #
-    # Non serve più analizzare COMMON:
-    # get_gallery() restituisce solo LIMITED.
-    #
-    # Manteniamo comunque questa protezione
-    # come seconda barriera.
     # --------------------------------------------------------
 
     rarity = norm(
@@ -1019,12 +1101,6 @@ def validate_card(
 
     # --------------------------------------------------------
     # NESSUN CONTROLLO ETA
-    # --------------------------------------------------------
-    #
-    # Il limite di età è stato completamente eliminato.
-    #
-    # Una LIMITED di 18, 28, 30, 35 anni ecc.
-    # può proseguire nel controllo.
     # --------------------------------------------------------
 
     # --------------------------------------------------------
@@ -1132,7 +1208,20 @@ def print_rejection(
         "code"
     )
 
-    if code == "KULENOVIC":
+    if code == "VAULT":
+
+        print(
+            "   └─ Motivo: CARTA IN "
+            "CASSAFORTE",
+            flush=True
+        )
+
+        print(
+            "      Sicurezza: NON VENDERE",
+            flush=True
+        )
+
+    elif code == "KULENOVIC":
 
         print(
             "   └─ Motivo: KULENOVIC "
@@ -1673,6 +1762,24 @@ def sell_card(
     )
 
     # --------------------------------------------------------
+    # SECONDA PROTEZIONE ASSOLUTA
+    # --------------------------------------------------------
+    #
+    # Anche se per errore una sealed arrivasse fino a qui,
+    # NON viene mai preparata né venduta.
+    # --------------------------------------------------------
+
+    if card.get("sealed") is True:
+
+        print(
+            "🔒 CARTA IN CASSAFORTE → "
+            "VENDITA BLOCCATA",
+            flush=True
+        )
+
+        return False
+
+    # --------------------------------------------------------
     # DRY RUN
     # --------------------------------------------------------
 
@@ -1746,6 +1853,20 @@ def process_card(
         f"\n🔎 CONTROLLO: {label}",
         flush=True
     )
+
+    # --------------------------------------------------------
+    # VAULT
+    # --------------------------------------------------------
+
+    if card.get("sealed") is True:
+
+        print(
+            f"🔒 {label} → "
+            f"IN CASSAFORTE, SKIP",
+            flush=True
+        )
+
+        return
 
     # --------------------------------------------------------
     # GIÀ IN VENDITA
@@ -1900,6 +2021,12 @@ def worker():
     )
 
     print(
+        "🔒 CARTE IN CASSAFORTE: "
+        "ESCLUSE A MONTE",
+        flush=True
+    )
+
+    print(
         "🛡️ CONTROLLO LINEUP: "
         "blockchainCardsInLineups",
         flush=True
@@ -2016,17 +2143,31 @@ def worker():
             )
 
             # ------------------------------------------------
-            # PROCESSA SOLO LIMITED
+            # PROCESSA SOLO LIMITED NON SEALED
             # ------------------------------------------------
 
             for card in cards:
 
                 try:
 
-                    # Seconda barriera di sicurezza.
-                    # Anche se per errore una Common
-                    # arrivasse qui, viene ignorata
-                    # SENZA analizzarla.
+                    # ====================================================
+                    # SECONDA BARRIERA VAULT
+                    # ====================================================
+
+                    if card.get("sealed") is True:
+
+                        print(
+                            f"🔒 {card_label(card)} "
+                            f"→ IN CASSAFORTE, "
+                            f"SKIP SICUREZZA",
+                            flush=True
+                        )
+
+                        continue
+
+                    # ====================================================
+                    # SECONDA BARRIERA RARITY
+                    # ====================================================
 
                     if norm(
                         card.get(
@@ -2145,6 +2286,12 @@ def home():
         "rarity":
             "LIMITED_ONLY",
 
+        "vault_cards":
+            "EXCLUDED",
+
+        "vault_field":
+            "sealed",
+
         "lineup_check":
             "blockchainCardsInLineups",
 
@@ -2184,6 +2331,12 @@ def health():
 
         "rarity":
             "LIMITED_ONLY",
+
+        "vault_cards":
+            "EXCLUDED",
+
+        "vault_field":
+            "sealed",
 
         "age_filter":
             "DISABLED",
