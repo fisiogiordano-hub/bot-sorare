@@ -4,7 +4,6 @@ import uuid
 import json
 import subprocess
 import threading
-import hashlib
 from typing import Optional, Dict, Any, List, Tuple
 
 import requests
@@ -22,10 +21,8 @@ URL = "https://api.sorare.com/graphql"
 
 TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
-
 API_KEY = os.getenv("SORARE_API_KEY", "").strip()
 
-# Private key Sorare / Ethereum esportata dal wallet Sorare.
 PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
     ""
@@ -33,28 +30,18 @@ PRIVATE_KEY = os.getenv(
 
 
 # ============================================================
-# ATTENZIONE
-#
-# MODALITÀ REALE.
-#
-# False = LE OFFERTE VENGONO REALMENTE CREATE.
+# REAL MODE
 # ============================================================
 
 DRY_RUN = False
 
 
 # ============================================================
-# PREZZI
-#
-# Sorare EUR:
-#
-# 32 = €0,32
-# 40 = €0,40
-# 70 = €0,70
+# PRICE
 # ============================================================
 
-MIN_PRICE = 32
-MAX_PRICE = 70
+MIN_PRICE = 32       # €0.32
+MAX_PRICE = 70       # €0.70
 
 MIN_LIVE_LISTINGS = 5
 
@@ -62,8 +49,6 @@ MIN_LIVE_LISTINGS = 5
 # ============================================================
 # BOT
 # ============================================================
-
-LISTING_DURATION = 7 * 24 * 60 * 60
 
 REQUEST_DELAY = float(
     os.getenv(
@@ -74,8 +59,15 @@ REQUEST_DELAY = float(
 
 TIMEOUT = 30
 
+SCAN_DELAY = int(
+    os.getenv(
+        "SCAN_DELAY",
+        "15",
+    )
+)
+
 BOT_VERSION = (
-    "35.0-EUR-CENTS-SOLANA-OFFICIAL-PREPARE-FIX"
+    "36.0-EUR-CENTS-SOLANA-PREPARE-SCHEMA-FIX"
 )
 
 
@@ -117,7 +109,7 @@ FLOOR_CACHE_SECONDS = 60
 
 
 # ============================================================
-# HTTP SESSION
+# HTTP
 # ============================================================
 
 session = requests.Session()
@@ -136,15 +128,29 @@ session.headers.update({
 # ============================================================
 
 def norm(value):
-    return str(
-        value or ""
-    ).strip().lower()
+    return str(value or "").strip().lower()
+
+
+def eur(cents):
+
+    if cents is None:
+        return "N/D"
+
+    try:
+        cents = int(cents)
+    except Exception:
+        return "N/D"
+
+    return f"€{cents / 100:.2f}"
 
 
 def label(card):
 
     parts = [
         card.get("name")
+        or (
+            card.get("anyPlayer") or {}
+        ).get("displayName")
         or card.get("slug")
         or "Carta"
     ]
@@ -167,19 +173,6 @@ def label(card):
     return " • ".join(parts)
 
 
-def eur(cents):
-
-    if cents is None:
-        return "N/D"
-
-    try:
-        cents = int(cents)
-    except Exception:
-        return "N/D"
-
-    return f"€{cents / 100:.2f}"
-
-
 def sleep_request_delay():
 
     if REQUEST_DELAY > 0:
@@ -193,6 +186,7 @@ def sleep_request_delay():
 def headers():
 
     if not TOKEN:
+
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato"
         )
@@ -259,7 +253,6 @@ def graphql(
                 flush=True,
             )
 
-
             # ------------------------------------------------
             # RATE LIMIT
             # ------------------------------------------------
@@ -273,23 +266,18 @@ def graphql(
                 )
 
                 try:
-
                     wait = int(
                         retry_after
                     )
-
                 except Exception:
-
-                    wait = (
-                        3 * (attempt + 1)
+                    wait = 3 * (
+                        attempt + 1
                     )
-
 
                 wait = min(
                     max(wait, 2),
                     30,
                 )
-
 
                 print(
                     f"⏳ Rate limit "
@@ -300,7 +288,6 @@ def graphql(
                 time.sleep(wait)
 
                 continue
-
 
             # ------------------------------------------------
             # HTTP ERROR
@@ -322,7 +309,6 @@ def graphql(
                 )
 
                 continue
-
 
             # ------------------------------------------------
             # JSON
@@ -349,9 +335,8 @@ def graphql(
 
                 continue
 
-
             # ------------------------------------------------
-            # GRAPHQL ERRORS
+            # GRAPHQL ERROR
             # ------------------------------------------------
 
             if data.get("errors"):
@@ -365,9 +350,7 @@ def graphql(
                     flush=True,
                 )
 
-
             return data
-
 
         except Exception as exc:
 
@@ -383,7 +366,6 @@ def graphql(
                 )
             )
 
-
     return None
 
 
@@ -396,26 +378,20 @@ def check_account():
     data = graphql(
         """
         query CurrentUser {
-
             currentUser {
-
                 slug
                 nickname
                 starkKey
-
             }
-
         }
         """,
         operation_name="CurrentUser",
     )
 
-
     user = (
         ((data or {}).get("data") or {})
         .get("currentUser")
     )
-
 
     if not user:
 
@@ -426,7 +402,6 @@ def check_account():
 
         return False
 
-
     print(
         "✅ Account: "
         + str(
@@ -435,7 +410,6 @@ def check_account():
         ),
         flush=True,
     )
-
 
     print(
         "🔐 Stark key account: "
@@ -446,7 +420,6 @@ def check_account():
         ),
         flush=True,
     )
-
 
     return True
 
@@ -460,13 +433,10 @@ def get_gallery():
     cards = []
 
     after = None
-
     page_number = 0
 
     total = 0
-
     sealed = 0
-
 
     while True:
 
@@ -477,7 +447,6 @@ def get_gallery():
             f"{page_number}...",
             flush=True,
         )
-
 
         data = graphql(
             """
@@ -507,32 +476,22 @@ def get_gallery():
                             sealed
 
                             anyPlayer {
-
                                 slug
                                 displayName
-
                             }
 
                             liveSingleSaleOffer {
-
                                 id
                                 status
-
                             }
-
                         }
 
                         pageInfo {
-
                             hasNextPage
                             endCursor
-
                         }
-
                     }
-
                 }
-
             }
             """,
             {
@@ -542,16 +501,13 @@ def get_gallery():
             operation_name="Gallery",
         )
 
-
         if not data:
 
             return None
 
-
         if data.get("errors"):
 
             return None
-
 
         result = (
             ((data.get("data") or {})
@@ -560,12 +516,10 @@ def get_gallery():
             or {}
         )
 
-
         nodes = (
             result.get("nodes")
             or []
         )
-
 
         print(
             f"📄 Gallery page "
@@ -574,9 +528,7 @@ def get_gallery():
             flush=True,
         )
 
-
         total += len(nodes)
-
 
         for card in nodes:
 
@@ -588,27 +540,22 @@ def get_gallery():
 
                 cards.append(card)
 
-
         page = (
             result.get("pageInfo")
             or {}
         )
-
 
         if not page.get(
             "hasNextPage"
         ):
             break
 
-
         after = page.get(
             "endCursor"
         )
 
-
         if not after:
             break
-
 
     # --------------------------------------------------------
     # SOLO LIMITED
@@ -622,14 +569,12 @@ def get_gallery():
         ) == "limited"
     ]
 
-
     print(
         f"📦 Gallery totale: {total} | "
         f"🔒 Vault: {sealed} | "
         f"🏆 Limited: {len(cards)}",
         flush=True,
     )
-
 
     return cards
 
@@ -649,20 +594,16 @@ def get_lineup():
                 blockchainCardsInLineups(
                     sport:FOOTBALL
                 )
-
             }
-
         }
         """,
         operation_name="CurrentLineup",
     )
 
-
     if not data or data.get(
         "errors"
     ):
         return None
-
 
     value = (
         ((data.get("data") or {})
@@ -670,13 +611,11 @@ def get_lineup():
         .get("blockchainCardsInLineups")
     )
 
-
     if not isinstance(
         value,
         list,
     ):
         return None
-
 
     return {
         norm(item)
@@ -693,7 +632,6 @@ def identifiers(card):
 
     result = set()
 
-
     asset_id = norm(
         card.get("assetId")
     )
@@ -702,14 +640,11 @@ def identifiers(card):
         card.get("slug")
     )
 
-
     if asset_id:
         result.add(asset_id)
 
-
     if slug:
         result.add(slug)
-
 
     return result
 
@@ -718,7 +653,6 @@ def in_lineup(card, lineup):
 
     if lineup is None:
         return None
-
 
     return bool(
         identifiers(card)
@@ -737,12 +671,10 @@ def is_kulenovic(card):
         norm(KASSET),
     }
 
-
     if KID:
         wanted.add(
             norm(KID)
         )
-
 
     return bool(
         identifiers(card)
@@ -751,7 +683,7 @@ def is_kulenovic(card):
 
 
 # ============================================================
-# USD / EUR
+# USD -> EUR
 # ============================================================
 
 usd_rate = None
@@ -763,9 +695,7 @@ def usd_eur():
     global usd_rate
     global usd_time
 
-
     now = time.time()
-
 
     if (
         usd_rate
@@ -773,7 +703,6 @@ def usd_eur():
         now - usd_time < 300
     ):
         return usd_rate
-
 
     try:
 
@@ -786,26 +715,20 @@ def usd_eur():
             timeout=10,
         )
 
-
         if response.status_code != 200:
             return None
-
 
         rate = float(
             response.json()["rates"]["EUR"]
         )
 
-
         if rate <= 0:
             return None
-
 
         usd_rate = rate
         usd_time = now
 
-
         return rate
-
 
     except Exception:
 
@@ -820,9 +743,8 @@ def price_eur(amounts):
     ):
         return None
 
-
     # --------------------------------------------------------
-    # EUR NATIVO
+    # EUR
     # --------------------------------------------------------
 
     try:
@@ -833,16 +755,14 @@ def price_eur(amounts):
             )
         )
 
-
         if value > 0:
             return value
 
     except Exception:
         pass
 
-
     # --------------------------------------------------------
-    # USD FALLBACK
+    # USD
     # --------------------------------------------------------
 
     try:
@@ -857,17 +777,13 @@ def price_eur(amounts):
 
         usd_cents = 0
 
-
     if usd_cents <= 0:
         return None
 
-
     rate = usd_eur()
-
 
     if not rate:
         return None
-
 
     return int(
         round(
@@ -887,16 +803,13 @@ def live_floor(card):
         or {}
     )
 
-
     player_slug = norm(
         player.get("slug")
     )
 
-
     rarity = norm(
         card.get("rarityTyped")
     )
-
 
     try:
 
@@ -908,14 +821,11 @@ def live_floor(card):
 
         return None
 
-
     if not player_slug:
         return None
 
-
     if rarity != "limited":
         return None
-
 
     cache_key = (
         player_slug,
@@ -923,14 +833,11 @@ def live_floor(card):
         rarity,
     )
 
-
     now = time.time()
-
 
     cached = floor_cache.get(
         cache_key
     )
-
 
     if cached:
 
@@ -951,7 +858,6 @@ def live_floor(card):
                 )
 
             return cached_floor
-
 
     data = graphql(
         """
@@ -980,9 +886,7 @@ def live_floor(card):
                                 anyPlayer {
                                     slug
                                 }
-
                             }
-
                         }
 
                         receiverSide {
@@ -993,17 +897,11 @@ def live_floor(card):
                                 usdCents
                                 referenceCurrency
                                 wei
-
                             }
-
                         }
-
                     }
-
                 }
-
             }
-
         }
         """,
         {
@@ -1012,7 +910,6 @@ def live_floor(card):
         },
         operation_name="LiveFloor",
     )
-
 
     if not data or data.get(
         "errors"
@@ -1027,7 +924,6 @@ def live_floor(card):
 
         return None
 
-
     offers = (
         (((data.get("data") or {})
           .get("tokens") or {})
@@ -1037,9 +933,7 @@ def live_floor(card):
         or []
     )
 
-
     prices = []
-
 
     for offer in offers:
 
@@ -1050,14 +944,12 @@ def live_floor(card):
             or {}
         )
 
-
         market_cards = (
             sender_side.get(
                 "anyCards"
             )
             or []
         )
-
 
         for market_card in market_cards:
 
@@ -1067,7 +959,6 @@ def live_floor(card):
                 )
                 or {}
             )
-
 
             try:
 
@@ -1080,7 +971,6 @@ def live_floor(card):
             except Exception:
 
                 continue
-
 
             same_card = (
                 norm(
@@ -1104,10 +994,8 @@ def live_floor(card):
                 market_season == season
             )
 
-
             if not same_card:
                 continue
-
 
             amounts = (
                 (
@@ -1122,21 +1010,14 @@ def live_floor(card):
                 or {}
             )
 
-
             price = price_eur(
                 amounts
             )
 
-
             if price is not None:
-
-                prices.append(
-                    price
-                )
-
+                prices.append(price)
 
             break
-
 
     if len(prices) < MIN_LIVE_LISTINGS:
 
@@ -1158,9 +1039,7 @@ def live_floor(card):
 
         return None
 
-
     floor = min(prices)
-
 
     floor_cache[
         cache_key
@@ -1169,14 +1048,12 @@ def live_floor(card):
         floor,
     )
 
-
     print(
         f"📊 {label(card)} → "
         f"{len(prices)} listing | "
         f"FLOOR {eur(floor)}",
         flush=True,
     )
-
 
     return floor
 
@@ -1187,10 +1064,6 @@ def live_floor(card):
 
 def validate(card, lineup):
 
-    # --------------------------------------------------------
-    # VAULT
-    # --------------------------------------------------------
-
     if card.get("sealed"):
 
         return (
@@ -1199,11 +1072,6 @@ def validate(card, lineup):
             None,
         )
 
-
-    # --------------------------------------------------------
-    # KULENOVIC
-    # --------------------------------------------------------
-
     if is_kulenovic(card):
 
         return (
@@ -1211,11 +1079,6 @@ def validate(card, lineup):
             "KULENOVIC",
             None,
         )
-
-
-    # --------------------------------------------------------
-    # RARITY
-    # --------------------------------------------------------
 
     if norm(
         card.get("rarityTyped")
@@ -1227,16 +1090,10 @@ def validate(card, lineup):
             None,
         )
 
-
-    # --------------------------------------------------------
-    # LINEUP
-    # --------------------------------------------------------
-
     lineup_state = in_lineup(
         card,
         lineup,
     )
-
 
     if lineup_state is None:
 
@@ -1246,7 +1103,6 @@ def validate(card, lineup):
             None,
         )
 
-
     if lineup_state:
 
         return (
@@ -1255,13 +1111,7 @@ def validate(card, lineup):
             None,
         )
 
-
-    # --------------------------------------------------------
-    # FLOOR
-    # --------------------------------------------------------
-
     floor = live_floor(card)
-
 
     if floor is None:
 
@@ -1271,11 +1121,6 @@ def validate(card, lineup):
             None,
         )
 
-
-    # --------------------------------------------------------
-    # MIN
-    # --------------------------------------------------------
-
     if floor < MIN_PRICE:
 
         return (
@@ -1284,11 +1129,6 @@ def validate(card, lineup):
             floor,
         )
 
-
-    # --------------------------------------------------------
-    # MAX
-    # --------------------------------------------------------
-
     if floor > MAX_PRICE:
 
         return (
@@ -1296,7 +1136,6 @@ def validate(card, lineup):
             "PRICE_HIGH",
             floor,
         )
-
 
     return (
         True,
@@ -1336,7 +1175,6 @@ def reject(
             "PREZZO LIVE NON VERIFICABILE",
     }
 
-
     if reason == "PRICE_LOW":
 
         msg = (
@@ -1344,7 +1182,6 @@ def reject(
             f"SOTTO IL MINIMO "
             f"({eur(MIN_PRICE)})"
         )
-
 
     elif reason == "PRICE_HIGH":
 
@@ -1354,14 +1191,12 @@ def reject(
             f"({eur(MAX_PRICE)})"
         )
 
-
     else:
 
         msg = messages.get(
             reason,
             reason,
         )
-
 
     print(
         f"🚫 {label(card)} "
@@ -1381,7 +1216,6 @@ def node():
         "",
     ).strip()
 
-
     if configured:
 
         if (
@@ -1395,7 +1229,6 @@ def node():
 
             return configured
 
-
     for directory in os.getenv(
         "PATH",
         "",
@@ -1404,12 +1237,10 @@ def node():
         if not directory:
             continue
 
-
         executable = os.path.join(
             directory,
             "node",
         )
-
 
         if (
             os.path.isfile(executable)
@@ -1421,7 +1252,6 @@ def node():
         ):
 
             return executable
-
 
     return None
 
@@ -1436,13 +1266,11 @@ def sign_starkex(
 
     executable = node()
 
-
     if not executable:
 
         raise RuntimeError(
             "Node.js non disponibile"
         )
-
 
     if not PRIVATE_KEY:
 
@@ -1451,7 +1279,6 @@ def sign_starkex(
             "non configurata"
         )
 
-
     request = (
         authorization.get(
             "request"
@@ -1459,11 +1286,9 @@ def sign_starkex(
         or {}
     )
 
-
     typename = request.get(
         "__typename"
     )
-
 
     if typename != (
         "StarkexTransferAuthorizationRequest"
@@ -1475,7 +1300,6 @@ def sign_starkex(
             + str(typename)
         )
 
-
     required = [
         "amount",
         "expirationTimestamp",
@@ -1486,13 +1310,11 @@ def sign_starkex(
         "token",
     ]
 
-
     missing = [
         field
         for field in required
         if request.get(field) is None
     ]
-
 
     if missing:
 
@@ -1502,7 +1324,6 @@ def sign_starkex(
             + ", ".join(missing)
         )
 
-
     payload = {
         "authorization":
             authorization,
@@ -1510,14 +1331,12 @@ def sign_starkex(
             PRIVATE_KEY,
     }
 
-
     script = r"""
 const fs = require("fs");
 
 const {
   signAuthorizationRequest
 } = require("@sorare/crypto");
-
 
 async function main() {
 
@@ -1535,6 +1354,7 @@ async function main() {
     request.__typename !==
     "StarkexTransferAuthorizationRequest"
   ) {
+
     throw new Error(
       "Authorization non StarkEx: "
       + request.__typename
@@ -1572,7 +1392,6 @@ async function main() {
   );
 }
 
-
 main().catch(error => {
 
   console.error(
@@ -1585,7 +1404,6 @@ main().catch(error => {
 
 });
 """
-
 
     process = subprocess.run(
         [
@@ -1601,7 +1419,6 @@ main().catch(error => {
         timeout=60,
     )
 
-
     if process.stderr:
 
         print(
@@ -1609,14 +1426,12 @@ main().catch(error => {
             flush=True,
         )
 
-
     if process.returncode != 0:
 
         raise RuntimeError(
             process.stderr.strip()
             or "Firma StarkEx fallita"
         )
-
 
     try:
 
@@ -1630,36 +1445,11 @@ main().catch(error => {
             "Output firma StarkEx "
             "non valido: "
             + str(exc)
-            + " | OUTPUT="
-            + process.stdout[:1000]
         )
 
 
 # ============================================================
 # SOLANA SIGN
-#
-# IMPLEMENTAZIONE BASATA SULL'ESEMPIO UFFICIALE SORARE.
-#
-# SLIP-0010
-# m/44'/501'/0'/0'
-#
-# Messaggio:
-#
-# TRANSFER:
-# transferProxyProgramAddress:
-# merkleTreeAddress:
-# leafIndex:
-# nonce:
-# expirationTimestamp:
-# receiverAddress:
-# 0x:
-# originator
-#
-# SHA-256 del messaggio
-# ↓
-# Ed25519
-# ↓
-# Base58
 # ============================================================
 
 def sign_solana(
@@ -1668,13 +1458,11 @@ def sign_solana(
 
     executable = node()
 
-
     if not executable:
 
         raise RuntimeError(
             "Node.js non disponibile"
         )
-
 
     if not PRIVATE_KEY:
 
@@ -1683,7 +1471,6 @@ def sign_solana(
             "non configurata"
         )
 
-
     request = (
         authorization.get(
             "request"
@@ -1691,11 +1478,9 @@ def sign_solana(
         or {}
     )
 
-
     typename = request.get(
         "__typename"
     )
-
 
     if typename != (
         "SolanaTokenTransferAuthorizationRequest"
@@ -1705,7 +1490,6 @@ def sign_solana(
             "Authorization non Solana: "
             + str(typename)
         )
-
 
     required = [
 
@@ -1720,13 +1504,11 @@ def sign_solana(
 
     ]
 
-
     missing = [
         field
         for field in required
         if request.get(field) is None
     ]
-
 
     if missing:
 
@@ -1736,17 +1518,12 @@ def sign_solana(
             + ", ".join(missing)
         )
 
-
     payload = {
-
         "authorization":
             authorization,
-
         "privateKey":
             PRIVATE_KEY,
-
     }
-
 
     script = r"""
 const fs = require("fs");
@@ -1760,9 +1537,7 @@ const {
 
 const {
   HDKey
-} = require(
-  "micro-key-producer/slip10.js"
-);
+} = require("micro-key-producer/slip10.js");
 
 
 const DERIVATION_PATH =
@@ -1775,30 +1550,15 @@ async function main() {
     fs.readFileSync(0, "utf8")
   );
 
-
   const authorization =
     input.authorization;
-
 
   const request =
     authorization.request;
 
 
-  if (
-    request.__typename !==
-    "SolanaTokenTransferAuthorizationRequest"
-  ) {
-
-    throw new Error(
-      "Authorization non Solana: "
-      + request.__typename
-    );
-
-  }
-
-
   // --------------------------------------------------------
-  // PRIVATE KEY SORARE
+  // PRIVATE KEY
   // --------------------------------------------------------
 
   const privateKeyHex =
@@ -1815,7 +1575,7 @@ async function main() {
 
     throw new Error(
       "SORARE_STARK_PRIVATE_KEY "
-      + "non è una chiave esadecimale valida"
+      + "non è HEX valido"
     );
 
   }
@@ -1912,9 +1672,7 @@ async function main() {
 
 
   // --------------------------------------------------------
-  // CONTROLLO CRITICO
-  //
-  // Se non coincidono NON firmiamo.
+  // CRITICAL SECURITY CHECK
   // --------------------------------------------------------
 
   if (
@@ -1933,11 +1691,7 @@ async function main() {
 
 
   // --------------------------------------------------------
-  // MESSAGGIO UFFICIALE SORARE
-  //
-  // assetId NON va incluso.
-  // senderAddress NON va incluso.
-  // "0x" è letterale.
+  // OFFICIAL SORARE MESSAGE
   // --------------------------------------------------------
 
   const message = [
@@ -2001,7 +1755,7 @@ async function main() {
 
 
   // --------------------------------------------------------
-  // SIGN
+  // ED25519 SIGN
   // --------------------------------------------------------
 
   const signableMessage =
@@ -2071,7 +1825,6 @@ main().catch(error => {
 });
 """
 
-
     process = subprocess.run(
         [
             executable,
@@ -2086,7 +1839,6 @@ main().catch(error => {
         timeout=60,
     )
 
-
     if process.stderr:
 
         print(
@@ -2094,14 +1846,12 @@ main().catch(error => {
             flush=True,
         )
 
-
     if process.returncode != 0:
 
         raise RuntimeError(
             process.stderr.strip()
             or "Firma Solana fallita"
         )
-
 
     try:
 
@@ -2115,8 +1865,6 @@ main().catch(error => {
             "Output firma Solana "
             "non valido: "
             + str(exc)
-            + " | OUTPUT="
-            + process.stdout[:1000]
         )
 
 
@@ -2138,13 +1886,15 @@ def prepare_offer(
 
 
     # ========================================================
-    # IMPORTANTE
+    # IMPORTANTISSIMO
     #
-    # NEL TUO SCHEMA ATTUALE:
+    # IL TUO ENDPOINT HA RISPOSTO:
     #
-    # "type" NON È ACCETTATO.
+    # Field is not defined on prepareOfferInput
     #
-    # Quindi NON lo inviamo.
+    # per "type".
+    #
+    # Quindi la prima richiesta NON usa type.
     # ========================================================
 
     input_data = {
@@ -2166,12 +1916,10 @@ def prepare_offer(
 
             "currency":
                 "EUR",
-
         },
 
         "clientMutationId":
             str(uuid.uuid4()),
-
     }
 
 
@@ -2228,7 +1976,6 @@ def prepare_offer(
                             senderVaultId
 
                             token
-
                         }
 
 
@@ -2251,21 +1998,14 @@ def prepare_offer(
                             senderAddress
 
                             transferProxyProgramAddress
-
                         }
-
                     }
-
                 }
 
                 errors {
-
                     message
-
                 }
-
             }
-
         }
     """
 
@@ -2415,7 +2155,7 @@ def prepare_offer(
 
 
 # ============================================================
-# CREATE OFFER
+# CREATE SINGLE SALE OFFER
 # ============================================================
 
 def create_offer(
@@ -2425,14 +2165,9 @@ def create_offer(
 ):
 
     # ========================================================
-    # COME DA SCHEMA CREATE SINGLE SALE
+    # CURRENT createSingleSaleOfferInput
     #
-    # approvals
-    # dealId
-    # assetId
-    # settlementCurrencies
-    # receiveAmount
-    # clientMutationId
+    # Non inviamo settlementCurrencies.
     # ========================================================
 
     input_data = {
@@ -2446,10 +2181,6 @@ def create_offer(
         "assetId":
             asset_id,
 
-        "settlementCurrencies": [
-            "EUR"
-        ],
-
         "receiveAmount": {
 
             "amount":
@@ -2457,18 +2188,16 @@ def create_offer(
 
             "currency":
                 "EUR",
-
         },
 
         "clientMutationId":
             str(uuid.uuid4()),
-
     }
 
 
     print(
-        "📤 createSingleSaleOffer payload "
-        "(firma esclusa nei log)",
+        "📤 createSingleSaleOffer "
+        "→ invio offerta",
         flush=True,
     )
 
@@ -2488,17 +2217,13 @@ def create_offer(
                     id
                     startDate
                     endDate
-
                 }
 
                 errors {
 
                     message
-
                 }
-
             }
-
         }
         """,
         {
@@ -2825,10 +2550,6 @@ def worker():
                 continue
 
 
-            # ------------------------------------------------
-            # SUMMARY
-            # ------------------------------------------------
-
             print(
                 f"🔎 Carte da analizzare: "
                 f"{len(cards)}",
@@ -2837,6 +2558,8 @@ def worker():
 
 
             sell_candidates = 0
+            already_listed = 0
+            rejected = 0
 
 
             # ------------------------------------------------
@@ -2855,6 +2578,8 @@ def worker():
                         "liveSingleSaleOffer"
                     ):
 
+                        already_listed += 1
+
                         print(
                             f"⏭️ {label(card)} "
                             f"→ GIÀ IN VENDITA",
@@ -2865,7 +2590,7 @@ def worker():
 
 
                     # ----------------------------------------
-                    # VALIDAZIONE
+                    # VALIDATION
                     # ----------------------------------------
 
                     ok, reason, price = validate(
@@ -2875,6 +2600,8 @@ def worker():
 
 
                     if not ok:
+
+                        rejected += 1
 
                         reject(
                             card,
@@ -2886,7 +2613,7 @@ def worker():
 
 
                     # ----------------------------------------
-                    # VENDIBILE
+                    # SELLABLE
                     # ----------------------------------------
 
                     sell_candidates += 1
@@ -2910,7 +2637,6 @@ def worker():
                             card,
                             price,
                         )
-
 
                     except Exception as exc:
 
@@ -2943,8 +2669,31 @@ def worker():
             )
 
             print(
-                f"🏁 SCANSIONE COMPLETATA "
-                f"| candidate={sell_candidates}",
+                f"🏁 SCANSIONE COMPLETATA",
+                flush=True,
+            )
+
+            print(
+                f"📦 Limited analizzate: "
+                f"{len(cards)}",
+                flush=True,
+            )
+
+            print(
+                f"⏭️ Già in vendita: "
+                f"{already_listed}",
+                flush=True,
+            )
+
+            print(
+                f"🚫 Rifiutate: "
+                f"{rejected}",
+                flush=True,
+            )
+
+            print(
+                f"💰 Candidate vendita: "
+                f"{sell_candidates}",
                 flush=True,
             )
 
@@ -2963,7 +2712,7 @@ def worker():
 
 
         time.sleep(
-            15
+            SCAN_DELAY
         )
 
 
