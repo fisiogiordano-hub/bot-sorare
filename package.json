@@ -4,6 +4,6 @@
 "dependencies": {
 "@sorare/crypto": "3.0.1",
 "@solana/kit": "5.0.0",
-"micro-key-producer": "1.2.0"
+"micro-key-producer": "0.10.0"
 }
 }
