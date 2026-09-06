@@ -9,8 +9,6 @@ import re
 import requests
 from flask import Flask, jsonify
 
-import autosell
-
 app = Flask(__name__)
 
 URL = "https://api.sorare.com/graphql"
