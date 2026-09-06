@@ -40,15 +40,10 @@ DRY_RUN = (
 # PREZZI
 # ============================================================
 #
-# ATTENZIONE:
-#
 # Sorare usa i CENTESIMI per EUR.
 #
 # 32 = €0,32
 # 70 = €0,70
-#
-# NON:
-# 32 = €32
 #
 # ============================================================
 
@@ -67,7 +62,7 @@ LISTING_DURATION = 7 * 24 * 60 * 60
 INTERVAL = 15
 TIMEOUT = 30
 
-BOT_VERSION = "31.0-EUR-CENTS-STARKEX-SOLANA"
+BOT_VERSION = "31.1-EUR-CENTS-PREPARE-FIX"
 
 
 # ============================================================
@@ -210,6 +205,7 @@ def graphql(query, variables=None):
             if response.status_code == 429:
 
                 try:
+
                     wait = min(
                         int(
                             response.headers.get(
@@ -221,7 +217,9 @@ def graphql(query, variables=None):
                     )
 
                 except Exception:
+
                     wait = attempt + 2
+
 
                 print(
                     f"⏳ Rate limit: "
@@ -328,10 +326,12 @@ def check_account():
         """
     )
 
+
     user = (
         ((data or {}).get("data") or {})
         .get("currentUser")
     )
+
 
     if not user:
 
@@ -380,6 +380,7 @@ def get_gallery():
     total = 0
     sealed = 0
 
+
     while True:
 
         data = graphql(
@@ -388,13 +389,16 @@ def get_gallery():
                 $first:Int,
                 $after:String
             ){
+
                 currentUser {
+
                     cards(
                         first:$first,
                         after:$after,
                         ownedByMe:true,
                         sport:FOOTBALL
                     ) {
+
                         nodes {
 
                             assetId
@@ -407,17 +411,20 @@ def get_gallery():
                             sealed
 
                             anyPlayer {
+
                                 slug
                                 displayName
                             }
 
                             liveSingleSaleOffer {
+
                                 id
                                 status
                             }
                         }
 
                         pageInfo {
+
                             hasNextPage
                             endCursor
                         }
@@ -517,7 +524,9 @@ def get_lineup():
     data = graphql(
         """
         query {
+
             currentUser {
+
                 blockchainCardsInLineups(
                     sport:FOOTBALL
                 )
@@ -696,6 +705,7 @@ def price_eur(amounts):
         if value > 0:
             return value
 
+
     except Exception:
         pass
 
@@ -801,6 +811,7 @@ def live_floor(card):
                                 seasonYear
 
                                 anyPlayer {
+
                                     slug
                                 }
                             }
@@ -1066,8 +1077,6 @@ def validate(card, lineup):
 
     # --------------------------------------------------------
     # PREZZO MINIMO
-    #
-    # 32 = €0,32
     # --------------------------------------------------------
 
     if floor < MIN_PRICE:
@@ -1081,8 +1090,6 @@ def validate(card, lineup):
 
     # --------------------------------------------------------
     # PREZZO MASSIMO
-    #
-    # 70 = €0,70
     # --------------------------------------------------------
 
     if floor > MAX_PRICE:
@@ -1276,15 +1283,6 @@ def sign_starkex(
         )
 
 
-    # --------------------------------------------------------
-    # IMPORTANTISSIMO:
-    #
-    # amount arriva da GraphQL come stringa.
-    #
-    # @sorare/crypto richiede BigInt.
-    #
-    # --------------------------------------------------------
-
     payload = {
         "authorization": authorization,
         "privateKey": PRIVATE_KEY,
@@ -1326,14 +1324,6 @@ async function main() {
 
   }
 
-
-  /*
-   * GraphQL restituisce amount
-   * come stringa.
-   *
-   * @sorare/crypto deve riceverlo
-   * come BigInt.
-   */
 
   request.amount =
     BigInt(request.amount);
@@ -1564,18 +1554,6 @@ async function main() {
   }
 
 
-  /*
-   * Sorare:
-   *
-   * Ethereum/Sorare private key
-   *          ↓
-   * SLIP-0010
-   *          ↓
-   * m/44'/501'/0'/0'
-   *          ↓
-   * Solana key
-   */
-
   const privateKeyHex =
     input.privateKey
       .replace(/^0x/i, "");
@@ -1618,13 +1596,6 @@ async function main() {
       keyPair
     );
 
-
-  /*
-   * Messaggio ufficiale Sorare.
-   *
-   * NON aggiungere assetId.
-   * NON aggiungere senderAddress.
-   */
 
   const message = [
 
@@ -1801,17 +1772,17 @@ def prepare_offer(
 
 
     # --------------------------------------------------------
-    # 32 = €0,32
-    # 70 = €0,70
+    # CORREZIONE:
     #
-    # amount è SEMPRE nella denominazione minima
-    # della valuta.
+    # prepareOfferInput NON accetta il campo "type".
+    #
+    # NON aggiungere:
+    #
+    # "type": "SINGLE_SALE_OFFER"
+    #
     # --------------------------------------------------------
 
     input_data = {
-
-        "type":
-            "SINGLE_SALE_OFFER",
 
         "sendAssetIds": [
             asset_id
@@ -1836,19 +1807,6 @@ def prepare_offer(
             str(uuid.uuid4()),
     }
 
-
-    # ========================================================
-    # IMPORTANTE
-    #
-    # amount, NON amountAsNumber
-    #
-    # La precedente query produceva:
-    #
-    # Field 'amountAsNumber' doesn't exist
-    #
-    # perché amountAsNumber non è un campo dello schema.
-    #
-    # ========================================================
 
     query = """
         mutation(
@@ -1926,6 +1884,7 @@ def prepare_offer(
 
 
                 errors {
+
                     message
                 }
             }
@@ -2143,6 +2102,7 @@ def create_offer(
                 }
 
                 errors {
+
                     message
                 }
             }
