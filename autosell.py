@@ -41,7 +41,7 @@ REQUEST_DELAY = float(
 
 TIMEOUT = 30
 
-BOT_VERSION = "38.0-EUR-CENTS-SOLANA-FIX"
+BOT_VERSION = "38.1-SOLANA-0X-FIX"
 
 
 # ============================================================
@@ -1121,11 +1121,19 @@ main().catch(error => {
 # ============================================================
 # SOLANA
 #
-# NON BYPASSA senderAddress.
+# FIX:
+# SORARE_STARK_PRIVATE_KEY viene accettata nel formato:
 #
-# Prova i path compatibili e utilizza SOLO quello
-# che genera esattamente il senderAddress restituito
-# da Sorare.
+#     0xABCDEF....
+#
+# La chiave viene interpretata come HEX.
+#
+# NON vengono più provati path HD casuali.
+# La chiave viene usata direttamente come chiave
+# Solana ed25519.
+#
+# Il senderAddress restituito da Sorare viene verificato
+# prima della firma.
 # ============================================================
 
 def sign_solana(authorization):
@@ -1189,55 +1197,10 @@ def sign_solana(authorization):
 const fs = require("fs");
 
 const {
-  createKeyPairFromPrivateKeyBytes,
-  createSignerFromKeyPair,
+  createKeyPairSignerFromPrivateKeyBytes,
   createSignableMessage,
   getBase58Decoder
 } = require("@solana/kit");
-
-const {
-  HDKey
-} = require("micro-key-producer/slip10.js");
-
-
-const PATHS = [
-  "m/44'/501'/0'/0'",
-  "m/44'/501'/0'",
-  "m/501'/0'/0'/0'",
-  "m/501'/0'/0'"
-];
-
-
-async function derive(seed, path) {
-
-  const derived =
-    HDKey
-      .fromMasterSeed(seed)
-      .derive(path);
-
-  if (!derived.privateKey) {
-    throw new Error(
-      "Derivazione senza private key: "
-      + path
-    );
-  }
-
-  const keyPair =
-    await createKeyPairFromPrivateKeyBytes(
-      derived.privateKey
-    );
-
-  const signer =
-    await createSignerFromKeyPair(
-      keyPair
-    );
-
-  return {
-    path,
-    address: signer.address,
-    signer
-  };
-}
 
 
 async function main() {
@@ -1252,47 +1215,124 @@ async function main() {
   const request =
     authorization.request;
 
-  const privateKeyHex =
-    String(input.privateKey)
-      .replace(/^0x/i, "")
+
+  // ========================================================
+  // PRIVATE KEY
+  // ========================================================
+
+  let privateKey =
+    String(input.privateKey || "")
       .trim();
 
 
-  if (!/^[0-9a-fA-F]+$/.test(
-    privateKeyHex
-  )) {
+  /*
+   * La variabile Sorare può essere:
+   *
+   * 0xABCDEF...
+   *
+   * oppure:
+   *
+   * ABCDEF...
+   *
+   * Rimuoviamo esclusivamente il prefisso 0x.
+   */
+
+  privateKey =
+    privateKey.replace(/^0x/i, "");
+
+
+  if (!privateKey) {
+
     throw new Error(
-      "SORARE_STARK_PRIVATE_KEY "
-      + "non è HEX valida"
+      "SORARE_STARK_PRIVATE_KEY vuota"
     );
+
   }
 
 
-  if (
-    privateKeyHex.length % 2 !== 0
-  ) {
+  if (!/^[0-9a-fA-F]+$/.test(privateKey)) {
+
+    throw new Error(
+      "SORARE_STARK_PRIVATE_KEY "
+      + "non è una chiave HEX valida"
+    );
+
+  }
+
+
+  if (privateKey.length % 2 !== 0) {
+
     throw new Error(
       "SORARE_STARK_PRIVATE_KEY "
       + "ha lunghezza HEX dispari"
     );
+
   }
 
 
-  const seed =
-    Buffer.from(
-      privateKeyHex,
-      "hex"
+  const keyBytes =
+    new Uint8Array(
+      Buffer.from(
+        privateKey,
+        "hex"
+      )
     );
 
 
-  if (!seed.length) {
+  console.error(
+    "🔑 Solana key bytes:",
+    keyBytes.length
+  );
+
+
+  /*
+   * Supportiamo sia:
+   *
+   * 32 byte = seed ed25519
+   *
+   * 64 byte = secret key Solana
+   *
+   * Nel caso 64 byte utilizziamo i primi
+   * 32 byte, che rappresentano il seed.
+   */
+
+  let seed;
+
+  if (keyBytes.length === 32) {
+
+    seed = keyBytes;
+
+  } else if (keyBytes.length === 64) {
+
+    seed = keyBytes.slice(0, 32);
+
+  } else {
+
     throw new Error(
-      "Private key vuota"
+      "Lunghezza private key Solana non valida: "
+      + keyBytes.length
+      + " byte. "
+      + "Attesi 32 oppure 64 byte."
     );
+
   }
 
 
-  const expected =
+  // ========================================================
+  // CREATE SOLANA SIGNER
+  // ========================================================
+
+  const signer =
+    await createKeyPairSignerFromPrivateKeyBytes(
+      seed
+    );
+
+
+  const derivedAddress =
+    signer.address;
+
+
+  const expectedAddress =
     String(
       request.senderAddress
     ).trim();
@@ -1300,80 +1340,43 @@ async function main() {
 
   console.error(
     "📨 Sorare senderAddress:",
-    expected
+    expectedAddress
+  );
+
+  console.error(
+    "🔑 Derived Solana address:",
+    derivedAddress
   );
 
 
-  let match = null;
+  // ========================================================
+  // CHECK ADDRESS
+  // ========================================================
 
-
-  for (const path of PATHS) {
-
-    try {
-
-      const candidate =
-        await derive(
-          seed,
-          path
-        );
-
-      console.error(
-        "🔎 "
-        + path
-        + " => "
-        + candidate.address
-      );
-
-
-      if (
-        candidate.address === expected
-      ) {
-
-        match = candidate;
-        break;
-
-      }
-
-    } catch (error) {
-
-      console.error(
-        "⚠️ Path fallito "
-        + path
-        + ": "
-        + error.message
-      );
-
-    }
-  }
-
-
-  if (!match) {
+  if (
+    derivedAddress !== expectedAddress
+  ) {
 
     throw new Error(
       "SOLANA PRIVATE KEY NON CORRISPONDE "
       + "AL SENDER SORARE. "
-      + "Nessuno dei path supportati "
-      + "ha prodotto "
-      + expected
+      + "La chiave fornita produce "
+      + derivedAddress
+      + " mentre Sorare richiede "
+      + expectedAddress
     );
+
   }
 
 
   console.error(
-    "✅ Solana path corretto:",
-    match.path
+    "✅ Solana sender verificato"
   );
 
 
-  console.error(
-    "🔑 Derived Solana address:",
-    match.address
-  );
-
-
-  // --------------------------------------------------------
-  // MESSAGGIO SORARE
-  // --------------------------------------------------------
+  // ========================================================
+  // MESSAGE SORARE
+  // ========================================================
 
   const message = [
 
@@ -1404,9 +1407,9 @@ async function main() {
   );
 
 
-  // --------------------------------------------------------
+  // ========================================================
   // SHA-256
-  // --------------------------------------------------------
+  // ========================================================
 
   const messageBytes =
     new TextEncoder().encode(
@@ -1421,9 +1424,9 @@ async function main() {
     );
 
 
-  // --------------------------------------------------------
+  // ========================================================
   // SIGN
-  // --------------------------------------------------------
+  // ========================================================
 
   const signableMessage =
     createSignableMessage(
@@ -1434,7 +1437,7 @@ async function main() {
 
 
   const result =
-    await match.signer.signMessages(
+    await signer.signMessages(
       [signableMessage]
     );
 
@@ -1442,14 +1445,14 @@ async function main() {
   const signatureBytes =
     getBase58Decoder().decode(
       result[0][
-        match.signer.address
+        signer.address
       ]
     );
 
 
-  // --------------------------------------------------------
+  // ========================================================
   // OUTPUT
-  // --------------------------------------------------------
+  // ========================================================
 
   const output = {
 
@@ -1466,13 +1469,16 @@ async function main() {
 
       expirationTimestamp:
         request.expirationTimestamp
+
     }
+
   };
 
 
   process.stdout.write(
     JSON.stringify(output)
   );
+
 }
 
 
@@ -1502,22 +1508,27 @@ main().catch(error => {
     )
 
     if process.stderr:
+
         print(
             process.stderr.strip(),
             flush=True,
         )
 
     if process.returncode != 0:
+
         raise RuntimeError(
             process.stderr.strip()
             or "Firma Solana fallita"
         )
 
     try:
+
         return json.loads(
             process.stdout
         )
+
     except Exception as exc:
+
         raise RuntimeError(
             "Output firma Solana non valido: "
             + str(exc)
