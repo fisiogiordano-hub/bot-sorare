@@ -6,9 +6,8 @@ import shutil
 import subprocess
 import requests
 
-
 # ============================================================
-# AUTOSELL - MODULO COMPLETAMENTE INDIPENDENTE
+# AUTOSELL - MODULO INDIPENDENTE
 # ============================================================
 
 URL = "https://api.sorare.com/graphql"
@@ -17,37 +16,33 @@ TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
-# ------------------------------------------------------------
-# SICUREZZA
-# ------------------------------------------------------------
-
+# IMPORTANTE:
+# true  = simula soltanto
+# false = mette realmente in vendita
 DRY_RUN = os.getenv("AUTOSELL_DRY_RUN", "true").lower() == "true"
 
-INTERVAL = int(
-    os.getenv("AUTOSELL_INTERVAL", "60")
-)
-
+INTERVAL = int(os.getenv("AUTOSELL_INTERVAL", "60"))
 TIMEOUT = 25
 
-# ------------------------------------------------------------
-# PARAMETRI AUTOSELL
-# ------------------------------------------------------------
+# ============================================================
+# REGOLE AUTOSELL
+# ============================================================
 
 MIN_PRICE = 32       # €0.32
 MAX_PRICE = 70       # €0.70
 
-LISTING_DAYS = 7
-
 MIN_LIVE_LISTINGS = 5
 
-# ------------------------------------------------------------
-# KULENOVIC
-# ------------------------------------------------------------
+LISTING_DAYS = 7
 
-KULENOVIC_ID = os.getenv(
-    "KULENOVIC_ID",
-    ""
-).strip()
+# Solo LIMITED
+ALLOWED_RARITY = "LIMITED"
+
+# ============================================================
+# KULENOVIC - PROTEZIONE ASSOLUTA
+# ============================================================
+
+KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -56,13 +51,16 @@ KASSET = (
     "6796b6c0ed10ba0a6"
 )
 
-
 # ============================================================
 # UTILITY
 # ============================================================
 
 def norm(value):
     return str(value or "").strip().lower()
+
+
+def eur(cents):
+    return f"€{cents / 100:.2f}"
 
 
 def card_name(card):
@@ -75,23 +73,16 @@ def card_name(card):
 
 def card_label(card):
     name = card_name(card)
-    asset = card.get("assetId")
+    slug = card.get("slug")
 
-    if asset:
-        return f"{name} [{asset}]"
+    if slug and slug != name:
+        return f"{name} [{slug}]"
 
     return name
 
 
-def eur(cents):
-    if cents is None:
-        return "N/D"
-
-    return f"€{cents / 100:.2f}"
-
-
 # ============================================================
-# AUTENTICAZIONE
+# HTTP / GRAPHQL
 # ============================================================
 
 def headers():
@@ -119,10 +110,6 @@ def headers():
     return result
 
 
-# ============================================================
-# GRAPHQL
-# ============================================================
-
 def graphql(query, variables=None):
 
     payload = {
@@ -148,31 +135,28 @@ def graphql(query, variables=None):
 
             if response.status_code == 429:
 
-                wait = int(
-                    response.headers.get(
-                        "Retry-After",
-                        attempt + 2,
-                    )
+                retry = response.headers.get(
+                    "Retry-After",
+                    str(attempt + 2)
                 )
 
-                time.sleep(
-                    min(wait, 15)
-                )
+                try:
+                    retry = int(retry)
+                except ValueError:
+                    retry = attempt + 2
 
+                time.sleep(min(retry, 15))
                 continue
 
             if response.status_code != 200:
 
                 print(
-                    f"❌ HTTP: "
+                    f"❌ HTTP {response.status_code}: "
                     f"{response.text[:500]}",
                     flush=True,
                 )
 
-                time.sleep(
-                    attempt + 1
-                )
-
+                time.sleep(attempt + 1)
                 continue
 
             data = response.json()
@@ -190,16 +174,14 @@ def graphql(query, variables=None):
 
             return data
 
-        except Exception as error:
+        except Exception as exc:
 
             print(
-                f"❌ GraphQL: {error}",
+                f"❌ GraphQL: {exc}",
                 flush=True,
             )
 
-            time.sleep(
-                attempt + 1
-            )
+            time.sleep(attempt + 1)
 
     return None
 
@@ -227,7 +209,7 @@ def get_account():
 
 
 # ============================================================
-# TUTTE LE CARTE DELLA GALLERY
+# GALLERY
 # ============================================================
 
 def get_cards(cursor=None):
@@ -244,6 +226,7 @@ def get_cards(cursor=None):
                         assetId
                         slug
                         name
+
                         rarityTyped
                         seasonYear
                         serialNumber
@@ -277,10 +260,7 @@ def get_cards(cursor=None):
         or {}
     )
 
-    cards = (
-        user.get("cards")
-        or {}
-    )
+    cards = user.get("cards") or {}
 
     return (
         cards.get("nodes") or [],
@@ -291,15 +271,11 @@ def get_cards(cursor=None):
 def all_cards():
 
     result = []
-
     cursor = None
 
     while True:
 
         cards, page = get_cards(cursor)
-
-        if not cards:
-            break
 
         result.extend(cards)
 
@@ -315,7 +291,7 @@ def all_cards():
 
 
 # ============================================================
-# KULENOVIC - PROTEZIONE ASSOLUTA
+# KULENOVIC
 # ============================================================
 
 def is_kulenovic(card):
@@ -326,14 +302,14 @@ def is_kulenovic(card):
     }
 
     if KULENOVIC_ID:
-        wanted.add(
-            norm(KULENOVIC_ID)
-        )
+        wanted.add(norm(KULENOVIC_ID))
+
+    asset_id = norm(card.get("assetId"))
+    slug = norm(card.get("slug"))
 
     return (
-        norm(card.get("assetId")) in wanted
-        or
-        norm(card.get("slug")) in wanted
+        asset_id in wanted
+        or slug in wanted
     )
 
 
@@ -354,15 +330,94 @@ def already_listed(card):
 
 
 # ============================================================
+# VERIFICA LINEUP
+# ============================================================
+#
+# PRINCIPIO:
+#
+# 1. Se Sorare conferma che la carta è schierata:
+#       BLOCCA vendita.
+#
+# 2. Se il controllo lineup non è disponibile:
+#       BLOCCA vendita.
+#
+# Questo evita di vendere accidentalmente una carta
+# schierata.
+#
+# ============================================================
+
+def lineup_status(asset_id):
+
+    if not asset_id:
+        return "UNKNOWN"
+
+    # --------------------------------------------------------
+    # Tentativo di interrogazione delle lineup del currentUser.
+    #
+    # La struttura delle API Sorare può cambiare.
+    # Se la query non è supportata, graphql() restituirà
+    # un errore e consideriamo il risultato UNKNOWN.
+    # --------------------------------------------------------
+
+    data = graphql("""
+        query CardLineups {
+
+            currentUser {
+
+                football {
+                    lineups {
+                        nodes {
+                            cards {
+                                assetId
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    """)
+
+    if not data:
+        return "UNKNOWN"
+
+    if data.get("errors"):
+        return "UNKNOWN"
+
+    current = (
+        ((data.get("data") or {})
+        .get("currentUser"))
+        or {}
+    )
+
+    football = current.get("football") or {}
+
+    lineups = football.get("lineups") or {}
+
+    nodes = lineups.get("nodes")
+
+    if nodes is None:
+        return "UNKNOWN"
+
+    for lineup in nodes:
+
+        for lineup_card in lineup.get("cards") or []:
+
+            if norm(
+                lineup_card.get("assetId")
+            ) == norm(asset_id):
+
+                return "STARTED"
+
+    return "NOT_STARTED"
+
+
+# ============================================================
 # FLOOR LIVE
 # ============================================================
 
 def live_floor(card):
 
-    player = (
-        card.get("anyPlayer")
-        or {}
-    )
+    player = card.get("anyPlayer") or {}
 
     player_slug = norm(
         player.get("slug")
@@ -376,17 +431,10 @@ def live_floor(card):
         season = int(
             card.get("seasonYear")
         )
-
-    except (
-        TypeError,
-        ValueError
-    ):
+    except (TypeError, ValueError):
         return None
 
-    if not player_slug:
-        return None
-
-    if not rarity:
+    if not player_slug or not rarity:
         return None
 
     data = graphql("""
@@ -421,7 +469,6 @@ def live_floor(card):
                         receiverSide {
 
                             amounts {
-
                                 eurCents
                                 usdCents
                             }
@@ -435,23 +482,16 @@ def live_floor(card):
         "first": 50,
     })
 
-    if not data:
-        return None
-
-    if data.get("errors"):
+    if not data or data.get("errors"):
         return None
 
     offers = (
         (
-            (
-                (data.get("data") or {})
-                .get("tokens")
-                or {}
-            )
+            ((data.get("data") or {})
+            .get("tokens") or {})
             .get("liveSingleSaleOffers")
             or {}
-        )
-        .get("nodes")
+        ).get("nodes")
         or []
     )
 
@@ -459,54 +499,49 @@ def live_floor(card):
 
     for offer in offers:
 
-        sender_side = (
-            offer.get("senderSide")
-            or {}
-        )
-
         cards = (
-            sender_side.get("anyCards")
+            (offer.get("senderSide") or {})
+            .get("anyCards")
             or []
         )
 
         for other in cards:
 
-            other_player = (
-                other.get("anyPlayer")
-                or {}
-            )
-
-            if norm(
-                other_player.get("slug")
-            ) != player_slug:
-                continue
-
-            if norm(
-                other.get("rarityTyped")
-            ) != rarity:
-                continue
-
             try:
                 other_season = int(
                     other.get("seasonYear")
                 )
+            except (TypeError, ValueError):
+                continue
 
-            except (
-                TypeError,
-                ValueError
+            same_player = (
+                norm(
+                    (other.get("anyPlayer") or {})
+                    .get("slug")
+                )
+                == player_slug
+            )
+
+            same_rarity = (
+                norm(
+                    other.get("rarityTyped")
+                )
+                == rarity
+            )
+
+            same_season = (
+                other_season == season
+            )
+
+            if not (
+                same_player
+                and same_rarity
+                and same_season
             ):
                 continue
 
-            if other_season != season:
-                continue
-
             amounts = (
-                (
-                    offer.get(
-                        "receiverSide"
-                    )
-                    or {}
-                )
+                (offer.get("receiverSide") or {})
                 .get("amounts")
                 or {}
             )
@@ -515,11 +550,7 @@ def live_floor(card):
                 price = int(
                     amounts.get("eurCents")
                 )
-
-            except (
-                TypeError,
-                ValueError
-            ):
+            except (TypeError, ValueError):
                 price = 0
 
             if price > 0:
@@ -527,16 +558,12 @@ def live_floor(card):
 
             break
 
-    # --------------------------------------------------------
-    # SICUREZZA:
-    # meno di 5 inserzioni live = nessun prezzo affidabile
-    # --------------------------------------------------------
-
     if len(prices) < MIN_LIVE_LISTINGS:
 
         print(
-            f"   └─ Solo {len(prices)} "
-            f"inserzioni live → floor NON affidabile",
+            f"🚫 {card_label(card)} → "
+            f"solo {len(prices)}/{MIN_LIVE_LISTINGS} "
+            f"inserzioni live",
             flush=True,
         )
 
@@ -546,163 +573,67 @@ def live_floor(card):
 
 
 # ============================================================
-# CONTROLLO CARTA SCHIERATA
-#
-# IMPORTANTE:
-# Se il controllo delle lineup non può essere verificato,
-# la carta viene BLOCCATA.
-#
-# Questo evita una vendita accidentale.
+# VALIDAZIONE FLOOR
 # ============================================================
 
-def card_is_in_lineup(card):
+def valid_price(floor):
 
-    asset_id = norm(
-        card.get("assetId")
+    return (
+        floor is not None
+        and MIN_PRICE <= floor <= MAX_PRICE
     )
-
-    slug = norm(
-        card.get("slug")
-    )
-
-    if not asset_id and not slug:
-        return None
-
-    # --------------------------------------------------------
-    # Il campo mySo5Lineups è l'area dell'API Sorare usata
-    # per recuperare le lineup dell'utente.
-    #
-    # Non assumiamo una struttura non verificata.
-    # Chiediamo solo i dati che possiamo leggere.
-    # --------------------------------------------------------
-
-    data = graphql("""
-        query MyLineups {
-
-            currentUser {
-
-                mySo5Lineups {
-
-                    nodes {
-
-                        id
-                    }
-                }
-            }
-        }
-    """)
-
-    # --------------------------------------------------------
-    # Se la query non è disponibile / fallisce:
-    # BLOCCO DI SICUREZZA.
-    # --------------------------------------------------------
-
-    if not data or data.get("errors"):
-
-        print(
-            "   └─ ⚠️ Impossibile verificare "
-            "le lineup → CARTA BLOCCATA",
-            flush=True,
-        )
-
-        return None
-
-    user = (
-        ((data.get("data") or {})
-        .get("currentUser"))
-        or {}
-    )
-
-    lineups = (
-        user.get("mySo5Lineups")
-        or {}
-    )
-
-    nodes = (
-        lineups.get("nodes")
-        or []
-    )
-
-    # --------------------------------------------------------
-    # Se non troviamo lineup:
-    # la carta non risulta schierata.
-    #
-    # Ma se l'API restituisce lineup senza dettagli delle carte,
-    # non possiamo determinare la presenza della carta.
-    # In quel caso BLOCCHIAMO.
-    # --------------------------------------------------------
-
-    if not nodes:
-        return False
-
-    # --------------------------------------------------------
-    # La query minimale sopra non espone ancora le carte della
-    # lineup. Quindi non possiamo dichiarare con certezza che
-    # una specifica carta NON sia schierata.
-    #
-    # BLOCCO DI SICUREZZA.
-    # --------------------------------------------------------
-
-    print(
-        "   └─ ⚠️ Lineup presenti ma dati carta "
-        "non disponibili nella risposta → CARTA BLOCCATA",
-        flush=True,
-    )
-
-    return None
 
 
 # ============================================================
-# VERIFICA COMPLETA
+# CONTROLLO CARTA
 # ============================================================
 
 def check_card(card):
 
-    name = card_name(card)
-
-    print(
-        f"\n🔎 CONTROLLO: {name}",
-        flush=True,
-    )
+    name = card_label(card)
 
     # --------------------------------------------------------
-    # KULENOVIC
+    # 1. KULENOVIC
     # --------------------------------------------------------
 
     if is_kulenovic(card):
 
         print(
-            "🔒 KULENOVIC → MAI IN VENDITA",
+            f"🔒 {name} → NON VENDERE",
+            flush=True,
+        )
+
+        print(
+            "   └─ Motivo: KULENOVIC PROTETTO",
             flush=True,
         )
 
         return None
 
     # --------------------------------------------------------
-    # LIMITED
+    # 2. RARITY
     # --------------------------------------------------------
 
     rarity = norm(
         card.get("rarityTyped")
     ).upper()
 
-    if rarity != "LIMITED":
+    if rarity != ALLOWED_RARITY:
 
         print(
-            f"🚫 {name} → esclusa",
+            f"🚫 {name} → NON VENDERE",
             flush=True,
         )
 
         print(
-            f"   └─ Motivo: rarità "
-            f"{rarity or 'N/D'}",
+            f"   └─ Motivo: rarità {rarity or 'N/D'}",
             flush=True,
         )
 
         return None
 
     # --------------------------------------------------------
-    # GIÀ IN VENDITA
+    # 3. GIÀ IN VENDITA
     # --------------------------------------------------------
 
     if already_listed(card):
@@ -715,43 +646,49 @@ def check_card(card):
         return None
 
     # --------------------------------------------------------
-    # CARTA SCHIERATA
+    # 4. LINEUP
     # --------------------------------------------------------
 
-    lineup_status = card_is_in_lineup(card)
+    lineup = lineup_status(
+        card.get("assetId")
+    )
 
-    if lineup_status is True:
+    if lineup == "STARTED":
 
         print(
-            f"🏟️ {name} → SCHIERATA",
+            f"🏟️ {name} → NON VENDERE",
             flush=True,
         )
 
         print(
-            "   └─ Motivo: carta presente "
-            "in una lineup → NON VENDERE",
+            "   └─ Motivo: CARTA SCHIERATA",
             flush=True,
         )
 
         return None
 
-    if lineup_status is None:
+    if lineup == "UNKNOWN":
 
         print(
-            f"🛑 {name} → controllo lineup "
-            f"non verificabile",
+            f"🛡️ {name} → BLOCCATA",
             flush=True,
         )
 
         print(
-            "   └─ Sicurezza: NON VENDERE",
+            "   └─ Motivo: controllo lineup "
+            "non verificabile",
             flush=True,
         )
 
         return None
 
+    print(
+        f"✅ {name} → carta NON schierata",
+        flush=True,
+    )
+
     # --------------------------------------------------------
-    # FLOOR LIVE
+    # 5. FLOOR
     # --------------------------------------------------------
 
     floor = live_floor(card)
@@ -759,25 +696,25 @@ def check_card(card):
     if floor is None:
 
         print(
-            f"🚫 {name} → esclusa",
+            f"🚫 {name} → NON VENDERE",
             flush=True,
         )
 
         print(
-            "   └─ Motivo: floor live "
-            "non disponibile/insufficiente",
+            "   └─ Motivo: floor live non disponibile "
+            f"o meno di {MIN_LIVE_LISTINGS} inserzioni",
             flush=True,
         )
 
         return None
 
     print(
-        f"💰 Floor live: {eur(floor)}",
+        f"💰 {name} → Floor: {eur(floor)}",
         flush=True,
     )
 
     # --------------------------------------------------------
-    # MINIMO
+    # 6. FLOOR < €0.32
     # --------------------------------------------------------
 
     if floor < MIN_PRICE:
@@ -788,7 +725,7 @@ def check_card(card):
         )
 
         print(
-            f"   └─ Floor {eur(floor)} "
+            f"   └─ Motivo: floor {eur(floor)} "
             f"< minimo {eur(MIN_PRICE)}",
             flush=True,
         )
@@ -796,7 +733,7 @@ def check_card(card):
         return None
 
     # --------------------------------------------------------
-    # MASSIMO
+    # 7. FLOOR > €0.70
     # --------------------------------------------------------
 
     if floor > MAX_PRICE:
@@ -807,7 +744,7 @@ def check_card(card):
         )
 
         print(
-            f"   └─ Floor {eur(floor)} "
+            f"   └─ Motivo: floor {eur(floor)} "
             f"> massimo {eur(MAX_PRICE)}",
             flush=True,
         )
@@ -815,12 +752,11 @@ def check_card(card):
         return None
 
     # --------------------------------------------------------
-    # OK
+    # 8. OK
     # --------------------------------------------------------
 
     print(
-        f"✅ {name} → VENDIBILE "
-        f"a {eur(floor)}",
+        f"🟢 {name} → VENDIBILE a {eur(floor)}",
         flush=True,
     )
 
@@ -831,24 +767,19 @@ def check_card(card):
 # FIRMA AUTORIZZAZIONI
 # ============================================================
 
-def sign_authorizations(
-    authorizations
-):
+def sign_authorizations(authorizations):
 
     node = (
         shutil.which("node")
-        or
-        shutil.which("nodejs")
+        or shutil.which("nodejs")
     )
 
     if not node:
-
         raise RuntimeError(
             "Node.js non disponibile"
         )
 
     if not STARK:
-
         raise RuntimeError(
             "SORARE_STARK_PRIVATE_KEY "
             "non configurata"
@@ -856,7 +787,6 @@ def sign_authorizations(
 
     script = r'''
 const fs = require("fs");
-
 const {
     signAuthorizationRequest
 } = require("@sorare/crypto");
@@ -865,7 +795,7 @@ const input = JSON.parse(
     fs.readFileSync(0, "utf8")
 );
 
-function signAuthorization(a) {
+function sign(a) {
 
     const r = a.request;
 
@@ -878,8 +808,7 @@ function signAuthorization(a) {
     if (
         r.__typename ===
         "StarkexTransferAuthorizationRequest"
-        &&
-        r.amount != null
+        && r.amount != null
     ) {
         r.amount = BigInt(r.amount);
     }
@@ -896,18 +825,12 @@ function signAuthorization(a) {
     ) {
 
         return {
-
-            fingerprint:
-                a.fingerprint,
+            fingerprint: a.fingerprint,
 
             starkexTransferApproval: {
-
-                nonce:
-                    r.nonce,
-
+                nonce: r.nonce,
                 expirationTimestamp:
                     r.expirationTimestamp,
-
                 signature
             }
         };
@@ -919,18 +842,12 @@ function signAuthorization(a) {
     ) {
 
         return {
-
-            fingerprint:
-                a.fingerprint,
+            fingerprint: a.fingerprint,
 
             starkexLimitOrderApproval: {
-
-                nonce:
-                    r.nonce,
-
+                nonce: r.nonce,
                 expirationTimestamp:
                     r.expirationTimestamp,
-
                 signature
             }
         };
@@ -942,15 +859,10 @@ function signAuthorization(a) {
     ) {
 
         return {
-
-            fingerprint:
-                a.fingerprint,
+            fingerprint: a.fingerprint,
 
             mangopayWalletTransferApproval: {
-
-                nonce:
-                    r.nonce,
-
+                nonce: r.nonce,
                 signature
             }
         };
@@ -964,9 +876,7 @@ function signAuthorization(a) {
 
 process.stdout.write(
     JSON.stringify(
-        input.authorizations.map(
-            signAuthorization
-        )
+        input.authorizations.map(sign)
     )
 );
 '''
@@ -977,13 +887,10 @@ process.stdout.write(
             "-e",
             script,
         ],
-
         input=json.dumps({
             "privateKey": STARK,
-            "authorizations":
-                authorizations,
+            "authorizations": authorizations,
         }),
-
         text=True,
         capture_output=True,
         timeout=TIMEOUT,
@@ -1002,17 +909,12 @@ process.stdout.write(
 
 
 # ============================================================
-# CREA LISTING
+# CREATE LISTING
 # ============================================================
 
-def create_listing(
-    card,
-    floor
-):
+def create_listing(card, floor):
 
-    asset_id = card.get(
-        "assetId"
-    )
+    asset_id = card.get("assetId")
 
     if not asset_id:
 
@@ -1024,7 +926,7 @@ def create_listing(
         return False
 
     # --------------------------------------------------------
-    # SECONDA BARRIERA KULENOVIC
+    # BARRIERA KULENOVIC
     # --------------------------------------------------------
 
     if is_kulenovic(card):
@@ -1037,14 +939,10 @@ def create_listing(
         return False
 
     # --------------------------------------------------------
-    # PREZZO
+    # BARRIERA PREZZO
     # --------------------------------------------------------
 
-    if not (
-        MIN_PRICE
-        <= floor
-        <= MAX_PRICE
-    ):
+    if not valid_price(floor):
 
         print(
             "🛑 Prezzo fuori range",
@@ -1053,19 +951,31 @@ def create_listing(
 
         return False
 
-    print(
-        f"🟢 LISTING {card_name(card)}",
-        flush=True,
-    )
+    # --------------------------------------------------------
+    # BARRIERA LINEUP - SECONDO CONTROLLO
+    # --------------------------------------------------------
+
+    lineup = lineup_status(asset_id)
+
+    if lineup != "NOT_STARTED":
+
+        print(
+            f"🛡️ LISTING BLOCCATO: "
+            f"{card_label(card)}",
+            flush=True,
+        )
+
+        print(
+            f"   └─ Stato lineup: {lineup}",
+            flush=True,
+        )
+
+        return False
 
     print(
-        f"   ├─ Prezzo: {eur(floor)}",
-        flush=True,
-    )
-
-    print(
-        f"   └─ Durata: "
-        f"{LISTING_DAYS} giorni",
+        f"🟢 LISTING: {card_label(card)} "
+        f"→ {eur(floor)} "
+        f"→ {LISTING_DAYS} giorni",
         flush=True,
     )
 
@@ -1076,8 +986,7 @@ def create_listing(
     if DRY_RUN:
 
         print(
-            "🟡 DRY RUN=True "
-            "→ nessuna vendita reale",
+            "🟡 DRY RUN=True → vendita simulata",
             flush=True,
         )
 
@@ -1085,15 +994,11 @@ def create_listing(
 
     # --------------------------------------------------------
     # PREPARE OFFER
-    #
-    # Sorare documenta la creazione di una Single Sale tramite
-    # prepareOffer + autorizzazioni + createSingleSaleOffer.
     # --------------------------------------------------------
 
     prepare_input = {
 
-        "type":
-            "SINGLE_SALE_OFFER",
+        "type": "SINGLE_SALE_OFFER",
 
         "sendAssetIds": [
             asset_id
@@ -1101,17 +1006,18 @@ def create_listing(
 
         "receiveAssetIds": [],
 
+        "settlementCurrencies": [
+            "EUR"
+        ],
+
         "receiveAmount": {
-
-            "amount":
-                str(floor),
-
-            "currency":
-                "EUR"
+            "amount": str(floor),
+            "currency": "EUR"
         },
 
-        "clientMutationId":
-            str(uuid.uuid4())
+        "clientMutationId": str(
+            uuid.uuid4()
+        )
     }
 
     data = graphql("""
@@ -1119,9 +1025,7 @@ def create_listing(
             $input: prepareOfferInput!
         ) {
 
-            prepareOffer(
-                input: $input
-            ) {
+            prepareOffer(input: $input) {
 
                 authorizations {
 
@@ -1143,7 +1047,6 @@ def create_listing(
                             token
 
                             feeInfoUser {
-
                                 feeLimit
                                 sourceVaultId
                                 tokenId
@@ -1162,7 +1065,6 @@ def create_listing(
                             expirationTimestamp
 
                             feeInfo {
-
                                 feeLimit
                                 tokenId
                                 sourceVaultId
@@ -1186,8 +1088,7 @@ def create_listing(
             }
         }
     """, {
-        "input":
-            prepare_input
+        "input": prepare_input
     })
 
     result = (
@@ -1196,18 +1097,9 @@ def create_listing(
     )
 
     if not result:
-
-        print(
-            "❌ prepareOffer non disponibile",
-            flush=True,
-        )
-
         return False
 
-    errors = (
-        result.get("errors")
-        or []
-    )
+    errors = result.get("errors") or []
 
     if errors:
 
@@ -1223,9 +1115,7 @@ def create_listing(
         return False
 
     authorizations = (
-        result.get(
-            "authorizations"
-        )
+        result.get("authorizations")
         or []
     )
 
@@ -1238,51 +1128,47 @@ def create_listing(
 
         return False
 
-    # --------------------------------------------------------
-    # FIRMA
-    # --------------------------------------------------------
-
     try:
 
         approvals = sign_authorizations(
             authorizations
         )
 
-    except Exception as error:
+    except Exception as exc:
 
         print(
-            f"❌ Firma vendita: {error}",
+            f"❌ Firma vendita: {exc}",
             flush=True,
         )
 
         return False
 
     # --------------------------------------------------------
-    # CREATE SINGLE SALE
+    # CREATE SALE
     # --------------------------------------------------------
 
     create_input = {
 
-        "approvals":
-            approvals,
+        "approvals": approvals,
 
-        "dealId":
-            str(uuid.uuid4()),
+        "dealId": str(
+            uuid.uuid4()
+        ),
 
-        "assetId":
-            asset_id,
+        "assetId": asset_id,
+
+        "settlementCurrencies": [
+            "EUR"
+        ],
 
         "receiveAmount": {
-
-            "amount":
-                str(floor),
-
-            "currency":
-                "EUR"
+            "amount": str(floor),
+            "currency": "EUR"
         },
 
-        "clientMutationId":
-            str(uuid.uuid4())
+        "clientMutationId": str(
+            uuid.uuid4()
+        )
     }
 
     data = graphql("""
@@ -1290,12 +1176,9 @@ def create_listing(
             $input: createSingleSaleOfferInput!
         ) {
 
-            createSingleSaleOffer(
-                input: $input
-            ) {
+            createSingleSaleOffer(input: $input) {
 
                 tokenOffer {
-
                     id
                     startDate
                     endDate
@@ -1307,31 +1190,18 @@ def create_listing(
             }
         }
     """, {
-        "input":
-            create_input
+        "input": create_input
     })
 
     result = (
         ((data or {}).get("data") or {})
-        .get(
-            "createSingleSaleOffer"
-        )
+        .get("createSingleSaleOffer")
     )
 
     if not result:
-
-        print(
-            "❌ createSingleSaleOffer "
-            "non disponibile",
-            flush=True,
-        )
-
         return False
 
-    errors = (
-        result.get("errors")
-        or []
-    )
+    errors = result.get("errors") or []
 
     if errors:
 
@@ -1347,9 +1217,7 @@ def create_listing(
         return False
 
     offer = (
-        result.get(
-            "tokenOffer"
-        )
+        result.get("tokenOffer")
         or {}
     )
 
@@ -1363,19 +1231,13 @@ def create_listing(
         return False
 
     print(
-        "✅ CARTA MESSA IN VENDITA",
+        f"✅ CARTA MESSA IN VENDITA: "
+        f"{card_label(card)}",
         flush=True,
     )
 
     print(
-        f"   ├─ Carta: "
-        f"{card_name(card)}",
-        flush=True,
-    )
-
-    print(
-        f"   ├─ Prezzo: "
-        f"{eur(floor)}",
+        f"   ├─ Prezzo: {eur(floor)}",
         flush=True,
     )
 
@@ -1392,8 +1254,7 @@ def create_listing(
     )
 
     print(
-        f"   └─ ID: "
-        f"{offer.get('id')}",
+        f"   └─ ID: {offer.get('id')}",
         flush=True,
     )
 
@@ -1424,27 +1285,15 @@ def run_once():
     cards = all_cards()
 
     print(
-        f"📦 Carte trovate: "
-        f"{len(cards)}",
+        f"📦 Carte trovate: {len(cards)}",
         flush=True,
     )
-
-    if not cards:
-
-        print(
-            "⚠️ Nessuna carta trovata",
-            flush=True,
-        )
-
-        return
 
     for card in cards:
 
         try:
 
-            floor = check_card(
-                card
-            )
+            floor = check_card(card)
 
             if floor is None:
                 continue
@@ -1454,18 +1303,16 @@ def run_once():
                 floor
             )
 
-        except Exception as error:
+        except Exception as exc:
 
             print(
-                f"❌ Errore "
-                f"{card_name(card)}: "
-                f"{error}",
+                f"❌ Errore {card_label(card)}: {exc}",
                 flush=True,
             )
 
 
 # ============================================================
-# MAIN
+# START
 # ============================================================
 
 def main():
@@ -1530,42 +1377,9 @@ def main():
         flush=True,
     )
 
-    # --------------------------------------------------------
-    # CONTROLLO CREDENZIALI
-    # --------------------------------------------------------
+    user = get_account()
 
-    if not TOKEN:
-
-        print(
-            "❌ SORARE_JWT_TOKEN mancante",
-            flush=True,
-        )
-
-        return
-
-    if not AUD:
-
-        print(
-            "⚠️ SORARE_JWT_AUD non configurato",
-            flush=True,
-        )
-
-    if not STARK:
-
-        print(
-            "❌ SORARE_STARK_PRIVATE_KEY mancante",
-            flush=True,
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # ACCOUNT
-    # --------------------------------------------------------
-
-    account = get_account()
-
-    if not account:
+    if not user:
 
         print(
             "❌ Account Sorare non verificato",
@@ -1576,13 +1390,9 @@ def main():
 
     print(
         f"✅ Account: "
-        f"{account.get('nickname') or account.get('slug')}",
+        f"{user.get('nickname') or user.get('slug')}",
         flush=True,
     )
-
-    # --------------------------------------------------------
-    # CICLO INFINITO
-    # --------------------------------------------------------
 
     while True:
 
@@ -1590,27 +1400,37 @@ def main():
 
             run_once()
 
-        except Exception as error:
+        except Exception as exc:
 
             print(
-                f"❌ AUTOSELL: {error}",
+                f"❌ AUTOSELL: {exc}",
                 flush=True,
             )
 
-        print(
-            f"💤 Prossimo controllo "
-            f"tra {INTERVAL} secondi",
-            flush=True,
-        )
-
-        time.sleep(
-            INTERVAL
-        )
+        time.sleep(INTERVAL)
 
 
 # ============================================================
-# AVVIO AUTONOMO
+# ENTRY POINT
 # ============================================================
 
 if __name__ == "__main__":
-    main()
+
+    try:
+        main()
+
+    except KeyboardInterrupt:
+
+        print(
+            "\n🛑 AUTOSELL ARRESTATO",
+            flush=True,
+        )
+
+    except Exception as exc:
+
+        print(
+            f"❌ ERRORE FATALE AUTOSELL: {exc}",
+            flush=True,
+        )
+
+        raise
