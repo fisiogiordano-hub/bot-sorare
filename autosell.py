@@ -23,8 +23,15 @@ TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 API_KEY = os.getenv("SORARE_API_KEY", "").strip()
 
+# CHIAVE STARKEX
 PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
+    ""
+).strip()
+
+# CHIAVE SOLANA
+SOLANA_PRIVATE_KEY = os.getenv(
+    "SORARE_SOLANA_PRIVATE_KEY",
     ""
 ).strip()
 
@@ -41,7 +48,7 @@ REQUEST_DELAY = float(
 
 TIMEOUT = 30
 
-BOT_VERSION = "39.0-SOLANA-0X-FIX"
+BOT_VERSION = "40.0-SEPARATE-STARK-SOLANA-KEY"
 
 
 # ============================================================
@@ -1070,6 +1077,7 @@ async function main() {
 }
 
 main().catch(error => {
+
   console.error(
     error && error.stack
       ? error.stack
@@ -1077,6 +1085,7 @@ main().catch(error => {
   );
 
   process.exit(1);
+
 });
 """
 
@@ -1108,10 +1117,13 @@ main().catch(error => {
         )
 
     try:
+
         return json.loads(
             process.stdout
         )
+
     except Exception as exc:
+
         raise RuntimeError(
             "Output firma StarkEx non valido: "
             + str(exc)
@@ -1121,19 +1133,27 @@ main().catch(error => {
 # ============================================================
 # SOLANA
 #
-# MODIFICA PRINCIPALE:
+# IMPORTANTE:
 #
-# La private key Sorare viene accettata nel formato:
+# Questa funzione NON usa più
+# SORARE_STARK_PRIVATE_KEY.
 #
-#     0x...
+# Usa esclusivamente:
 #
-# Il prefisso 0x viene rimosso prima della conversione HEX.
+# SORARE_SOLANA_PRIVATE_KEY
 #
-# Viene utilizzato UN SOLO path:
+# La chiave viene interpretata come HEX.
 #
-#     m/44'/501'/0'/0'
+# Se è 32 byte:
+#   viene usata direttamente come private key
+#   Ed25519.
 #
-# Non vengono più provati path alternativi.
+# Se è 64 byte:
+#   viene provata come secret key completa.
+#
+# Il codice NON modifica senderAddress.
+# Deve corrispondere esattamente all'indirizzo
+# restituito da Sorare.
 # ============================================================
 
 def sign_solana(authorization):
@@ -1145,9 +1165,9 @@ def sign_solana(authorization):
             "Node.js non disponibile"
         )
 
-    if not PRIVATE_KEY:
+    if not SOLANA_PRIVATE_KEY:
         raise RuntimeError(
-            "SORARE_STARK_PRIVATE_KEY "
+            "SORARE_SOLANA_PRIVATE_KEY "
             "non configurata"
         )
 
@@ -1190,136 +1210,102 @@ def sign_solana(authorization):
 
     payload = {
         "authorization": authorization,
-        "privateKey": PRIVATE_KEY,
+        "privateKey": SOLANA_PRIVATE_KEY,
     }
 
     script = r"""
 const fs = require("fs");
 
 const {
-  createKeyPairFromPrivateKeyBytes,
-  createSignerFromKeyPair,
+  createKeyPairSignerFromPrivateKeyBytes,
+  createKeyPairSignerFromBytes,
   createSignableMessage,
   getBase58Decoder
 } = require("@solana/kit");
 
-const {
-  HDKey
-} = require("micro-key-producer/slip10.js");
 
+async function signerFromHex(hex) {
 
-// ==========================================================
-// PATH SOLANA
-// ==========================================================
+  const clean =
+    String(hex)
+      .trim()
+      .replace(/^0x/i, "");
 
-const SOLANA_PATH =
-  "m/44'/501'/0'/0'";
-
-
-// ==========================================================
-// NORMALIZZA PRIVATE KEY
-// ==========================================================
-
-function normalizePrivateKey(value) {
-
-  let key =
-    String(value || "")
-      .trim();
-
-  // Accetta:
-  //
-  // 0x1234...
-  //
-  // oppure:
-  //
-  // 1234...
-  //
-  key =
-    key.replace(/^0x/i, "");
-
-  if (!key) {
+  if (!/^[0-9a-fA-F]+$/.test(clean)) {
     throw new Error(
-      "SORARE_STARK_PRIVATE_KEY vuota"
+      "SORARE_SOLANA_PRIVATE_KEY "
+      + "non è HEX valida"
     );
   }
 
-  if (!/^[0-9a-fA-F]+$/.test(key)) {
+  if (clean.length % 2 !== 0) {
     throw new Error(
-      "SORARE_STARK_PRIVATE_KEY "
-      + "non è una chiave HEX valida"
-    );
-  }
-
-  if (key.length % 2 !== 0) {
-    throw new Error(
-      "SORARE_STARK_PRIVATE_KEY "
-      + "ha un numero dispari di caratteri HEX"
+      "SORARE_SOLANA_PRIVATE_KEY "
+      + "ha lunghezza HEX dispari"
     );
   }
 
   const bytes =
-    Buffer.from(
-      key,
-      "hex"
-    );
-
-  if (bytes.length !== 32) {
-    throw new Error(
-      "SORARE_STARK_PRIVATE_KEY deve essere "
-      + "di 32 byte. Byte ricevuti: "
-      + bytes.length
-    );
-  }
-
-  return bytes;
-}
-
-
-// ==========================================================
-// DERIVAZIONE SOLANA
-// ==========================================================
-
-async function deriveSigner(privateKey) {
-
-  const seed =
-    normalizePrivateKey(
-      privateKey
+    new Uint8Array(
+      Buffer.from(clean, "hex")
     );
 
   console.error(
-    "🔎 Solana derivation path:",
-    SOLANA_PATH
+    "🔑 Solana key bytes:",
+    bytes.length
   );
 
-  const derived =
-    HDKey
-      .fromMasterSeed(seed)
-      .derive(SOLANA_PATH);
+  /*
+   * Caso 32 byte:
+   *
+   * La chiave viene interpretata direttamente
+   * come private key Ed25519.
+   *
+   * NON viene applicato alcun path BIP44.
+   */
 
-  if (!derived.privateKey) {
-    throw new Error(
-      "La derivazione Solana "
-      + "non ha prodotto una private key"
-    );
+  if (bytes.length === 32) {
+
+    const signer =
+      await createKeyPairSignerFromPrivateKeyBytes(
+        bytes
+      );
+
+    return {
+      signer,
+      mode: "RAW-32"
+    };
   }
 
-  const keyPair =
-    await createKeyPairFromPrivateKeyBytes(
-      derived.privateKey
-    );
 
-  const signer =
-    await createSignerFromKeyPair(
-      keyPair
-    );
+  /*
+   * Caso 64 byte:
+   *
+   * Secret key completa Solana.
+   */
 
-  return signer;
+  if (bytes.length === 64) {
+
+    const signer =
+      await createKeyPairSignerFromBytes(
+        bytes
+      );
+
+    return {
+      signer,
+      mode: "SECRET-64"
+    };
+  }
+
+
+  throw new Error(
+    "Lunghezza chiave Solana non supportata: "
+    + bytes.length
+    + " byte. "
+    + "Sono supportati 32 o 64 byte."
+  );
 }
 
-
-// ==========================================================
-// MAIN
-// ==========================================================
 
 async function main() {
 
@@ -1333,18 +1319,33 @@ async function main() {
   const request =
     authorization.request;
 
+
+  // --------------------------------------------------------
+  // CHIAVE SOLANA
+  // --------------------------------------------------------
+
+  const result =
+    await signerFromHex(
+      input.privateKey
+    );
+
+  const signer =
+    result.signer;
+
+
+  // --------------------------------------------------------
+  // SENDER SORARE
+  // --------------------------------------------------------
+
   const expected =
     String(
-      request.senderAddress || ""
+      request.senderAddress
     ).trim();
 
-
-  if (!expected) {
-    throw new Error(
-      "senderAddress mancante nella "
-      + "authorization Solana"
-    );
-  }
+  const derived =
+    String(
+      signer.address
+    ).trim();
 
 
   console.error(
@@ -1352,50 +1353,43 @@ async function main() {
     expected
   );
 
-
-  // ========================================================
-  // DERIVA L'INDIRIZZO
-  // ========================================================
-
-  const signer =
-    await deriveSigner(
-      input.privateKey
-    );
-
-
   console.error(
     "🔑 Derived Solana address:",
-    signer.address
+    derived
+  );
+
+  console.error(
+    "🔐 Key mode:",
+    result.mode
   );
 
 
-  // ========================================================
-  // VERIFICA SENDER
-  // ========================================================
+  // --------------------------------------------------------
+  // CONTROLLO FONDAMENTALE
+  // --------------------------------------------------------
 
-  if (signer.address !== expected) {
+  if (derived !== expected) {
 
     throw new Error(
       "SOLANA PRIVATE KEY NON CORRISPONDE "
       + "AL SENDER SORARE. "
-      + "Path utilizzato: "
-      + SOLANA_PATH
-      + " | Derived: "
-      + signer.address
-      + " | Expected: "
+      + "La chiave fornita produce "
+      + derived
+      + " mentre Sorare richiede "
       + expected
     );
   }
 
 
   console.error(
-    "✅ Solana senderAddress verificato"
+    "✅ Solana private key CORRISPONDE "
+    + "al sender Sorare"
   );
 
 
-  // ========================================================
+  // --------------------------------------------------------
   // MESSAGGIO SORARE
-  // ========================================================
+  // --------------------------------------------------------
 
   const message = [
 
@@ -1405,17 +1399,11 @@ async function main() {
 
     request.merkleTreeAddress,
 
-    String(
-      request.leafIndex
-    ),
+    request.leafIndex.toString(),
 
-    String(
-      request.nonce
-    ),
+    request.nonce.toString(),
 
-    String(
-      request.expirationTimestamp
-    ),
+    request.expirationTimestamp.toString(),
 
     request.receiverAddress,
 
@@ -1432,14 +1420,15 @@ async function main() {
   );
 
 
-  // ========================================================
+  // --------------------------------------------------------
   // SHA-256
-  // ========================================================
+  // --------------------------------------------------------
 
   const messageBytes =
     new TextEncoder().encode(
       message
     );
+
 
   const messageHash =
     await crypto.subtle.digest(
@@ -1448,9 +1437,9 @@ async function main() {
     );
 
 
-  // ========================================================
-  // ED25519
-  // ========================================================
+  // --------------------------------------------------------
+  // SIGN
+  // --------------------------------------------------------
 
   const signableMessage =
     createSignableMessage(
@@ -1460,7 +1449,7 @@ async function main() {
     );
 
 
-  const result =
+  const resultSign =
     await signer.signMessages(
       [signableMessage]
     );
@@ -1468,15 +1457,15 @@ async function main() {
 
   const signatureBytes =
     getBase58Decoder().decode(
-      result[0][
+      resultSign[0][
         signer.address
       ]
     );
 
 
-  // ========================================================
-  // APPROVAL
-  // ========================================================
+  // --------------------------------------------------------
+  // OUTPUT
+  // --------------------------------------------------------
 
   const output = {
 
@@ -1493,9 +1482,7 @@ async function main() {
 
       expirationTimestamp:
         request.expirationTimestamp
-
     }
-
   };
 
 
@@ -1531,6 +1518,7 @@ main().catch(error => {
     )
 
     if process.stderr:
+
         print(
             process.stderr.strip(),
             flush=True,
@@ -1989,6 +1977,26 @@ def worker():
 
     print(
         f"MAX: {eur(MAX_PRICE)}",
+        flush=True,
+    )
+
+    print(
+        "🔐 StarkEx key: "
+        + (
+            "CONFIGURATA"
+            if PRIVATE_KEY
+            else "MANCANTE"
+        ),
+        flush=True,
+    )
+
+    print(
+        "🔐 Solana key: "
+        + (
+            "CONFIGURATA"
+            if SOLANA_PRIVATE_KEY
+            else "MANCANTE"
+        ),
         flush=True,
     )
 
