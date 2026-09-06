@@ -17,11 +17,16 @@ COVERAGE_URL = "https://sorare.com/coverage"
 TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 
-# Chiave già utilizzata dal tuo bot AutoBuy/Swap.
-STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
+# Private key Sorare/Ethereum già usata dal bot.
+STARK = os.getenv(
+    "SORARE_STARK_PRIVATE_KEY",
+    ""
+).strip()
 
-# Se presente viene usata per la parte Solana.
-# NON è obbligatorio configurarla: in assenza usa STARK.
+# IMPORTANTE:
+# La Solana key NON è una seconda private key obbligatoria.
+# Sorare documenta che viene derivata dalla stessa private key
+# Sorare/Ethereum usando SLIP-0010 + m/44'/501'/0'/0'
 SOLANA_PRIVATE_KEY = os.getenv(
     "SORARE_SOLANA_PRIVATE_KEY",
     STARK
@@ -29,7 +34,11 @@ SOLANA_PRIVATE_KEY = os.getenv(
 
 KID = os.getenv("KULENOVIC_ID", "").strip()
 
-DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+DRY_RUN = os.getenv(
+    "DRY_RUN",
+    "false"
+).lower() == "true"
+
 SWAP_AUTO_ACCEPT = os.getenv(
     "SWAP_AUTO_ACCEPT",
     "false"
@@ -49,7 +58,7 @@ SWAP_MAX = 1.25
 USD_CACHE = 300
 COVERAGE_CACHE = 3600
 
-BOT_VERSION = "38.0-SOLANA-AUTH-FIX"
+BOT_VERSION = "39.0-SOLANA-SLIP10"
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -1092,6 +1101,31 @@ def sign_authorizations(authorizations):
             "non configurata"
         )
 
+    if not SOLANA_PRIVATE_KEY:
+
+        raise RuntimeError(
+            "SORARE_SOLANA_PRIVATE_KEY / "
+            "SORARE_STARK_PRIVATE_KEY "
+            "non configurata"
+        )
+
+    # Questo script usa:
+    #
+    # @sorare/crypto
+    # @solana/kit
+    # micro-key-producer
+    #
+    # Per StarkEx:
+    #     STARK private key
+    #
+    # Per Solana:
+    #     stessa private key Sorare/Ethereum
+    #     -> SLIP-0010
+    #     -> m/44'/501'/0'/0'
+    #     -> Ed25519
+    #
+    # NON viene usata @sorare/crypto per Solana.
+
     script = r'''
 const fs = require("fs");
 
@@ -1099,16 +1133,111 @@ const {
     signAuthorizationRequest
 } = require("@sorare/crypto");
 
+const {
+    createKeyPairFromPrivateKeyBytes,
+    createSignerFromKeyPair,
+    createSignableMessage,
+    getBase58Decoder
+} = require("@solana/kit");
+
+const {
+    HDKey
+} = require("micro-key-producer/slip10.js");
+
 const input = JSON.parse(
     fs.readFileSync(0, "utf8")
 );
 
+
+const SOLANA_DERIVATION_PATH =
+    "m/44'/501'/0'/0'";
+
+
+/*
+ * ==========================================================
+ * SOLANA KEYPAIR
+ * ==========================================================
+ *
+ * Sorare:
+ *
+ * Ethereum/Sorare private key
+ *        ↓
+ * SLIP-0010
+ *        ↓
+ * m/44'/501'/0'/0'
+ *        ↓
+ * Ed25519 keypair
+ */
+
+async function deriveSolanaSigner(
+    ethereumPrivateKey
+) {
+
+    if (!ethereumPrivateKey) {
+        throw new Error(
+            "Private key Solana mancante"
+        );
+    }
+
+    const clean =
+        ethereumPrivateKey
+            .replace(/^0x/, "")
+            .trim();
+
+    if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+
+        throw new Error(
+            "La private key Sorare deve essere "
+            + "32 byte esadecimali"
+        );
+    }
+
+    const seed =
+        Buffer.from(
+            clean,
+            "hex"
+        );
+
+    const derived =
+        HDKey
+            .fromMasterSeed(seed)
+            .derive(
+                SOLANA_DERIVATION_PATH
+            );
+
+    const derivedPrivateKeyBytes =
+        derived.privateKey;
+
+    if (!derivedPrivateKeyBytes) {
+
+        throw new Error(
+            "Derivazione SLIP-0010 fallita"
+        );
+    }
+
+    const keyPair =
+        await createKeyPairFromPrivateKeyBytes(
+            derivedPrivateKeyBytes
+        );
+
+    return createSignerFromKeyPair(
+        keyPair
+    );
+}
+
+
+/*
+ * ==========================================================
+ * STARKEX
+ * ==========================================================
+ */
 
 function signStark(a) {
 
     const r = a.request;
 
     if (!r) {
+
         throw new Error(
             "AuthorizationRequest mancante"
         );
@@ -1120,12 +1249,15 @@ function signStark(a) {
         &&
         r.amount != null
     ) {
-        r.amount = BigInt(r.amount);
+
+        r.amount = BigInt(
+            r.amount
+        );
     }
 
     const signature =
         signAuthorizationRequest(
-            input.privateKey,
+            input.starkPrivateKey,
             r
         );
 
@@ -1135,11 +1267,14 @@ function signStark(a) {
     ) {
 
         return {
+
             fingerprint:
                 a.fingerprint,
 
             starkexTransferApproval: {
-                nonce: r.nonce,
+
+                nonce:
+                    r.nonce,
 
                 expirationTimestamp:
                     r.expirationTimestamp,
@@ -1155,11 +1290,14 @@ function signStark(a) {
     ) {
 
         return {
+
             fingerprint:
                 a.fingerprint,
 
             starkexLimitOrderApproval: {
-                nonce: r.nonce,
+
+                nonce:
+                    r.nonce,
 
                 expirationTimestamp:
                     r.expirationTimestamp,
@@ -1175,18 +1313,22 @@ function signStark(a) {
     ) {
 
         return {
+
             fingerprint:
                 a.fingerprint,
 
             mangopayWalletTransferApproval: {
-                nonce: r.nonce,
+
+                nonce:
+                    r.nonce,
+
                 signature
             }
         };
     }
 
     throw new Error(
-        "Authorization non supportata: "
+        "Authorization Stark non supportata: "
         + r.__typename
     );
 }
@@ -1194,23 +1336,24 @@ function signStark(a) {
 
 /*
  * ==========================================================
- * SOLANA
+ * SOLANA TOKEN TRANSFER
  * ==========================================================
  *
- * ATTENZIONE:
+ * IMPORTANTE:
  *
- * Non controlliamo più una derivazione locale
- * contro senderAddress.
+ * NON usiamo:
  *
- * Il precedente controllo:
+ *     signAuthorizationRequest(...)
  *
- *   H4Cur... != 7uCQ...
+ * per Solana.
  *
- * era precisamente il punto che mandava in errore
- * ogni AutoSell.
+ * La procedura ufficiale Sorare è:
  *
- * La richiesta viene invece trattata direttamente
- * come SolanaTokenTransferAuthorizationRequest.
+ * 1. costruire il messaggio esatto
+ * 2. UTF-8
+ * 3. SHA-256
+ * 4. Ed25519 sull'hash
+ * 5. Base58
  */
 
 async function signSolana(a) {
@@ -1218,8 +1361,20 @@ async function signSolana(a) {
     const r = a.request;
 
     if (!r) {
+
         throw new Error(
             "Solana AuthorizationRequest mancante"
+        );
+    }
+
+    if (
+        r.__typename !==
+        "SolanaTokenTransferAuthorizationRequest"
+    ) {
+
+        throw new Error(
+            "Tipo Solana inatteso: "
+            + r.__typename
         );
     }
 
@@ -1247,41 +1402,243 @@ async function signSolana(a) {
         + (r.leafIndex ?? "N/D")
     );
 
-    /*
-     * IMPORTANTE:
-     *
-     * Il bot NON costruisce più un messaggio
-     * Solana arbitrario.
-     *
-     * Se Sorare restituisce un tipo di authorization
-     * che @sorare/crypto sa firmare, viene delegato
-     * al metodo ufficiale.
-     */
+    console.log(
+        "🔢 nonce: "
+        + (r.nonce ?? "N/D")
+    );
 
-    let signature;
+    console.log(
+        "⏳ expirationTimestamp: "
+        + (r.expirationTimestamp ?? "N/D")
+    );
 
-    try {
+    console.log(
+        "🔑 transferProxyProgramAddress: "
+        + (
+            r.transferProxyProgramAddress
+            || "N/D"
+        )
+    );
 
-        signature =
-            signAuthorizationRequest(
-                input.privateKey,
-                r
-            );
+    console.log(
+        "👤 originator: "
+        + (r.originator || "N/D")
+    );
 
-    } catch (e) {
+
+    if (!r.transferProxyProgramAddress) {
 
         throw new Error(
-            "Firma Solana non supportata dalla "
-            + "versione @sorare/crypto installata: "
-            + e.message
+            "transferProxyProgramAddress mancante"
         );
     }
 
+    if (!r.merkleTreeAddress) {
+
+        throw new Error(
+            "merkleTreeAddress mancante"
+        );
+    }
+
+    if (
+        r.leafIndex === null
+        ||
+        r.leafIndex === undefined
+    ) {
+
+        throw new Error(
+            "leafIndex mancante"
+        );
+    }
+
+    if (
+        r.nonce === null
+        ||
+        r.nonce === undefined
+    ) {
+
+        throw new Error(
+            "nonce mancante"
+        );
+    }
+
+    if (
+        r.expirationTimestamp === null
+        ||
+        r.expirationTimestamp === undefined
+    ) {
+
+        throw new Error(
+            "expirationTimestamp mancante"
+        );
+    }
+
+    if (!r.receiverAddress) {
+
+        throw new Error(
+            "receiverAddress mancante"
+        );
+    }
+
+    if (!r.originator) {
+
+        throw new Error(
+            "originator mancante"
+        );
+    }
+
+
+    /*
+     * Questo è ESATTAMENTE il formato
+     * richiesto da Sorare.
+     *
+     * assetId NON viene incluso.
+     *
+     * senderAddress NON viene incluso.
+     *
+     * '0x' è letterale.
+     */
+
+    const message = [
+
+        "TRANSFER",
+
+        r.transferProxyProgramAddress,
+
+        r.merkleTreeAddress,
+
+        r.leafIndex.toString(),
+
+        r.nonce,
+
+        r.expirationTimestamp.toString(),
+
+        r.receiverAddress,
+
+        "0x",
+
+        r.originator
+
+    ].join(":");
+
+
+    console.log(
+        "📝 Solana message costruito"
+    );
+
+
+    const textEncoder =
+        new TextEncoder();
+
+    const messageBytes =
+        textEncoder.encode(
+            message
+        );
+
+
+    /*
+     * SHA-256 DEL MESSAGGIO
+     *
+     * Non si firma direttamente
+     * la stringa.
+     */
+
+    const messageHash =
+        await crypto.subtle.digest(
+            "SHA-256",
+            messageBytes
+        );
+
+
+    /*
+     * La firma Ed25519 viene fatta
+     * sull'hash SHA-256.
+     */
+
+    const signer =
+        await deriveSolanaSigner(
+            input.solanaPrivateKey
+        );
+
+
+    /*
+     * senderAddress deve coincidere
+     * con la keypair derivata.
+     *
+     * Questo controllo evita di inviare
+     * firme sicuramente errate.
+     */
+
+    if (
+        signer.address !==
+        r.senderAddress
+    ) {
+
+        throw new Error(
+            "DERIVAZIONE SOLANA ERRATA: "
+            + "derived="
+            + signer.address
+            + " request="
+            + r.senderAddress
+        );
+    }
+
+    console.log(
+        "✅ Solana sender verificato: "
+        + signer.address
+    );
+
+
+    const signableMessage =
+        createSignableMessage(
+            new Uint8Array(
+                messageHash
+            )
+        );
+
+
+    const signatures =
+        await signer.signMessages([
+            signableMessage
+        ]);
+
+
+    const signature =
+        getBase58Decoder().decode(
+            signatures[
+                signer.address
+            ]
+        );
+
+
+    if (!signature) {
+
+        throw new Error(
+            "Firma Solana vuota"
+        );
+    }
+
+
+    console.log(
+        "✅ Firma Solana generata"
+    );
+
+
+    /*
+     * NON modificare nonce
+     * o expirationTimestamp.
+     *
+     * Devono essere quelli restituiti
+     * dalla authorization.
+     */
+
     return {
+
         fingerprint:
             a.fingerprint,
 
         solanaTokenTransferApproval: {
+
             signature,
 
             nonce:
@@ -1294,9 +1651,29 @@ async function signSolana(a) {
 }
 
 
+/*
+ * ==========================================================
+ * MAIN
+ * ==========================================================
+ */
+
 async function main() {
 
     const result = [];
+
+    if (
+        !input.authorizations
+        ||
+        !Array.isArray(
+            input.authorizations
+        )
+    ) {
+
+        throw new Error(
+            "authorizations mancanti"
+        );
+    }
+
 
     for (
         const a
@@ -1308,10 +1685,12 @@ async function main() {
             a.request &&
             a.request.__typename;
 
+
         console.log(
             "🔐 Authorization: "
             + type
         );
+
 
         if (
             type ===
@@ -1324,6 +1703,7 @@ async function main() {
 
             continue;
         }
+
 
         if (
             type ===
@@ -1343,11 +1723,13 @@ async function main() {
             continue;
         }
 
+
         throw new Error(
             "Authorization non supportata: "
             + type
         );
     }
+
 
     process.stdout.write(
         JSON.stringify(result)
@@ -1366,12 +1748,17 @@ main().catch(
 '''
 
     p = subprocess.run(
+
         [node, "-e", script],
 
         input=json.dumps({
-            "privateKey": STARK,
+
+            "starkPrivateKey":
+                STARK,
+
             "solanaPrivateKey":
                 SOLANA_PRIVATE_KEY,
+
             "authorizations":
                 authorizations
         }),
@@ -1383,12 +1770,14 @@ main().catch(
         timeout=TIMEOUT
     )
 
+
     if p.returncode != 0:
 
         raise RuntimeError(
             p.stderr.strip()
             or "Firma fallita"
         )
+
 
     try:
 
@@ -1443,6 +1832,7 @@ def counter_offer(offer, cards):
         return True
 
     inp = {
+
         "receiveAssetIds":
             ids,
 
@@ -1450,6 +1840,7 @@ def counter_offer(offer, cards):
             [],
 
         "sendAmount": {
+
             "amount":
                 str(amount),
 
@@ -1466,6 +1857,7 @@ def counter_offer(offer, cards):
         "clientMutationId":
             str(uuid.uuid4())
     }
+
 
     data = graphql("""
         mutation PrepareOffer(
@@ -1544,15 +1936,19 @@ def counter_offer(offer, cards):
         "input": inp
     })
 
+
     result = (
         ((data or {}).get("data") or {})
         .get("prepareOffer")
     )
 
+
     if not result:
         return False
 
+
     errors = result.get("errors") or []
+
 
     if errors:
 
@@ -1567,10 +1963,12 @@ def counter_offer(offer, cards):
 
         return False
 
+
     auth = (
         result.get("authorizations")
         or []
     )
+
 
     if not auth:
 
@@ -1581,6 +1979,7 @@ def counter_offer(offer, cards):
         )
 
         return False
+
 
     try:
 
@@ -1597,6 +1996,7 @@ def counter_offer(offer, cards):
 
         return False
 
+
     create = dict(inp)
 
     create["approvals"] = approvals
@@ -1604,6 +2004,7 @@ def counter_offer(offer, cards):
     create["dealId"] = str(
         uuid.uuid4()
     )
+
 
     data = graphql("""
         mutation CreateDirectOffer(
@@ -1626,15 +2027,19 @@ def counter_offer(offer, cards):
         "input": create
     })
 
+
     result = (
         ((data or {}).get("data") or {})
         .get("createDirectOffer")
     )
 
+
     if not result:
         return False
 
+
     errors = result.get("errors") or []
+
 
     if errors:
 
@@ -1649,13 +2054,16 @@ def counter_offer(offer, cards):
 
         return False
 
+
     token_offer = (
         result.get("tokenOffer")
         or {}
     )
 
+
     if not token_offer.get("id"):
         return False
+
 
     print(
         f"✅ CONTROPROPOSTA INVIATA: "
@@ -1678,11 +2086,13 @@ def process_autobuy(offer):
     ):
         return
 
+
     receiver_cards = (
         (offer.get("receiverSide") or {})
         .get("anyCards")
         or []
     )
+
 
     if not any(
         is_kulenovic(c)
@@ -1690,17 +2100,20 @@ def process_autobuy(offer):
     ):
         return
 
+
     sender_cards = (
         (offer.get("senderSide") or {})
         .get("anyCards")
         or []
     )
 
+
     ids = [
         c.get("assetId")
         for c in sender_cards
         if c.get("assetId")
     ]
+
 
     if not ids:
 
@@ -1714,12 +2127,15 @@ def process_autobuy(offer):
 
         return
 
+
     print(
         f"\n📨 AUTOBUY {offer_id}",
         flush=True
     )
 
+
     details = card_details(ids)
+
 
     if len(details) != len(ids):
 
@@ -1734,11 +2150,14 @@ def process_autobuy(offer):
 
         return
 
+
     valid = []
+
 
     for card in details:
 
         ok, info = validate_card(card)
+
 
         if ok:
 
@@ -1764,6 +2183,7 @@ def process_autobuy(offer):
                 "AUTOBUY"
             )
 
+
     if not valid:
 
         print(
@@ -1776,6 +2196,7 @@ def process_autobuy(offer):
             mark_done(offer_id)
 
         return
+
 
     if counter_offer(
         offer,
@@ -1798,6 +2219,7 @@ def get_exchange_rate_id():
         }
     """)
 
+
     return (
         (((data or {}).get("data") or {})
          .get("config") or {})
@@ -1810,6 +2232,7 @@ def prepare_accept(offer_id):
 
     rate = get_exchange_rate_id()
 
+
     if not rate:
 
         print(
@@ -1820,7 +2243,9 @@ def prepare_accept(offer_id):
 
         return None, None
 
+
     settlement = {
+
         "currency":
             "WEI",
 
@@ -1830,6 +2255,7 @@ def prepare_accept(offer_id):
         "exchangeRateId":
             rate
     }
+
 
     data = graphql("""
         mutation PrepareAcceptOffer(
@@ -1906,6 +2332,7 @@ def prepare_accept(offer_id):
         }
     """, {
         "input": {
+
             "offerId":
                 offer_id,
 
@@ -1914,15 +2341,19 @@ def prepare_accept(offer_id):
         }
     })
 
+
     result = (
         ((data or {}).get("data") or {})
         .get("prepareAcceptOffer")
     )
 
+
     if not result:
         return None, None
 
+
     errors = result.get("errors") or []
+
 
     if errors:
 
@@ -1931,11 +2362,12 @@ def prepare_accept(offer_id):
             json.dumps(
                 errors,
                 ensure_ascii=False
-            ),
+            )[:3000],
             flush=True
         )
 
         return None, None
+
 
     return (
         result.get("authorizations")
@@ -1950,6 +2382,7 @@ def accept_offer(offer):
         offer.get("id")
     )
 
+
     if DRY_RUN:
 
         print(
@@ -1960,12 +2393,15 @@ def accept_offer(offer):
 
         return True
 
+
     auth, rate = prepare_accept(
         offer_id
     )
 
+
     if not auth:
         return False
+
 
     try:
 
@@ -1981,6 +2417,7 @@ def accept_offer(offer):
         )
 
         return False
+
 
     data = graphql("""
         mutation AcceptOffer(
@@ -1999,6 +2436,7 @@ def accept_offer(offer):
             }
         }
     """, {
+
         "input": {
 
             "approvals":
@@ -2008,6 +2446,7 @@ def accept_offer(offer):
                 offer_id,
 
             "settlementInfo": {
+
                 "currency":
                     "WEI",
 
@@ -2023,15 +2462,19 @@ def accept_offer(offer):
         }
     })
 
+
     result = (
         ((data or {}).get("data") or {})
         .get("acceptOffer")
     )
 
+
     if not result:
         return False
 
+
     errors = result.get("errors") or []
+
 
     if errors:
 
@@ -2045,6 +2488,7 @@ def accept_offer(offer):
         )
 
         return False
+
 
     print(
         "✅ SWAP ACCETTATO",
@@ -2060,11 +2504,13 @@ def process_swap(offer):
         offer.get("id")
     )
 
+
     if (
         not offer_id
         or not should_process(offer_id)
     ):
         return
+
 
     sender_cards = (
         (offer.get("senderSide") or {})
@@ -2072,26 +2518,33 @@ def process_swap(offer):
         or []
     )
 
+
     receiver_cards = (
         (offer.get("receiverSide") or {})
         .get("anyCards")
         or []
     )
 
+
     if not sender_cards or not receiver_cards:
         return
 
+
     give_ids = [
+
         c.get("assetId")
         for c in receiver_cards
         if c.get("assetId")
     ]
 
+
     receive_ids = [
+
         c.get("assetId")
         for c in sender_cards
         if c.get("assetId")
     ]
+
 
     if not give_ids or not receive_ids:
 
@@ -2099,18 +2552,22 @@ def process_swap(offer):
 
         return
 
+
     print(
         f"\n🔄 SWAP {offer_id}",
         flush=True
     )
 
+
     give = card_details(
         give_ids
     )
 
+
     receive = card_details(
         receive_ids
     )
+
 
     if (
         len(give) != len(give_ids)
@@ -2128,6 +2585,7 @@ def process_swap(offer):
             mark_done(offer_id)
 
         return
+
 
     if any(
         is_kulenovic(c)
@@ -2154,6 +2612,7 @@ def process_swap(offer):
             mark_done(offer_id)
 
         return
+
 
     if any(
         is_kulenovic(c)
@@ -2182,11 +2641,14 @@ def process_swap(offer):
 
         return
 
+
     total_given = 0
+
 
     for card in give:
 
         floor = live_floor(card)
+
 
         if floor is None:
 
@@ -2216,11 +2678,13 @@ def process_swap(offer):
 
             return
 
+
         print(
             f"📤 SWAP - Carta ceduta: "
             f"{card_label(card)}",
             flush=True
         )
+
 
         print(
             f"   └─ Floor live: "
@@ -2228,13 +2692,17 @@ def process_swap(offer):
             flush=True
         )
 
+
         total_given += floor
 
+
     total_received = 0
+
 
     for card in receive:
 
         ok, info = validate_card(card)
+
 
         if not ok:
 
@@ -2244,17 +2712,21 @@ def process_swap(offer):
                 "SWAP - CARTA RICEVUTA"
             )
 
+
             print(
                 "🔴 SWAP RIFIUTATO",
                 flush=True
             )
+
 
             if reject_offer(offer):
                 mark_done(offer_id)
 
             return
 
+
         floor = info.get("floor")
+
 
         print(
             f"📥 SWAP - Carta ricevuta: "
@@ -2262,13 +2734,16 @@ def process_swap(offer):
             flush=True
         )
 
+
         print(
             f"   └─ Floor live: "
             f"{format_eur(floor)}",
             flush=True
         )
 
+
         total_received += floor
+
 
     cash = price_eur(
         (offer.get("senderSide") or {})
@@ -2276,7 +2751,9 @@ def process_swap(offer):
         or {}
     ) or 0
 
+
     total_received += cash
+
 
     if total_given <= 0:
 
@@ -2290,11 +2767,13 @@ def process_swap(offer):
 
         return
 
+
     minimum = int(
         round(
             total_given * SWAP_MIN
         )
     )
+
 
     maximum = int(
         round(
@@ -2302,11 +2781,13 @@ def process_swap(offer):
         )
     )
 
+
     print(
         f"📤 Totale ceduto: "
         f"{format_eur(total_given)}",
         flush=True
     )
+
 
     print(
         f"📥 Totale ricevuto: "
@@ -2314,11 +2795,13 @@ def process_swap(offer):
         flush=True
     )
 
+
     print(
         f"💶 Cash già offerto: "
         f"{format_eur(cash)}",
         flush=True
     )
+
 
     print(
         f"🎯 Range richiesto: "
@@ -2326,6 +2809,7 @@ def process_swap(offer):
         f"{format_eur(maximum)}",
         flush=True
     )
+
 
     if total_received < minimum:
 
@@ -2335,11 +2819,13 @@ def process_swap(offer):
             - 1
         ) * 100
 
+
         print(
             "🔴 SWAP RIFIUTATO: "
             "valore ricevuto sotto +20%",
             flush=True
         )
+
 
         print(
             f"   ├─ Premium reale: "
@@ -2347,16 +2833,19 @@ def process_swap(offer):
             flush=True
         )
 
+
         print(
             f"   └─ Minimo richiesto: "
             f"+{(SWAP_MIN - 1) * 100:.0f}%",
             flush=True
         )
 
+
         if reject_offer(offer):
             mark_done(offer_id)
 
         return
+
 
     if total_received > maximum:
 
@@ -2366,11 +2855,13 @@ def process_swap(offer):
             - 1
         ) * 100
 
+
         print(
             "🔴 SWAP RIFIUTATO: "
             "valore ricevuto sopra +25%",
             flush=True
         )
+
 
         print(
             f"   ├─ Premium reale: "
@@ -2378,16 +2869,19 @@ def process_swap(offer):
             flush=True
         )
 
+
         print(
             f"   └─ Massimo consentito: "
             f"+{(SWAP_MAX - 1) * 100:.0f}%",
             flush=True
         )
 
+
         if reject_offer(offer):
             mark_done(offer_id)
 
         return
+
 
     premium = (
         total_received
@@ -2395,11 +2889,13 @@ def process_swap(offer):
         - 1
     ) * 100
 
+
     print(
         f"✅ SWAP APPROVABILE: "
         f"+{premium:.2f}%",
         flush=True
     )
+
 
     if not SWAP_AUTO_ACCEPT:
 
@@ -2413,6 +2909,7 @@ def process_swap(offer):
 
         return
 
+
     if accept_offer(offer):
         mark_done(offer_id)
 
@@ -2425,11 +2922,13 @@ def process_offer(offer):
         or []
     )
 
+
     sender_cards = (
         (offer.get("senderSide") or {})
         .get("anyCards")
         or []
     )
+
 
     if any(
         is_kulenovic(c)
@@ -2439,6 +2938,7 @@ def process_offer(offer):
         process_autobuy(offer)
 
         return
+
 
     if sender_cards and receiver_cards:
 
@@ -2452,16 +2952,19 @@ def worker():
         flush=True
     )
 
+
     print(
         f"📦 VERSIONE BOT: "
         f"{BOT_VERSION}",
         flush=True
     )
 
+
     print(
         f"🧪 DRY_RUN={DRY_RUN}",
         flush=True
     )
+
 
     print(
         f"🔄 SWAP_AUTO_ACCEPT="
@@ -2469,11 +2972,13 @@ def worker():
         flush=True
     )
 
+
     print(
         f"💰 AutoBuy: "
         f"€{PAY_PER_CARD / 100:.2f}/carta",
         flush=True
     )
+
 
     print(
         f"📊 AutoBuy floor: "
@@ -2482,10 +2987,12 @@ def worker():
         flush=True
     )
 
+
     print(
         f"🎂 Età: < {MAX_AGE}",
         flush=True
     )
+
 
     print(
         f"📊 Inserzioni minime: "
@@ -2493,10 +3000,12 @@ def worker():
         flush=True
     )
 
+
     print(
         "🔄 SWAP: +20% / +25%",
         flush=True
     )
+
 
     print(
         "💶 SWAP CASH: "
@@ -2504,10 +3013,12 @@ def worker():
         flush=True
     )
 
+
     print(
         "🚫 SWAP NON aggiunge cash",
         flush=True
     )
+
 
     print(
         "💰 PRICE SOURCE: "
@@ -2515,27 +3026,32 @@ def worker():
         flush=True
     )
 
+
     print(
         "🎯 MATCH PRICE: "
         "player + rarity + season",
         flush=True
     )
 
+
     print(
         "💶 EUR: eurCents | "
-        "💵 USD: usdCents → EUR",
+        "USD: usdCents → EUR",
         flush=True
     )
+
 
     print(
         "🚫 WEI: escluso",
         flush=True
     )
 
+
     print(
         "🔒 KULENOVIC: MAI CEDIBILE",
         flush=True
     )
+
 
     print(
         "🎯 KULENOVIC RICHIESTO "
@@ -2543,20 +3059,38 @@ def worker():
         flush=True
     )
 
+
     print(
         "🛡️ DOPPIA BARRIERA "
         "KULENOVIC ATTIVA",
         flush=True
     )
 
+
     print(
         "📝 LOG MOTIVI ESCLUSIONE: ATTIVO",
         flush=True
     )
 
+
+    print(
+        "🔐 SOLANA AUTH: "
+        "SLIP-0010 + Ed25519",
+        flush=True
+    )
+
+
+    print(
+        "🧬 SOLANA PATH: "
+        "m/44'/501'/0'/0'",
+        flush=True
+    )
+
+
     coverage = load_coverage(
         force=True
     )
+
 
     if not coverage:
 
@@ -2568,14 +3102,17 @@ def worker():
 
         return
 
+
     print(
         f"🏆 Competizioni Football coperte: "
         f"{len(coverage)}",
         flush=True
     )
 
+
     if not check_account():
         return
+
 
     while True:
 
@@ -2583,11 +3120,13 @@ def worker():
 
             offers = get_offers()
 
+
             print(
                 f"📨 Offerte pendenti: "
                 f"{len(offers)}",
                 flush=True
             )
+
 
             for offer in offers:
 
@@ -2605,7 +3144,11 @@ def worker():
                         flush=True
                     )
 
-            time.sleep(INTERVAL)
+
+            time.sleep(
+                INTERVAL
+            )
+
 
         except Exception as e:
 
@@ -2614,25 +3157,31 @@ def worker():
                 flush=True
             )
 
-            time.sleep(INTERVAL)
+            time.sleep(
+                INTERVAL
+            )
 
 
 def start_worker():
 
     global worker_started
 
+
     with worker_lock:
 
         if worker_started:
             return
 
+
         worker_started = True
+
 
         threading.Thread(
             target=worker,
             name="sorare-worker",
             daemon=True
         ).start()
+
 
         print(
             "✅ Thread Sorare avviato.",
@@ -2644,9 +3193,11 @@ def start_worker():
 def home():
 
     with coverage_lock:
+
         covered = set(
             coverage_cache
         )
+
 
     return jsonify({
 
@@ -2707,6 +3258,12 @@ def home():
         "solana_auth":
             "ENABLED",
 
+        "solana_derivation":
+            "SLIP-0010",
+
+        "solana_derivation_path":
+            "m/44'/501'/0'/0'",
+
         "covered_competitions_count":
             len(covered),
 
@@ -2722,9 +3279,11 @@ def home():
 def health():
 
     with coverage_lock:
+
         loaded = bool(
             coverage_cache
         )
+
 
     return jsonify({
 
