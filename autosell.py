@@ -2,9 +2,11 @@ import os
 import time
 import uuid
 import json
-import subprocess
 import shutil
+import subprocess
+import threading
 import requests
+
 
 # ============================================================
 # AUTOSELL - MODULO INDIPENDENTE
@@ -16,24 +18,30 @@ TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
-DRY_RUN = os.getenv(
-    "AUTOSELL_DRY_RUN", "true"
-).lower() == "true"
+DRY_RUN = os.getenv("AUTOSELL_DRY_RUN", "false").lower() == "true"
 
-INTERVAL = int(
-    os.getenv("AUTOSELL_INTERVAL", "60")
-)
+# Controllo ogni minuto
+INTERVAL = int(os.getenv("AUTOSELL_INTERVAL", "60"))
 
 TIMEOUT = 25
 
-MIN_PRICE = 32
-MAX_PRICE = 70
+# ============================================================
+# REGOLE AUTOSELL
+# ============================================================
+
+MIN_PRICE = 32          # €0.32
+MAX_PRICE = 70          # €0.70
 
 LISTING_DAYS = 7
+LISTING_SECONDS = 7 * 24 * 60 * 60
 
-KULENOVIC_ID = os.getenv(
-    "KULENOVIC_ID", ""
-).strip()
+MIN_LIVE_LISTINGS = 5
+
+# ============================================================
+# KULENOVIC - MAI VENDERE
+# ============================================================
+
+KULENOVIC_ID = os.getenv("KULENOVIC_ID", "").strip()
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 
@@ -43,11 +51,19 @@ KASSET = (
 )
 
 # ============================================================
+# LOCK
+# ============================================================
+
+started = False
+start_lock = threading.Lock()
+
+
+# ============================================================
 # UTILITY
 # ============================================================
 
-def norm(v):
-    return str(v or "").strip().lower()
+def norm(value):
+    return str(value or "").strip().lower()
 
 
 def card_name(card):
@@ -56,6 +72,10 @@ def card_name(card):
         or card.get("slug")
         or "Carta"
     )
+
+
+def eur(cents):
+    return f"€{cents / 100:.2f}"
 
 
 def is_kulenovic(card):
@@ -73,12 +93,8 @@ def is_kulenovic(card):
     )
 
 
-def eur(cents):
-    return f"€{cents / 100:.2f}"
-
-
 # ============================================================
-# GRAPHQL
+# HTTP / GRAPHQL
 # ============================================================
 
 def headers():
@@ -92,17 +108,17 @@ def headers():
     if not token.lower().startswith("bearer "):
         token = "Bearer " + token
 
-    h = {
+    result = {
         "Authorization": token,
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "Sorare-AutoSell/1.1",
+        "User-Agent": "Sorare-AutoSell/2.0",
     }
 
     if AUD:
-        h["JWT-AUD"] = AUD
+        result["JWT-AUD"] = AUD
 
-    return h
+    return result
 
 
 def graphql(query, variables=None):
@@ -111,76 +127,140 @@ def graphql(query, variables=None):
         "variables": variables or {},
     }
 
-    try:
-        r = requests.post(
-            URL,
-            json=payload,
-            headers=headers(),
-            timeout=TIMEOUT,
-        )
+    for attempt in range(3):
 
-        print(
-            f"🌐 Sorare HTTP {r.status_code}",
-            flush=True,
-        )
-
-        if r.status_code != 200:
-            print(
-                f"❌ HTTP: {r.text[:500]}",
-                flush=True,
+        try:
+            response = requests.post(
+                URL,
+                json=payload,
+                headers=headers(),
+                timeout=TIMEOUT,
             )
-            return None
 
-        data = r.json()
-
-        if data.get("errors"):
             print(
-                "❌ GraphQL:",
-                json.dumps(
-                    data["errors"],
-                    ensure_ascii=False,
-                )[:3000],
+                f"🌐 AutoSell Sorare HTTP "
+                f"{response.status_code}",
                 flush=True,
             )
 
-        return data
+            if response.status_code == 429:
 
-    except Exception as e:
-        print(
-            f"❌ GraphQL: {e}",
-            flush=True,
-        )
-        return None
+                retry = response.headers.get(
+                    "Retry-After",
+                    str(attempt + 2)
+                )
+
+                try:
+                    retry = int(retry)
+                except ValueError:
+                    retry = attempt + 2
+
+                retry = min(retry, 30)
+
+                print(
+                    f"⏳ AutoSell rate limit → "
+                    f"attendo {retry}s",
+                    flush=True,
+                )
+
+                time.sleep(retry)
+                continue
+
+            if response.status_code != 200:
+
+                print(
+                    f"❌ AutoSell HTTP "
+                    f"{response.status_code}: "
+                    f"{response.text[:500]}",
+                    flush=True,
+                )
+
+                time.sleep(attempt + 1)
+                continue
+
+            data = response.json()
+
+            if data.get("errors"):
+
+                print(
+                    "❌ AutoSell GraphQL:",
+                    json.dumps(
+                        data["errors"],
+                        ensure_ascii=False,
+                    )[:3000],
+                    flush=True,
+                )
+
+            return data
+
+        except Exception as exc:
+
+            print(
+                f"❌ AutoSell GraphQL: {exc}",
+                flush=True,
+            )
+
+            time.sleep(attempt + 1)
+
+    return None
 
 
 # ============================================================
 # ACCOUNT
 # ============================================================
 
-def get_account():
+def check_account():
+
     data = graphql("""
-        query {
+        query AutoSellAccount {
             currentUser {
                 slug
                 nickname
+                starkKey
             }
         }
     """)
 
-    return (
+    user = (
         ((data or {}).get("data") or {})
         .get("currentUser")
         or {}
     )
 
+    if not user:
+        print(
+            "❌ AutoSell: account non verificato",
+            flush=True,
+        )
+        return False
+
+    print(
+        f"✅ AutoSell account: "
+        f"{user.get('nickname') or user.get('slug')}",
+        flush=True,
+    )
+
+    print(
+        "🔐 AutoSell Stark key: "
+        + (
+            "PRESENTE"
+            if user.get("starkKey")
+            else "NON DISPONIBILE"
+        ),
+        flush=True,
+    )
+
+    return True
+
 
 # ============================================================
-# CARTE DELLA GALLERY
+# GALLERY
 # ============================================================
 
 def get_cards(cursor=None):
+
     data = graphql("""
-        query MyCards($cursor: String) {
+        query AutoSellCards($cursor: String) {
             currentUser {
                 cards(after: $cursor) {
                     nodes {
@@ -194,6 +274,17 @@ def get_cards(cursor=None):
                         anyPlayer {
                             slug
                             displayName
+                            age
+                        }
+
+                        # Carta effettivamente utilizzata
+                        # in una lineup So5 attiva/aperta
+                        liveSo5Lineup {
+                            id
+                        }
+
+                        openedSo5Lineups {
+                            id
                         }
 
                         myMintedSingleSaleOffer {
@@ -211,7 +302,7 @@ def get_cards(cursor=None):
             }
         }
     """, {
-        "cursor": cursor
+        "cursor": cursor,
     })
 
     user = (
@@ -229,10 +320,12 @@ def get_cards(cursor=None):
 
 
 def all_cards():
+
     result = []
     cursor = None
 
     while True:
+
         cards, page = get_cards(cursor)
 
         result.extend(cards)
@@ -249,70 +342,41 @@ def all_cards():
 
 
 # ============================================================
-# CARTE SCHIERATE
-#
-# Sorare fornisce direttamente gli assetId delle carte
-# impegnate nelle lineup Football live o upcoming.
-#
-# True  -> carta schierata
-# False -> carta libera
-# None  -> impossibile verificare
+# CARTA SCHIERATA
 # ============================================================
 
-def get_lineup_assets():
-    data = graphql("""
-        query MyLineupCards {
-            currentUser {
-                blockchainCardsInLineups(
-                    sport: FOOTBALL
-                )
-            }
-        }
-    """)
+def is_in_lineup(card):
 
-    user = (
-        ((data or {}).get("data") or {})
-        .get("currentUser")
+    live = card.get("liveSo5Lineup")
+
+    if live and live.get("id"):
+        return True, "LIVE_SO5_LINEUP"
+
+    opened = card.get("openedSo5Lineups") or []
+
+    if opened:
+        for lineup in opened:
+
+            if isinstance(lineup, dict) and lineup.get("id"):
+                return True, "OPENED_SO5_LINEUP"
+
+    return False, None
+
+
+# ============================================================
+# GIÀ IN VENDITA
+# ============================================================
+
+def already_listed(card):
+
+    offer = card.get(
+        "myMintedSingleSaleOffer"
     )
 
-    if user is None:
-        print(
-            "❌ AUTOSELL: impossibile verificare "
-            "le carte schierate",
-            flush=True,
-        )
-        return None
-
-    assets = user.get(
-        "blockchainCardsInLineups"
+    return bool(
+        offer
+        and offer.get("id")
     )
-
-    if assets is None:
-        print(
-            "❌ AUTOSELL: stato lineup non disponibile",
-            flush=True,
-        )
-        return None
-
-    return {
-        norm(asset)
-        for asset in assets
-        if asset
-    }
-
-
-def lineup_status(card, lineup_assets):
-    asset_id = norm(
-        card.get("assetId")
-    )
-
-    if not asset_id:
-        return None
-
-    if lineup_assets is None:
-        return None
-
-    return asset_id in lineup_assets
 
 
 # ============================================================
@@ -320,6 +384,7 @@ def lineup_status(card, lineup_assets):
 # ============================================================
 
 def live_floor(card):
+
     player = card.get("anyPlayer") or {}
 
     player_slug = norm(
@@ -341,7 +406,7 @@ def live_floor(card):
         return None
 
     data = graphql("""
-        query LiveSales(
+        query AutoSellLiveSales(
             $playerSlug: String,
             $first: Int
         ) {
@@ -351,6 +416,7 @@ def live_floor(card):
                     first: $first
                 ) {
                     nodes {
+
                         senderSide {
                             anyCards {
                                 assetId
@@ -410,20 +476,20 @@ def live_floor(card):
             except (TypeError, ValueError):
                 continue
 
-            if (
-                norm(
-                    (other.get("anyPlayer") or {})
-                    .get("slug")
-                ) != player_slug
-            ):
-                continue
+            other_player = norm(
+                (other.get("anyPlayer") or {})
+                .get("slug")
+            )
 
-            if norm(
+            other_rarity = norm(
                 other.get("rarityTyped")
-            ) != rarity:
-                continue
+            )
 
-            if other_season != season:
+            if (
+                other_player != player_slug
+                or other_rarity != rarity
+                or other_season != season
+            ):
                 continue
 
             amounts = (
@@ -444,51 +510,39 @@ def live_floor(card):
 
             break
 
-    if not prices:
+    # ========================================================
+    # SICUREZZA:
+    # devono esserci almeno 5 inserzioni live
+    # ========================================================
+
+    if len(prices) < MIN_LIVE_LISTINGS:
+
+        print(
+            f"⚠️ {card_name(card)} → solo "
+            f"{len(prices)} inserzioni live "
+            f"(richieste {MIN_LIVE_LISTINGS})",
+            flush=True,
+        )
+
         return None
 
     return min(prices)
 
 
 # ============================================================
-# RANGE PREZZO
+# VALIDAZIONE
 # ============================================================
 
-def valid_price(floor):
-    return (
-        floor is not None
-        and MIN_PRICE <= floor <= MAX_PRICE
-    )
-
-
-# ============================================================
-# CARTA GIÀ IN VENDITA
-# ============================================================
-
-def already_listed(card):
-    offer = card.get(
-        "myMintedSingleSaleOffer"
-    )
-
-    return bool(
-        offer
-        and offer.get("id")
-    )
-
-
-# ============================================================
-# CONTROLLO CARTA
-# ============================================================
-
-def check_card(card, lineup_assets):
+def check_card(card):
 
     name = card_name(card)
 
     # --------------------------------------------------------
-    # KULENOVIC
+    # 1. KULENOVIC
     # --------------------------------------------------------
 
     if is_kulenovic(card):
+
         print(
             f"🔒 {name} → NON VENDERE",
             flush=True,
@@ -502,49 +556,7 @@ def check_card(card, lineup_assets):
         return None
 
     # --------------------------------------------------------
-    # CARTA SCHIERATA
-    # --------------------------------------------------------
-
-    status = lineup_status(
-        card,
-        lineup_assets
-    )
-
-    if status is None:
-        print(
-            f"🛡️ {name} → NON VENDERE",
-            flush=True,
-        )
-
-        print(
-            "   └─ Motivo: impossibile verificare "
-            "lo stato della lineup",
-            flush=True,
-        )
-
-        return None
-
-    if status:
-        print(
-            f"🏟️ {name} → NON VENDERE",
-            flush=True,
-        )
-
-        print(
-            "   └─ Motivo: CARTA SCHIERATA "
-            "IN UNA LINEUP LIVE/UPCOMING",
-            flush=True,
-        )
-
-        return None
-
-    print(
-        f"🟢 {name} → carta libera",
-        flush=True,
-    )
-
-    # --------------------------------------------------------
-    # RARITY
+    # 2. RARITY
     # --------------------------------------------------------
 
     rarity = norm(
@@ -552,8 +564,9 @@ def check_card(card, lineup_assets):
     ).upper()
 
     if rarity != "LIMITED":
+
         print(
-            f"🚫 {name} → esclusa",
+            f"🚫 {name} → NON VENDERE",
             flush=True,
         )
 
@@ -566,10 +579,32 @@ def check_card(card, lineup_assets):
         return None
 
     # --------------------------------------------------------
-    # GIÀ IN VENDITA
+    # 3. CARTA SCHIERATA
+    # --------------------------------------------------------
+
+    in_lineup, lineup_type = is_in_lineup(card)
+
+    if in_lineup:
+
+        print(
+            f"🏆 {name} → NON VENDERE",
+            flush=True,
+        )
+
+        print(
+            f"   └─ Motivo: carta schierata "
+            f"({lineup_type})",
+            flush=True,
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # 4. GIÀ IN VENDITA
     # --------------------------------------------------------
 
     if already_listed(card):
+
         print(
             f"⏳ {name} → già in vendita",
             flush=True,
@@ -578,14 +613,15 @@ def check_card(card, lineup_assets):
         return None
 
     # --------------------------------------------------------
-    # FLOOR
+    # 5. FLOOR LIVE
     # --------------------------------------------------------
 
     floor = live_floor(card)
 
     if floor is None:
+
         print(
-            f"🚫 {name} → esclusa",
+            f"🚫 {name} → NON VENDERE",
             flush=True,
         )
 
@@ -598,15 +634,17 @@ def check_card(card, lineup_assets):
         return None
 
     print(
-        f"💰 {name} → Floor: {eur(floor)}",
+        f"💰 {name} → Floor live: "
+        f"{eur(floor)}",
         flush=True,
     )
 
     # --------------------------------------------------------
-    # SOTTO MINIMO
+    # 6. FLOOR < €0.32
     # --------------------------------------------------------
 
     if floor < MIN_PRICE:
+
         print(
             f"🚫 {name} → NON VENDERE",
             flush=True,
@@ -621,10 +659,11 @@ def check_card(card, lineup_assets):
         return None
 
     # --------------------------------------------------------
-    # SOPRA MASSIMO
+    # 7. FLOOR > €0.70
     # --------------------------------------------------------
 
     if floor > MAX_PRICE:
+
         print(
             f"🚫 {name} → NON VENDERE",
             flush=True,
@@ -637,6 +676,10 @@ def check_card(card, lineup_assets):
         )
 
         return None
+
+    # --------------------------------------------------------
+    # OK
+    # --------------------------------------------------------
 
     print(
         f"✅ {name} → VENDIBILE "
@@ -762,7 +805,7 @@ process.stdout.write(
 );
 '''
 
-    p = subprocess.run(
+    process = subprocess.run(
         [
             node,
             "-e",
@@ -777,19 +820,20 @@ process.stdout.write(
         timeout=TIMEOUT,
     )
 
-    if p.returncode != 0:
+    if process.returncode != 0:
+
         raise RuntimeError(
-            p.stderr.strip()
+            process.stderr.strip()
             or "Firma fallita"
         )
 
     return json.loads(
-        p.stdout
+        process.stdout
     )
 
 
 # ============================================================
-# METTI IN VENDITA
+# CREA INSERZIONE
 # ============================================================
 
 def create_listing(card, floor):
@@ -797,33 +841,33 @@ def create_listing(card, floor):
     asset_id = card.get("assetId")
 
     if not asset_id:
+
         print(
             "❌ AssetId mancante",
             flush=True,
         )
+
         return False
 
-    # --------------------------------------------------------
-    # PROTEZIONE KULENOVIC
-    # --------------------------------------------------------
-
+    # Doppia protezione Kulenovic
     if is_kulenovic(card):
+
         print(
             "🛡️ BLOCCO ASSOLUTO KULENOVIC",
             flush=True,
         )
+
         return False
 
-    # --------------------------------------------------------
-    # PREZZO
-    # --------------------------------------------------------
+    # Doppia protezione prezzo
+    if floor < MIN_PRICE or floor > MAX_PRICE:
 
-    if not valid_price(floor):
         print(
-            "🛑 Prezzo fuori range "
-            "→ nessuna vendita",
+            "🛑 Prezzo fuori range → "
+            "nessuna vendita",
             flush=True,
         )
+
         return False
 
     print(
@@ -834,21 +878,23 @@ def create_listing(card, floor):
     )
 
     if DRY_RUN:
+
         print(
-            "🟡 DRY_RUN=True "
+            "🟡 AUTOSELL_DRY_RUN=True "
             "→ vendita simulata",
             flush=True,
         )
+
         return True
 
-    # --------------------------------------------------------
+    # ========================================================
     # PREPARE OFFER
     #
-    # Nessun settlementInfo qui.
-    # --------------------------------------------------------
+    # IMPORTANTE:
+    # prepareOfferInput attuale NON contiene "type".
+    # ========================================================
 
     prepare_input = {
-        "type": "SINGLE_SALE_OFFER",
 
         "sendAssetIds": [
             asset_id
@@ -871,7 +917,7 @@ def create_listing(card, floor):
     }
 
     data = graphql("""
-        mutation PrepareOffer(
+        mutation AutoSellPrepareOffer(
             $input: prepareOfferInput!
         ) {
             prepareOffer(input: $input) {
@@ -941,11 +987,18 @@ def create_listing(card, floor):
     )
 
     if not result:
+
+        print(
+            "❌ prepareOffer → nessun risultato",
+            flush=True,
+        )
+
         return False
 
     errors = result.get("errors") or []
 
     if errors:
+
         print(
             "❌ prepareOffer:",
             json.dumps(
@@ -954,6 +1007,7 @@ def create_listing(card, floor):
             ),
             flush=True,
         )
+
         return False
 
     authorizations = (
@@ -962,29 +1016,42 @@ def create_listing(card, floor):
     )
 
     if not authorizations:
+
         print(
-            "❌ Nessuna authorization",
+            "❌ prepareOffer → "
+            "nessuna authorization",
             flush=True,
         )
+
         return False
 
+    # ========================================================
+    # FIRMA
+    # ========================================================
+
     try:
+
         approvals = sign_authorizations(
             authorizations
         )
 
-    except Exception as e:
+    except Exception as exc:
+
         print(
-            f"❌ Firma vendita: {e}",
+            f"❌ Firma vendita: {exc}",
             flush=True,
         )
+
         return False
 
-    # --------------------------------------------------------
+    # ========================================================
     # CREATE SINGLE SALE
-    # --------------------------------------------------------
+    #
+    # duration = 604800 secondi = 7 giorni
+    # ========================================================
 
     create_input = {
+
         "approvals": approvals,
 
         "dealId": str(
@@ -1002,13 +1069,15 @@ def create_listing(card, floor):
             "currency": "EUR"
         },
 
+        "duration": LISTING_SECONDS,
+
         "clientMutationId": str(
             uuid.uuid4()
         )
     }
 
     data = graphql("""
-        mutation CreateSingleSaleOffer(
+        mutation AutoSellCreateListing(
             $input: createSingleSaleOfferInput!
         ) {
             createSingleSaleOffer(input: $input) {
@@ -1034,11 +1103,19 @@ def create_listing(card, floor):
     )
 
     if not result:
+
+        print(
+            "❌ createSingleSaleOffer "
+            "→ nessun risultato",
+            flush=True,
+        )
+
         return False
 
     errors = result.get("errors") or []
 
     if errors:
+
         print(
             "❌ createSingleSaleOffer:",
             json.dumps(
@@ -1047,6 +1124,7 @@ def create_listing(card, floor):
             ),
             flush=True,
         )
+
         return False
 
     offer = (
@@ -1055,10 +1133,12 @@ def create_listing(card, floor):
     )
 
     if not offer.get("id"):
+
         print(
             "❌ Listing non creata",
             flush=True,
         )
+
         return False
 
     print(
@@ -1069,6 +1149,11 @@ def create_listing(card, floor):
 
     print(
         f"   ├─ Prezzo: {eur(floor)}",
+        flush=True,
+    )
+
+    print(
+        f"   ├─ Durata: {LISTING_DAYS} giorni",
         flush=True,
     )
 
@@ -1093,13 +1178,13 @@ def create_listing(card, floor):
 
 
 # ============================================================
-# CICLO AUTOSELL
+# CICLO
 # ============================================================
 
 def run_once():
 
     print(
-        "\n==============================",
+        "\n================================",
         flush=True,
     )
 
@@ -1109,33 +1194,9 @@ def run_once():
     )
 
     print(
-        "==============================",
+        "================================",
         flush=True,
     )
-
-    # --------------------------------------------------------
-    # VERIFICA LINEUP UNA SOLA VOLTA
-    # --------------------------------------------------------
-
-    lineup_assets = get_lineup_assets()
-
-    if lineup_assets is None:
-        print(
-            "🛑 AUTOSELL BLOCCATO: "
-            "impossibile verificare le carte schierate",
-            flush=True,
-        )
-        return
-
-    print(
-        f"🏟️ Carte impegnate in lineup "
-        f"live/upcoming: {len(lineup_assets)}",
-        flush=True,
-    )
-
-    # --------------------------------------------------------
-    # GALLERY
-    # --------------------------------------------------------
 
     cards = all_cards()
 
@@ -1148,28 +1209,9 @@ def run_once():
 
         try:
 
-            floor = check_card(
-                card,
-                lineup_assets
-            )
+            floor = check_card(card)
 
             if floor is None:
-                continue
-
-            # ------------------------------------------------
-            # ULTIMO BLOCCO DI SICUREZZA
-            # ------------------------------------------------
-
-            if lineup_status(
-                card,
-                lineup_assets
-            ):
-                print(
-                    f"🛡️ BLOCCO FINALE: "
-                    f"{card_name(card)} "
-                    f"risulta schierata",
-                    flush=True,
-                )
                 continue
 
             create_listing(
@@ -1177,19 +1219,20 @@ def run_once():
                 floor
             )
 
-        except Exception as e:
+        except Exception as exc:
 
             print(
-                f"❌ Errore {card_name(card)}: {e}",
+                f"❌ AutoSell errore "
+                f"{card_name(card)}: {exc}",
                 flush=True,
             )
 
 
 # ============================================================
-# START
+# WORKER
 # ============================================================
 
-def main():
+def worker():
 
     print(
         "🤖 AUTOSELL AVVIATO",
@@ -1202,35 +1245,18 @@ def main():
     )
 
     print(
-        f"🧪 DRY_RUN={DRY_RUN}",
+        f"🧪 AUTOSELL_DRY_RUN={DRY_RUN}",
         flush=True,
     )
 
     print(
-        f"💰 RANGE: "
-        f"{eur(MIN_PRICE)} - "
+        "🏆 RARITÀ: LIMITED",
+        flush=True,
+    )
+
+    print(
+        f"💰 FLOOR: {eur(MIN_PRICE)} - "
         f"{eur(MAX_PRICE)}",
-        flush=True,
-    )
-
-    print(
-        f"⏱️ DURATA LISTING: "
-        f"{LISTING_DAYS} giorni",
-        flush=True,
-    )
-
-    print(
-        "🔒 KULENOVIC: MAI IN VENDITA",
-        flush=True,
-    )
-
-    print(
-        "🏟️ CARTE SCHIERATE: BLOCCATE",
-        flush=True,
-    )
-
-    print(
-        "🏆 LIMITED soltanto",
         flush=True,
     )
 
@@ -1240,39 +1266,91 @@ def main():
     )
 
     print(
-        "🛡️ FALLBACK SICURO: "
-        "SE LINEUP NON VERIFICABILE → NON VENDERE",
+        f"📊 INSERZIONI LIVE MINIME: "
+        f"{MIN_LIVE_LISTINGS}",
         flush=True,
     )
-
-    user = get_account()
-
-    if not user:
-        print(
-            "❌ Account Sorare non verificato",
-            flush=True,
-        )
-        return
 
     print(
-        f"✅ Account: "
-        f"{user.get('nickname') or user.get('slug')}",
+        f"⏱️ DURATA: {LISTING_DAYS} giorni",
         flush=True,
     )
 
+    print(
+        "🏆 CARTA SCHIERATA → NON VENDERE",
+        flush=True,
+    )
+
+    print(
+        "🔒 KULENOVIC → MAI VENDERE",
+        flush=True,
+    )
+
+    print(
+        "🆕 CARTE APPENA ACQUISTATE → "
+        "INCLUSE",
+        flush=True,
+    )
+
+    print(
+        "🔄 INSERZIONE SCADUTA → "
+        "RIMESSA IN VENDITA",
+        flush=True,
+    )
+
+    if not check_account():
+        return
+
+    # Primo controllo immediato
+    try:
+        run_once()
+    except Exception as exc:
+        print(
+            f"❌ AutoSell primo controllo: {exc}",
+            flush=True,
+        )
+
     while True:
+
+        time.sleep(INTERVAL)
 
         try:
             run_once()
 
-        except Exception as e:
+        except Exception as exc:
+
             print(
-                f"❌ AUTOSELL: {e}",
+                f"❌ AutoSell worker: {exc}",
                 flush=True,
             )
 
-        time.sleep(INTERVAL)
 
+# ============================================================
+# START PUBBLICO
+# ============================================================
 
-if __name__ == "__main__":
-    main()
+def start():
+
+    global started
+
+    with start_lock:
+
+        if started:
+            print(
+                "ℹ️ AutoSell già avviato",
+                flush=True,
+            )
+            return
+
+        started = True
+
+        threading.Thread(
+            target=worker,
+            name="autosell-worker",
+            daemon=True,
+        ).start()
+
+        print(
+            "✅ Thread AutoSell avviato.",
+            flush=True,
+        )
