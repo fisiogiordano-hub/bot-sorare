@@ -56,6 +56,20 @@ DRY_RUN = False
 MIN_PRICE = 32
 MAX_PRICE = 70
 
+# ============================================================
+# L10 PROTECTION
+#
+# NON vendere MAI carte con L10 superiore a 47.
+#
+# 47   -> consentito
+# 48+  -> BLOCCATO
+#
+# Se L10 non è disponibile/verificabile,
+# la vendita viene BLOCCATA per sicurezza.
+# ============================================================
+
+MAX_L10 = 47
+
 MIN_LIVE_LISTINGS = 5
 
 REQUEST_DELAY = float(
@@ -64,7 +78,7 @@ REQUEST_DELAY = float(
 
 TIMEOUT = 30
 
-BOT_VERSION = "42.0-SOLANA-ED25519-NATIVE"
+BOT_VERSION = "43.0-SOLANA-ED25519-L10-47"
 
 
 # ============================================================
@@ -158,6 +172,36 @@ def label(card):
         )
 
     return " • ".join(parts)
+
+
+def card_l10(card):
+
+    value = card.get("l10")
+
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+
+    except (TypeError, ValueError):
+        return None
+
+
+def label_with_l10(card):
+
+    base = label(card)
+
+    l10 = card_l10(card)
+
+    if l10 is None:
+        return (
+            f"{base} | L10=N/D"
+        )
+
+    return (
+        f"{base} | L10={l10:g}"
+    )
 
 
 def sleep_request_delay():
@@ -424,6 +468,22 @@ def get_gallery():
                             seasonYear
                             serialNumber
                             sealed
+
+                            # =================================================
+                            # L10
+                            #
+                            # Sorare GraphQL:
+                            #
+                            # averageScore(
+                            #     type: LAST_TEN_PLAYED_SO5_AVERAGE_SCORE
+                            # )
+                            #
+                            # Questo viene letto direttamente dalla CARD.
+                            # =================================================
+
+                            l10: averageScore(
+                                type: LAST_TEN_PLAYED_SO5_AVERAGE_SCORE
+                            )
 
                             anyPlayer {
                                 slug
@@ -943,7 +1003,7 @@ def live_floor(card):
     if len(prices) < MIN_LIVE_LISTINGS:
 
         print(
-            f"⚠️ {label(card)}: "
+            f"⚠️ {label_with_l10(card)}: "
             f"solo {len(prices)} "
             f"listing comparabili "
             f"(minimo "
@@ -970,7 +1030,7 @@ def live_floor(card):
     )
 
     print(
-        f"📊 {label(card)} → "
+        f"📊 {label_with_l10(card)} → "
         f"{len(prices)} listing | "
         f"FLOOR {eur(floor)}",
         flush=True,
@@ -985,6 +1045,10 @@ def live_floor(card):
 
 def validate(card, lineup):
 
+    # --------------------------------------------------------
+    # VAULT
+    # --------------------------------------------------------
+
     if card.get("sealed"):
         return (
             False,
@@ -992,12 +1056,20 @@ def validate(card, lineup):
             None,
         )
 
+    # --------------------------------------------------------
+    # KULENOVIC
+    # --------------------------------------------------------
+
     if is_kulenovic(card):
         return (
             False,
             "KULENOVIC",
             None,
         )
+
+    # --------------------------------------------------------
+    # RARITY
+    # --------------------------------------------------------
 
     if norm(
         card.get("rarityTyped")
@@ -1007,6 +1079,50 @@ def validate(card, lineup):
             "RARITY",
             None,
         )
+
+    # ========================================================
+    # L10 PROTECTION
+    #
+    # REGOLA ASSOLUTA:
+    #
+    # L10 > 47
+    #     → MAI IN VENDITA
+    #
+    # L10 == 47
+    #     → CONSENTITO
+    #
+    # L10 < 47
+    #     → CONSENTITO
+    #
+    # L10 mancante/non valido
+    #     → BLOCCATO
+    #
+    # IMPORTANTE:
+    # questo controllo viene eseguito PRIMA di live_floor()
+    # e quindi prima di prepareOffer().
+    # ========================================================
+
+    l10 = card_l10(card)
+
+    if l10 is None:
+
+        return (
+            False,
+            "L10_UNKNOWN",
+            None,
+        )
+
+    if l10 > MAX_L10:
+
+        return (
+            False,
+            "L10_HIGH",
+            l10,
+        )
+
+    # --------------------------------------------------------
+    # LINEUP
+    # --------------------------------------------------------
 
     lineup_state = in_lineup(
         card,
@@ -1027,6 +1143,10 @@ def validate(card, lineup):
             None,
         )
 
+    # --------------------------------------------------------
+    # LIVE FLOOR
+    # --------------------------------------------------------
+
     floor = live_floor(
         card
     )
@@ -1038,12 +1158,20 @@ def validate(card, lineup):
             None,
         )
 
+    # --------------------------------------------------------
+    # MIN PRICE
+    # --------------------------------------------------------
+
     if floor < MIN_PRICE:
         return (
             False,
             "PRICE_LOW",
             floor,
         )
+
+    # --------------------------------------------------------
+    # MAX PRICE
+    # --------------------------------------------------------
 
     if floor > MAX_PRICE:
         return (
@@ -1088,9 +1216,25 @@ def reject(
 
         "PRICE_UNKNOWN":
             "PREZZO LIVE NON VERIFICABILE",
+
+        "L10_UNKNOWN":
+            "L10 NON VERIFICABILE → VENDITA BLOCCATA",
+
     }
 
-    if reason == "PRICE_LOW":
+    # ========================================================
+    # L10 HIGH
+    # ========================================================
+
+    if reason == "L10_HIGH":
+
+        msg = (
+            f"L10 {value:g} "
+            f"> {MAX_L10} "
+            f"→ VENDITA BLOCCATA"
+        )
+
+    elif reason == "PRICE_LOW":
 
         msg = (
             f"FLOOR {eur(value)} "
@@ -1114,7 +1258,7 @@ def reject(
         )
 
     print(
-        f"🚫 {label(card)} → "
+        f"🚫 {label_with_l10(card)} → "
         f"{msg}",
         flush=True,
     )
@@ -1634,9 +1778,6 @@ def sign_solana(
     # BUILD PKCS8 PRIVATE KEY
     # --------------------------------------------------------
 
-    # DER prefix for:
-    # Ed25519 private key containing 32-byte seed
-
     pkcs8_prefix = bytes.fromhex(
         "302e020100300506032b657004220420"
     )
@@ -1648,9 +1789,6 @@ def sign_solana(
 
     # --------------------------------------------------------
     # NODE SCRIPT
-    #
-    # We pass the PKCS8 private key as Base64.
-    # Node derives the Ed25519 public key and signs.
     # --------------------------------------------------------
 
     executable = node()
@@ -1700,16 +1838,6 @@ async function main() {
       format: "der",
       type: "spki"
     });
-
-  /*
-   * Ed25519 SPKI DER:
-   *
-   * 30 2a
-   * 30 05
-   * 06 03 2b 65 70
-   * 03 21 00
-   * <32 byte public key>
-   */
 
   if (
     publicKeyDer.length < 32
@@ -1951,8 +2079,6 @@ main().catch(error => {
 
     # --------------------------------------------------------
     # SOLANA ADDRESS
-    #
-    # Solana address = Base58(public key)
     # --------------------------------------------------------
 
     derived_address = base58_encode(
@@ -2028,14 +2154,6 @@ main().catch(error => {
 
     # --------------------------------------------------------
     # APPROVAL
-    #
-    # Sorare richiede esattamente:
-    #
-    # fingerprint
-    # solanaTokenTransferApproval:
-    #   signature
-    #   nonce
-    #   expirationTimestamp
     # --------------------------------------------------------
 
     output = {
@@ -2446,6 +2564,30 @@ def autosell(
     price,
 ):
 
+    # ========================================================
+    # ULTIMA PROTEZIONE L10
+    #
+    # Anche se autosell() venisse chiamata accidentalmente
+    # da un'altra parte del programma, una carta con L10 > 47
+    # NON può arrivare a prepare_offer().
+    # ========================================================
+
+    l10 = card_l10(card)
+
+    if l10 is None:
+
+        raise RuntimeError(
+            "VENDITA BLOCCATA: "
+            "L10 non verificabile"
+        )
+
+    if l10 > MAX_L10:
+
+        raise RuntimeError(
+            f"VENDITA BLOCCATA: "
+            f"L10 {l10:g} > {MAX_L10}"
+        )
+
     asset_id = card.get(
         "assetId"
     )
@@ -2457,7 +2599,7 @@ def autosell(
         )
 
     print(
-        f"💰 SELL {label(card)} "
+        f"💰 SELL {label_with_l10(card)} "
         f"→ {eur(price)}",
         flush=True,
     )
@@ -2561,6 +2703,16 @@ def worker():
     )
 
     print(
+        f"MAX L10: {MAX_L10}",
+        flush=True,
+    )
+
+    print(
+        "REGOLA: L10 > 47 = MAI IN VENDITA",
+        flush=True,
+    )
+
+    print(
         "SOLANA KEY: BASE58",
         flush=True,
     )
@@ -2637,17 +2789,25 @@ def worker():
 
                 try:
 
+                    # ------------------------------------------------
+                    # GIÀ IN VENDITA
+                    # ------------------------------------------------
+
                     if card.get(
                         "liveSingleSaleOffer"
                     ):
 
                         print(
-                            f"⏭️ {label(card)} "
+                            f"⏭️ {label_with_l10(card)} "
                             f"→ GIÀ IN VENDITA",
                             flush=True,
                         )
 
                         continue
+
+                    # ------------------------------------------------
+                    # VALIDAZIONE
+                    # ------------------------------------------------
 
                     ok, reason, price = (
                         validate(
@@ -2669,11 +2829,15 @@ def worker():
                     sell_candidates += 1
 
                     print(
-                        f"✅ {label(card)} "
+                        f"✅ {label_with_l10(card)} "
                         f"→ VENDIBILE "
                         f"{eur(price)}",
                         flush=True,
                     )
+
+                    # ------------------------------------------------
+                    # AUTOSSELL
+                    # ------------------------------------------------
 
                     try:
 
@@ -2686,7 +2850,7 @@ def worker():
 
                         print(
                             f"🔴 AutoSell fallito "
-                            f"{label(card)}: "
+                            f"{label_with_l10(card)}: "
                             f"{exc}",
                             flush=True,
                         )
@@ -2695,7 +2859,7 @@ def worker():
 
                     print(
                         f"❌ Carta "
-                        f"{label(card)}: "
+                        f"{label_with_l10(card)}: "
                         f"{exc}",
                         flush=True,
                     )
@@ -2761,6 +2925,12 @@ def home():
         "max_price_eur":
             eur(MAX_PRICE),
 
+        "max_l10":
+            MAX_L10,
+
+        "l10_rule":
+            "L10 > 47 = NEVER SELL",
+
         "last_scan":
             last_scan,
     })
@@ -2785,6 +2955,12 @@ def health():
 
         "max_price":
             MAX_PRICE,
+
+        "max_l10":
+            MAX_L10,
+
+        "l10_rule":
+            "L10 > 47 = NEVER SELL",
 
         "last_scan":
             last_scan,
