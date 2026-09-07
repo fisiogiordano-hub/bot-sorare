@@ -697,11 +697,6 @@ def load_coverage(
                 coverage_cache
             )
 
-    # Non interroghiamo /coverage.
-    #
-    # La cache verrà popolata quando il bot riceve
-    # i dettagli delle carte.
-
     with coverage_lock:
 
         coverage_time = now
@@ -716,9 +711,6 @@ def register_card_competitions(
 ):
     """
     Registra le competizioni attive della carta.
-
-    Questa è la stessa fonte utilizzata dal codice
-    AutoBuy / Swap fornito dall'utente.
     """
 
     global coverage_time
@@ -962,7 +954,6 @@ def card_details(
         or []
     )
 
-    # Registra subito le competizioni trovate.
     for card in cards:
 
         try:
@@ -1291,12 +1282,6 @@ def coverage_info(
 ):
     """
     Verifica la coverage direttamente sulla carta.
-
-    Se Sorare restituisce almeno una activeCompetition,
-    la carta viene considerata appartenente a una
-    competizione seguita dal bot.
-
-    Non viene più usata la pagina /coverage.
     """
 
     active = (
@@ -1570,12 +1555,12 @@ def print_card_rejection(
 
         "COVERAGE": (
             "COMPETIZIONE NON DISPONIBILE",
-            f"Attive: "
-            f"{', '.join("
+            "Attive: "
+            + ", ".join(
                 info.get(
-                    'active_competitions'
+                    "active_competitions"
                 ) or []
-            )}"
+            )
         )
     }
 
@@ -2973,385 +2958,3 @@ def process_swap(
 
 
 # ============================================================
-# DISPATCH
-# ============================================================
-
-def process_offer(
-    offer
-):
-
-    receiver_cards = (
-        (offer.get("receiverSide") or {})
-        .get("anyCards")
-        or []
-    )
-
-    sender_cards = (
-        (offer.get("senderSide") or {})
-        .get("anyCards")
-        or []
-    )
-
-    # Kulenovic ricevuto → AUTOBUY
-    if any(
-        is_kulenovic(c)
-        for c in receiver_cards
-    ):
-
-        process_autobuy(
-            offer
-        )
-
-        return
-
-    # Scambio carta ↔ carta → SWAP
-    if (
-        sender_cards
-        and receiver_cards
-    ):
-
-        process_swap(
-            offer
-        )
-
-
-# ============================================================
-# WORKER
-# ============================================================
-
-def worker():
-
-    print(
-        "🤖 AUTOSELL AVVIATO",
-        flush=True
-    )
-
-    print(
-        f"📦 VERSIONE: "
-        f"{BOT_VERSION}",
-        flush=True
-    )
-
-    print(
-        f"🧪 DRY_RUN={DRY_RUN}",
-        flush=True
-    )
-
-    print(
-        "✅ Thread AutoSell avviato.",
-        flush=True
-    )
-
-    print(
-        f"💰 RANGE: "
-        f"€{MIN_PRICE / 100:.2f} - "
-        f"€{MAX_PRICE / 100:.2f}",
-        flush=True
-    )
-
-    print(
-        f"📊 LISTING MINIME: "
-        f"{MIN_LIVE_LISTINGS}",
-        flush=True
-    )
-
-    print(
-        f"🎂 ETÀ: < {MAX_AGE}",
-        flush=True
-    )
-
-    print(
-        "🔒 KULENOVIC: MAI VENDUTO",
-        flush=True
-    )
-
-    print(
-        "🛡️ SOURCE: "
-        "SORARE activeCompetitions",
-        flush=True
-    )
-
-    print(
-        "💾 JSON: "
-        f"{STATE_FILE}",
-        flush=True
-    )
-
-    print(
-        "🔄 SWAP: "
-        f"+{int((SWAP_MIN - 1) * 100)}% / "
-        f"+{int((SWAP_MAX - 1) * 100)}%",
-        flush=True
-    )
-
-    print(
-        f"🔄 SWAP_AUTO_ACCEPT="
-        f"{SWAP_AUTO_ACCEPT}",
-        flush=True
-    )
-
-    # ========================================================
-    # STATE
-    # ========================================================
-
-    load_state()
-
-    # ========================================================
-    # COVERAGE
-    # ========================================================
-
-    print(
-        "🏆 COVERAGE: "
-        "NON viene più usata /coverage",
-        flush=True
-    )
-
-    print(
-        "🛡️ Coverage: "
-        "verifica tramite "
-        "activeCompetitions di Sorare",
-        flush=True
-    )
-
-    # NON FERMARE IL BOT QUI.
-    #
-    # La lista delle competizioni viene popolata
-    # progressivamente dalle carte.
-
-    # ========================================================
-    # ACCOUNT
-    # ========================================================
-
-    if not check_account():
-
-        return
-
-    # ========================================================
-    # LOOP
-    # ========================================================
-
-    while True:
-
-        try:
-
-            offers = get_offers()
-
-            print(
-                f"📨 Offerte pendenti lette "
-                f"da Sorare: {len(offers)}",
-                flush=True
-            )
-
-            for offer in offers:
-
-                try:
-
-                    process_offer(
-                        offer
-                    )
-
-                except Exception as e:
-
-                    print(
-                        f"❌ Errore offerta: {e}",
-                        flush=True
-                    )
-
-            time.sleep(
-                INTERVAL
-            )
-
-        except Exception as e:
-
-            print(
-                f"❌ Worker: {e}",
-                flush=True
-            )
-
-            time.sleep(
-                INTERVAL
-            )
-
-
-def start_worker():
-
-    global worker_started
-
-    with worker_lock:
-
-        if worker_started:
-            return
-
-        worker_started = True
-
-        threading.Thread(
-
-            target=worker,
-
-            name="sorare-worker",
-
-            daemon=True
-
-        ).start()
-
-        print(
-            "✅ Thread Sorare avviato.",
-            flush=True
-        )
-
-
-# ============================================================
-# FLASK
-# ============================================================
-
-@app.get("/")
-def home():
-
-    with coverage_lock:
-
-        covered = set(
-            coverage_cache
-        )
-
-    with state_lock:
-
-        processed_count = len(
-            processed
-        )
-
-    return jsonify({
-
-        "status":
-            "online",
-
-        "bot":
-            "autosell",
-
-        "version":
-            BOT_VERSION,
-
-        "dry_run":
-            DRY_RUN,
-
-        "swap_auto_accept":
-            SWAP_AUTO_ACCEPT,
-
-        "pay_per_card_cents":
-            PAY_PER_CARD,
-
-        "min_price_cents":
-            MIN_PRICE,
-
-        "max_price_cents":
-            MAX_PRICE,
-
-        "max_age":
-            MAX_AGE,
-
-        "min_live_listings":
-            MIN_LIVE_LISTINGS,
-
-        "swap_min_multiplier":
-            SWAP_MIN,
-
-        "swap_max_multiplier":
-            SWAP_MAX,
-
-        "kulenovic":
-            "NEVER_CEDIBLE",
-
-        "kulenovic_requested":
-            "ALWAYS_AUTOBUY",
-
-        "processed_offers":
-            processed_count,
-
-        "state_file":
-            STATE_FILE,
-
-        "github_state":
-            bool(GITHUB_TOKEN),
-
-        "covered_competitions_count":
-            len(covered),
-
-        "coverage_source":
-            "Sorare activeCompetitions",
-
-        "coverage_mode":
-            "PER_CARD"
-    })
-
-
-@app.get("/health")
-def health():
-
-    with coverage_lock:
-
-        loaded = bool(
-            coverage_cache
-        )
-
-        competition_count = len(
-            coverage_cache
-        )
-
-    with state_lock:
-
-        processed_count = len(
-            processed
-        )
-
-    return jsonify({
-
-        "status":
-            "ok",
-
-        "bot":
-            "running",
-
-        "version":
-            BOT_VERSION,
-
-        "worker_started":
-            worker_started,
-
-        "coverage_loaded":
-            loaded,
-
-        "coverage_mode":
-            "PER_CARD",
-
-        "known_competitions":
-            competition_count,
-
-        "processed_offers":
-            processed_count,
-
-        "dry_run":
-            DRY_RUN,
-
-        "swap_auto_accept":
-            SWAP_AUTO_ACCEPT
-    })
-
-
-# ============================================================
-# START
-# ============================================================
-
-if __name__ == "__main__":
-
-    start_worker()
-
-    app.run(
-
-        host="0.0.0.0",
-
-        port=int(
-            os.getenv(
-                "PORT",
-                "10000"
-            )
-        )
-    )
