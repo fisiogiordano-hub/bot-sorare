@@ -1,20 +1,8 @@
-import os
-import time
-import uuid
-import json
-import shutil
-import subprocess
-import threading
-import re
-
+import os, time, uuid, json, shutil, subprocess, threading, re
 import requests
 from flask import Flask, jsonify
 
 app = Flask(__name__)
-
-# ============================================================
-# CONFIG
-# ============================================================
 
 URL = "https://api.sorare.com/graphql"
 COVERAGE_URL = "https://sorare.com/coverage"
@@ -34,22 +22,12 @@ MIN_LIVE_LISTINGS = 5
 COVERAGE_CACHE = 3600
 USD_CACHE = 300
 
-BOT_VERSION = "AUTOSell-2.4-COVERAGE-FIX"
-
-SELL_PRICE_MODE = os.getenv(
-    "SELL_PRICE_MODE",
-    "FLOOR"
-).upper()
-
-JSON_PATH = os.getenv(
-    "AUTOSSELL_JSON_PATH",
-    "autosell_cards.json"
-).strip()
+BOT_VERSION = "AUTOSell-2.3-COVERAGE-FIX"
+SELL_PRICE_MODE = os.getenv("SELL_PRICE_MODE", "FLOOR").upper()
+JSON_PATH = os.getenv("AUTOSSELL_JSON_PATH", "autosell_cards.json").strip()
 
 KID = os.getenv("KULENOVIC_ID", "").strip()
-
 KSLUG = "sandro-kulenovic-2025-limited-385"
-
 KASSET = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
     "6796b6c0ed10ba0a6"
@@ -60,10 +38,8 @@ worker_lock = threading.Lock()
 coverage_lock = threading.Lock()
 
 worker_started = False
-
 usd_rate = None
 usd_time = 0
-
 coverage_cache = set()
 coverage_time = 0
 coverage_available = False
@@ -73,40 +49,26 @@ coverage_available = False
 # UTILITY
 # ============================================================
 
-def norm(value):
-    return str(value or "").strip().lower()
+def norm(v):
+    return str(v or "").strip().lower()
 
 
 def now_iso():
-    return time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ",
-        time.gmtime()
-    )
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def card_name(card):
-    return (
-        card.get("name")
-        or card.get("slug")
-        or "Carta"
-    )
+def card_name(c):
+    return c.get("name") or c.get("slug") or "Carta"
 
 
-def card_label(card):
-    name = card_name(card)
-    slug = card.get("slug")
-
-    if slug and slug != name:
-        return f"{name} [{slug}]"
-
-    return name
+def card_label(c):
+    name = card_name(c)
+    slug = c.get("slug")
+    return f"{name} [{slug}]" if slug and slug != name else name
 
 
 def format_eur(cents):
-    if cents is None:
-        return "N/D"
-
-    return f"€{cents / 100:.2f}"
+    return "N/D" if cents is None else f"€{cents / 100:.2f}"
 
 
 # ============================================================
@@ -114,215 +76,108 @@ def format_eur(cents):
 # ============================================================
 
 def ensure_json_file():
-    folder = os.path.dirname(
-        os.path.abspath(JSON_PATH)
-    )
-
+    folder = os.path.dirname(os.path.abspath(JSON_PATH))
     os.makedirs(folder, exist_ok=True)
-
     if not os.path.exists(JSON_PATH):
-        with open(
-            JSON_PATH,
-            "w",
-            encoding="utf-8"
-        ) as f:
-            json.dump(
-                [],
-                f,
-                ensure_ascii=False,
-                indent=2
-            )
+        with open(JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
 
 
 def load_cards():
     ensure_json_file()
-
     try:
-        with open(
-            JSON_PATH,
-            "r",
-            encoding="utf-8"
-        ) as f:
+        with open(JSON_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-
         return data if isinstance(data, list) else []
-
     except json.JSONDecodeError as e:
-        print(
-            f"❌ JSON non valido: {e}",
-            flush=True
-        )
-
+        print(f"❌ JSON non valido: {e}", flush=True)
     except Exception as e:
-        print(
-            f"❌ Lettura JSON: {e}",
-            flush=True
-        )
-
+        print(f"❌ Lettura JSON: {e}", flush=True)
     return []
 
 
 def save_cards(cards):
-    folder = os.path.dirname(
-        os.path.abspath(JSON_PATH)
-    )
-
+    folder = os.path.dirname(os.path.abspath(JSON_PATH))
     os.makedirs(folder, exist_ok=True)
-
-    temp = (
-        f"{JSON_PATH}.tmp."
-        f"{uuid.uuid4()}"
-    )
+    temp = f"{JSON_PATH}.tmp.{uuid.uuid4()}"
 
     try:
-        with open(
-            temp,
-            "w",
-            encoding="utf-8"
-        ) as f:
-            json.dump(
-                cards,
-                f,
-                ensure_ascii=False,
-                indent=2
-            )
-
+        with open(temp, "w", encoding="utf-8") as f:
+            json.dump(cards, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-
-        os.replace(
-            temp,
-            JSON_PATH
-        )
-
+        os.replace(temp, JSON_PATH)
         return True
-
     except Exception as e:
-        print(
-            f"❌ Scrittura JSON: {e}",
-            flush=True
-        )
-
+        print(f"❌ Scrittura JSON: {e}", flush=True)
         try:
             if os.path.exists(temp):
                 os.remove(temp)
         except Exception:
             pass
-
         return False
 
 
 def get_ready_cards():
     with json_lock:
         return [
-            c
-            for c in load_cards()
-            if (
-                isinstance(c, dict)
-                and norm(c.get("status")) == "ready"
-                and str(
-                    c.get("asset_id") or ""
-                ).strip()
-            )
+            c for c in load_cards()
+            if isinstance(c, dict)
+            and norm(c.get("status")) == "ready"
+            and str(c.get("asset_id") or "").strip()
         ]
 
 
-def update_json_card(
-    asset_id,
-    status=None,
-    sale_offer_id=None,
-    last_error=None
-):
-    asset_id = str(
-        asset_id or ""
-    ).strip()
-
+def update_json_card(asset_id, status=None, sale_offer_id=None, last_error=None):
+    asset_id = str(asset_id or "").strip()
     if not asset_id:
         return False
 
     with json_lock:
         cards = load_cards()
 
-        for card in cards:
-            if not isinstance(card, dict):
+        for c in cards:
+            if not isinstance(c, dict):
                 continue
-
-            current_asset = str(
-                card.get("asset_id") or ""
-            ).strip()
-
-            if (
-                current_asset.lower()
-                != asset_id.lower()
-            ):
+            if str(c.get("asset_id") or "").strip().lower() != asset_id.lower():
                 continue
 
             if status is not None:
-                card["status"] = status
-
+                c["status"] = status
             if sale_offer_id is not None:
-                card["sale_offer_id"] = (
-                    sale_offer_id
-                )
+                c["sale_offer_id"] = sale_offer_id
 
             if last_error is not None:
-                card["last_error"] = (
-                    last_error
-                )
-
-            elif status in (
-                "SELLING",
-                "SOLD"
-            ):
-                card["last_error"] = None
+                c["last_error"] = last_error
+            elif status in ("SELLING", "SOLD"):
+                c["last_error"] = None
 
             if status == "SELLING":
-                card["selling_at"] = now_iso()
-
-            if status == "SOLD":
-                card["sold_at"] = now_iso()
+                c["selling_at"] = now_iso()
+            elif status == "SOLD":
+                c["sold_at"] = now_iso()
 
             return save_cards(cards)
 
-        print(
-            f"⚠️ JSON: asset_id non trovato: "
-            f"{asset_id}",
-            flush=True
-        )
-
+        print(f"⚠️ JSON: asset_id non trovato: {asset_id}", flush=True)
         return False
 
 
-def add_card_to_json(
-    asset_id,
-    source="AUTOBUY"
-):
-    asset_id = str(
-        asset_id or ""
-    ).strip()
-
+def add_card_to_json(asset_id, source="AUTOBUY"):
+    asset_id = str(asset_id or "").strip()
     if not asset_id:
         return False
 
     with json_lock:
         cards = load_cards()
 
-        for card in cards:
-            if not isinstance(card, dict):
-                continue
-
-            existing = str(
-                card.get("asset_id") or ""
-            ).strip()
-
+        for c in cards:
             if (
-                existing.lower()
+                isinstance(c, dict)
+                and str(c.get("asset_id") or "").strip().lower()
                 == asset_id.lower()
             ):
-                return (
-                    card.get("status")
-                    != "SOLD"
-                )
+                return c.get("status") != "SOLD"
 
         cards.append({
             "asset_id": asset_id,
@@ -333,7 +188,6 @@ def add_card_to_json(
             "sale_offer_id": None,
             "last_error": None
         })
-
         return save_cards(cards)
 
 
@@ -343,124 +197,65 @@ def add_card_to_json(
 
 def headers():
     if not TOKEN:
-        raise RuntimeError(
-            "SORARE_JWT_TOKEN non configurato"
-        )
+        raise RuntimeError("SORARE_JWT_TOKEN non configurato")
 
-    token = TOKEN
-
-    if not token.lower().startswith(
-        "bearer "
-    ):
-        token = f"Bearer {token}"
-
-    h = {
-        "Authorization": token,
+    return {
+        "Authorization": TOKEN if TOKEN.lower().startswith("bearer ")
+        else f"Bearer {TOKEN}",
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": (
-            f"Sorare-AutoSell/{BOT_VERSION}"
-        )
+        "User-Agent": f"Sorare-AutoSell/{BOT_VERSION}",
+        **({"JWT-AUD": AUD} if AUD else {})
     }
 
-    if AUD:
-        h["JWT-AUD"] = AUD
 
-    return h
-
-
-def graphql(
-    query,
-    variables=None
-):
-    payload = {
-        "query": query,
-        "variables": variables or {}
-    }
+def graphql(query, variables=None):
+    payload = {"query": query, "variables": variables or {}}
 
     for attempt in range(3):
         try:
             r = requests.post(
-                URL,
-                json=payload,
-                headers=headers(),
-                timeout=TIMEOUT
+                URL, json=payload, headers=headers(), timeout=TIMEOUT
             )
 
-            print(
-                f"🌐 Sorare HTTP "
-                f"{r.status_code}",
-                flush=True
-            )
+            print(f"🌐 Sorare HTTP {r.status_code}", flush=True)
 
             if r.status_code == 429:
-                retry = r.headers.get(
-                    "Retry-After",
-                    str(attempt + 2)
-                )
-
+                retry = r.headers.get("Retry-After", str(attempt + 2))
                 try:
                     retry = int(retry)
                 except Exception:
                     retry = attempt + 2
-
-                time.sleep(
-                    min(retry, 15)
-                )
-
+                time.sleep(min(retry, 15))
                 continue
 
             if r.status_code != 200:
                 print(
-                    f"❌ Sorare HTTP "
-                    f"{r.status_code}: "
-                    f"{r.text[:1000]}",
+                    f"❌ Sorare HTTP {r.status_code}: {r.text[:1000]}",
                     flush=True
                 )
-
-                time.sleep(
-                    attempt + 1
-                )
-
+                time.sleep(attempt + 1)
                 continue
 
             try:
                 data = r.json()
-
             except Exception as e:
-                print(
-                    f"❌ JSON Sorare non valido: "
-                    f"{e}",
-                    flush=True
-                )
-
-                time.sleep(
-                    attempt + 1
-                )
-
+                print(f"❌ JSON Sorare non valido: {e}", flush=True)
+                time.sleep(attempt + 1)
                 continue
 
             if data.get("errors"):
                 print(
                     "❌ GraphQL:",
-                    json.dumps(
-                        data["errors"],
-                        ensure_ascii=False
-                    )[:3000],
+                    json.dumps(data["errors"], ensure_ascii=False)[:3000],
                     flush=True
                 )
 
             return data
 
         except Exception as e:
-            print(
-                f"❌ GraphQL: {e}",
-                flush=True
-            )
-
-            time.sleep(
-                attempt + 1
-            )
+            print(f"❌ GraphQL: {e}", flush=True)
+            time.sleep(attempt + 1)
 
     return None
 
@@ -470,87 +265,40 @@ def graphql(
 # ============================================================
 
 def extract_coverage_slugs(text):
-    """
-    Gestisce:
-      /football/leagues/serie-a-it
-      \\/football\\/leagues\\/serie-a-it
-      https://sorare.com/football/leagues/serie-a-it
-    """
-
     if not text:
         return set()
 
-    text = text.replace(
-        "\\/",
-        "/"
-    )
-
-    text = text.replace(
-        "\\u002F",
-        "/"
-    )
-
-    text = text.replace(
-        "\\u002f",
-        "/"
-    )
-
-    patterns = [
-        r"/football/leagues/"
-        r"([a-zA-Z0-9_-]+)",
-
-        r"football/leagues/"
-        r"([a-zA-Z0-9_-]+)"
-    ]
+    text = text.replace("\\/", "/").replace("\\u002F", "/")
+    text = text.replace("\\u002f", "/")
 
     result = set()
 
-    for pattern in patterns:
-        matches = re.findall(
-            pattern,
-            text,
-            re.I
-        )
-
+    for pattern in (
+        r"/football/leagues/([a-zA-Z0-9_-]+)",
+        r"football/leagues/([a-zA-Z0-9_-]+)"
+    ):
         result.update(
-            norm(x)
-            for x in matches
-            if norm(x)
+            norm(x) for x in re.findall(pattern, text, re.I) if norm(x)
         )
 
     return result
 
 
-def load_coverage(
-    force=False
-):
-    global coverage_cache
-    global coverage_time
-    global coverage_available
+def load_coverage(force=False):
+    global coverage_cache, coverage_time, coverage_available
 
     now = time.time()
 
     with coverage_lock:
-        cached = set(
-            coverage_cache
-        )
-
-        cached_time = (
-            coverage_time
-        )
-
-        cached_available = (
-            coverage_available
-        )
+        cached = set(coverage_cache)
+        cached_time = coverage_time
+        cached_available = coverage_available
 
     if (
         not force
         and cached
         and cached_available
-        and (
-            now - cached_time
-            < COVERAGE_CACHE
-        )
+        and now - cached_time < COVERAGE_CACHE
     ):
         return cached
 
@@ -560,55 +308,31 @@ def load_coverage(
             timeout=TIMEOUT,
             headers={
                 "User-Agent": (
-                    "Mozilla/5.0 "
-                    "(compatible; "
-                    f"Sorare-AutoSell/"
-                    f"{BOT_VERSION})"
+                    "Mozilla/5.0 (compatible; "
+                    f"Sorare-AutoSell/{BOT_VERSION})"
                 ),
                 "Accept": (
-                    "text/html,"
-                    "application/xhtml+xml,"
-                    "application/json;q=0.9,"
-                    "*/*;q=0.8"
+                    "text/html,application/xhtml+xml,"
+                    "application/json;q=0.9,*/*;q=0.8"
                 ),
-                "Accept-Language":
-                    "en-US,en;q=0.9"
+                "Accept-Language": "en-US,en;q=0.9"
             }
         )
 
-        print(
-            f"🌐 Coverage HTTP "
-            f"{r.status_code}",
-            flush=True
-        )
+        print(f"🌐 Coverage HTTP {r.status_code}", flush=True)
 
         if r.status_code != 200:
-            print(
-                "⚠️ Coverage "
-                "temporaneamente non "
-                "disponibile",
-                flush=True
-            )
-
+            print("⚠️ Coverage temporaneamente non disponibile", flush=True)
             with coverage_lock:
                 coverage_available = False
-
             return cached
 
-        result = extract_coverage_slugs(
-            r.text
-        )
+        result = extract_coverage_slugs(r.text)
 
         if not result:
-            print(
-                "⚠️ Coverage HTTP 200 "
-                "ma nessuno slug trovato",
-                flush=True
-            )
-
+            print("⚠️ Coverage HTTP 200 ma nessuno slug trovato", flush=True)
             with coverage_lock:
                 coverage_available = False
-
             return cached
 
         with coverage_lock:
@@ -616,23 +340,13 @@ def load_coverage(
             coverage_time = time.time()
             coverage_available = True
 
-        print(
-            f"🏆 Coverage Football: "
-            f"{len(result)} competizioni",
-            flush=True
-        )
-
+        print(f"🏆 Coverage Football: {len(result)} competizioni", flush=True)
         return result
 
     except Exception as e:
-        print(
-            f"⚠️ Coverage: {e}",
-            flush=True
-        )
-
+        print(f"⚠️ Coverage: {e}", flush=True)
         with coverage_lock:
             coverage_available = False
-
         return cached
 
 
@@ -651,72 +365,43 @@ def check_account():
         }
     """)
 
-    user = (
-        ((data or {}).get("data") or {})
-        .get("currentUser")
-    )
+    user = ((data or {}).get("data") or {}).get("currentUser")
 
     if not user:
-        print(
-            "❌ Account Sorare "
-            "non verificato",
-            flush=True
-        )
-
+        print("❌ Account Sorare non verificato", flush=True)
         return False
 
     print(
-        "✅ Sorare: "
-        f"{user.get('nickname') or user.get('slug')}",
+        f"✅ Sorare: {user.get('nickname') or user.get('slug')}",
         flush=True
     )
-
     print(
         "🔐 Stark key account: "
-        + (
-            "PRESENTE"
-            if user.get("starkKey")
-            else "NON DISPONIBILE"
-        ),
+        + ("PRESENTE" if user.get("starkKey") else "NON DISPONIBILE"),
         flush=True
     )
-
     return True
 
 
 def card_details(asset_ids):
-    ids = list(
-        dict.fromkeys(
-            str(x).strip()
-            for x in asset_ids
-            if x
-        )
-    )
-
+    ids = list(dict.fromkeys(str(x).strip() for x in asset_ids if x))
     if not ids:
         return []
 
     data = graphql("""
-        query Cards(
-            $assetIds: [String!]!
-        ) {
-            anyCards(
-                assetIds: $assetIds
-            ) {
+        query Cards($assetIds: [String!]!) {
+            anyCards(assetIds: $assetIds) {
                 assetId
                 slug
                 name
                 rarityTyped
                 seasonYear
-
                 anyPlayer {
                     slug
                     displayName
-
                     activeClub {
                         slug
                         name
-
                         activeCompetitions {
                             slug
                         }
@@ -724,18 +409,12 @@ def card_details(asset_ids):
                 }
             }
         }
-    """, {
-        "assetIds": ids
-    })
+    """, {"assetIds": ids})
 
     if not data or data.get("errors"):
         return []
 
-    return (
-        ((data.get("data") or {})
-        .get("anyCards"))
-        or []
-    )
+    return ((data.get("data") or {}).get("anyCards")) or []
 
 
 # ============================================================
@@ -743,100 +422,57 @@ def card_details(asset_ids):
 # ============================================================
 
 def usd_eur():
-    global usd_rate
-    global usd_time
+    global usd_rate, usd_time
 
     now = time.time()
 
-    if (
-        usd_rate
-        and now - usd_time
-        < USD_CACHE
-    ):
+    if usd_rate and now - usd_time < USD_CACHE:
         return usd_rate
 
     try:
         r = requests.get(
             "https://api.frankfurter.app/latest",
-            params={
-                "from": "USD",
-                "to": "EUR"
-            },
+            params={"from": "USD", "to": "EUR"},
             timeout=10
         )
 
         if r.status_code != 200:
             return None
 
-        rate = float(
-            (
-                r.json().get("rates")
-                or {}
-            ).get("EUR")
-        )
+        rate = float((r.json().get("rates") or {}).get("EUR"))
 
         if rate <= 0:
             return None
 
         usd_rate = rate
         usd_time = now
-
         return rate
 
     except Exception as e:
-        print(
-            f"❌ USD/EUR: {e}",
-            flush=True
-        )
-
+        print(f"❌ USD/EUR: {e}", flush=True)
         return None
 
 
 def price_eur(amounts):
-    if not isinstance(
-        amounts,
-        dict
-    ):
+    if not isinstance(amounts, dict):
         return None
 
     try:
-        eur = int(
-            amounts.get(
-                "eurCents"
-            )
-        )
-
+        eur = int(amounts.get("eurCents"))
         if eur > 0:
             return eur
-
-    except (
-        TypeError,
-        ValueError
-    ):
+    except (TypeError, ValueError):
         pass
 
     try:
-        usd = float(
-            amounts.get(
-                "usdCents"
-            )
-        )
-
-    except (
-        TypeError,
-        ValueError
-    ):
+        usd = float(amounts.get("usdCents"))
+    except (TypeError, ValueError):
         usd = 0
 
     if usd > 0:
         rate = usd_eur()
-
         if rate:
-            return int(
-                round(
-                    usd * rate
-                )
-            )
+            return int(round(usd * rate))
 
     return None
 
@@ -846,38 +482,20 @@ def price_eur(amounts):
 # ============================================================
 
 def live_floor(card):
-    player = (
-        card.get("anyPlayer")
-        or {}
-    )
-
-    player_slug = norm(
-        player.get("slug")
-    )
-
-    rarity = norm(
-        card.get("rarityTyped")
-    )
+    player = card.get("anyPlayer") or {}
+    player_slug = norm(player.get("slug"))
+    rarity = norm(card.get("rarityTyped"))
 
     try:
-        season = int(
-            card.get("seasonYear")
-        )
-
-    except (
-        TypeError,
-        ValueError
-    ):
+        season = int(card.get("seasonYear"))
+    except (TypeError, ValueError):
         return None
 
     if not player_slug or not rarity:
         return None
 
     data = graphql("""
-        query LiveSales(
-            $playerSlug: String,
-            $first: Int
-        ) {
+        query LiveSales($playerSlug: String, $first: Int) {
             tokens {
                 liveSingleSaleOffers(
                     playerSlug: $playerSlug
@@ -889,13 +507,11 @@ def live_floor(card):
                                 assetId
                                 rarityTyped
                                 seasonYear
-
                                 anyPlayer {
                                     slug
                                 }
                             }
                         }
-
                         receiverSide {
                             amounts {
                                 eurCents
@@ -908,127 +524,50 @@ def live_floor(card):
                 }
             }
         }
-    """, {
-        "playerSlug": player_slug,
-        "first": 50
-    })
+    """, {"playerSlug": player_slug, "first": 50})
 
     if not data or data.get("errors"):
         return None
 
     offers = (
-        (
-            (
-                (
-                    data.get("data")
-                    or {}
-                ).get("tokens")
-                or {}
-            ).get(
-                "liveSingleSaleOffers"
-            )
-            or {}
-        ).get("nodes")
-        or []
+        (((data.get("data") or {}).get("tokens") or {})
+        .get("liveSingleSaleOffers") or {})
+        .get("nodes") or []
     )
 
     prices = []
 
     for offer in offers:
-        cards = (
-            (
-                offer.get("senderSide")
-                or {}
-            ).get("anyCards")
-            or []
-        )
+        cards = (offer.get("senderSide") or {}).get("anyCards") or []
 
         for c in cards:
             try:
-                c_season = int(
-                    c.get("seasonYear")
-                )
-
-            except (
-                TypeError,
-                ValueError
-            ):
+                season_ok = int(c.get("seasonYear")) == season
+            except (TypeError, ValueError):
                 continue
 
-            c_player_slug = norm(
-                (
-                    c.get("anyPlayer")
-                    or {}
-                ).get("slug")
-            )
-
-            c_rarity = norm(
-                c.get("rarityTyped")
-            )
-
-            # =================================================
-            # BUG FIX PRINCIPALE
-            # =================================================
-            # Prima veniva fatto:
-            #
-            # norm(
-            #     slug == player_slug
-            # )
-            #
-            # che trasformava True/False in
-            # "true"/"false".
-            #
-            # Ora confrontiamo correttamente
-            # gli slug normalizzati.
-            # =================================================
-
             if (
-                c_player_slug
-                == player_slug
-                and c_rarity
-                == rarity
-                and c_season
-                == season
+                norm((c.get("anyPlayer") or {}).get("slug")) == player_slug
+                and norm(c.get("rarityTyped")) == rarity
+                and season_ok
             ):
                 price = price_eur(
-                    (
-                        offer.get(
-                            "receiverSide"
-                        )
-                        or {}
-                    ).get(
-                        "amounts"
-                    )
-                    or {}
+                    (offer.get("receiverSide") or {}).get("amounts") or {}
                 )
 
                 if price is not None:
-                    prices.append(
-                        price
-                    )
-
+                    prices.append(price)
                 break
 
     if len(prices) < MIN_LIVE_LISTINGS:
         print(
             f"⚠️ Floor {player_slug}: "
-            f"{len(prices)}/"
-            f"{MIN_LIVE_LISTINGS} listing",
+            f"{len(prices)}/{MIN_LIVE_LISTINGS} listing",
             flush=True
         )
-
         return None
 
-    floor = min(prices)
-
-    print(
-        f"📉 Live floor {player_slug}: "
-        f"{format_eur(floor)} "
-        f"({len(prices)} listing)",
-        flush=True
-    )
-
-    return floor
+    return min(prices)
 
 
 # ============================================================
@@ -1036,51 +575,23 @@ def live_floor(card):
 # ============================================================
 
 def is_kulenovic(card):
-    wanted = {
-        norm(KSLUG),
-        norm(KASSET)
-    }
-
+    wanted = {norm(KSLUG), norm(KASSET)}
     if KID:
-        wanted.add(
-            norm(KID)
-        )
-
-    asset_id = norm(
-        card.get("assetId")
-    )
-
-    slug = norm(
-        card.get("slug")
-    )
+        wanted.add(norm(KID))
 
     return (
-        asset_id in wanted
-        or slug in wanted
+        norm(card.get("assetId")) in wanted
+        or norm(card.get("slug")) in wanted
     )
 
 
 def coverage_info(card):
-    club = (
-        (
-            card.get("anyPlayer")
-            or {}
-        ).get("activeClub")
-        or {}
-    )
+    club = (card.get("anyPlayer") or {}).get("activeClub") or {}
 
     active = [
         norm(c.get("slug"))
-        for c in (
-            club.get(
-                "activeCompetitions"
-            )
-            or []
-        )
-        if (
-            isinstance(c, dict)
-            and c.get("slug")
-        )
+        for c in club.get("activeCompetitions") or []
+        if isinstance(c, dict) and c.get("slug")
     ]
 
     coverage = load_coverage()
@@ -1088,72 +599,31 @@ def coverage_info(card):
     with coverage_lock:
         available = coverage_available
 
-    if (
-        not available
-        or not coverage
-    ):
-        return (
-            None,
-            active,
-            [],
-            "COVERAGE_UNAVAILABLE"
-        )
+    if not available or not coverage:
+        return None, active, [], "COVERAGE_UNAVAILABLE"
 
-    covered = [
-        x
-        for x in active
-        if x in coverage
-    ]
-
-    return (
-        bool(covered),
-        active,
-        covered,
-        None
-    )
+    covered = [x for x in active if x in coverage]
+    return bool(covered), active, covered, None
 
 
 def validate_for_autosell(card):
-    # --------------------------------------------------------
-    # KULENOVIC PROTETTO
-    # --------------------------------------------------------
-
     if is_kulenovic(card):
         return False, {
             "code": "KULENOVIC",
-            "message": (
-                "Kulenovic è protetto "
-                "e non deve essere venduto"
-            )
+            "message": "Kulenovic è protetto e non deve essere venduto"
         }
 
-    # --------------------------------------------------------
-    # RARITÀ
-    # --------------------------------------------------------
-
-    rarity = norm(
-        card.get("rarityTyped")
-    ).upper()
+    rarity = norm(card.get("rarityTyped")).upper()
 
     if rarity != "LIMITED":
-        return False, {
-            "code": "RARITY",
-            "rarity": (
-                rarity or "N/D"
-            )
-        }
-
-    # --------------------------------------------------------
-    # FLOOR
-    # --------------------------------------------------------
+        return False, {"code": "RARITY", "rarity": rarity or "N/D"}
 
     floor = live_floor(card)
 
     if floor is None:
         return False, {
             "code": "PRICE_UNKNOWN",
-            "min_live_listings":
-                MIN_LIVE_LISTINGS
+            "min_live_listings": MIN_LIVE_LISTINGS
         }
 
     if floor < MIN_PRICE:
@@ -1170,16 +640,7 @@ def validate_for_autosell(card):
             "max_price": MAX_PRICE
         }
 
-    # --------------------------------------------------------
-    # COVERAGE
-    # --------------------------------------------------------
-
-    (
-        covered,
-        active,
-        covered_competitions,
-        error
-    ) = coverage_info(card)
+    covered, active, covered_competitions, error = coverage_info(card)
 
     if error:
         return False, {
@@ -1192,406 +653,188 @@ def validate_for_autosell(card):
         return False, {
             "code": "COVERAGE",
             "active_competitions": active,
-            "covered_competitions":
-                covered_competitions
+            "covered_competitions": covered_competitions
         }
 
     return True, {
         "floor": floor,
         "rarity": rarity,
         "active_competitions": active,
-        "covered_competitions":
-            covered_competitions
+        "covered_competitions": covered_competitions
     }
 
 
-def print_rejection(
-    card,
-    info
-):
-    print(
-        "🚫 AutoSell - ESCLUSA: "
-        f"{card_label(card)}",
-        flush=True
-    )
+def print_rejection(card, info):
+    print(f"🚫 AutoSell - ESCLUSA: {card_label(card)}", flush=True)
 
-    code = (
-        info or {}
-    ).get("code")
+    code = (info or {}).get("code")
 
     if code == "KULENOVIC":
-        print(
-            "   └─ Motivo: "
-            "KULENOVIC PROTETTO",
-            flush=True
-        )
+        print("   └─ Motivo: KULENOVIC PROTETTO", flush=True)
 
     elif code == "RARITY":
-        print(
-            "   ├─ Motivo: "
-            "RARITÀ NON VALIDA",
-            flush=True
-        )
-
-        print(
-            f"   └─ Rarità: "
-            f"{info.get('rarity')}",
-            flush=True
-        )
+        print("   ├─ Motivo: RARITÀ NON VALIDA", flush=True)
+        print(f"   └─ Rarità: {info.get('rarity')}", flush=True)
 
     elif code == "PRICE_UNKNOWN":
+        print("   ├─ Motivo: FLOOR LIVE NON DISPONIBILE", flush=True)
         print(
-            "   ├─ Motivo: "
-            "FLOOR LIVE NON DISPONIBILE",
-            flush=True
-        )
-
-        print(
-            "   └─ Listing richiesti: "
-            f"{info.get('min_live_listings')}",
+            f"   └─ Listing richiesti: {info.get('min_live_listings')}",
             flush=True
         )
 
     elif code == "PRICE_LOW":
-        print(
-            "   ├─ Motivo: "
-            "FLOOR TROPPO BASSO",
-            flush=True
-        )
-
-        print(
-            f"   ├─ Floor: "
-            f"{format_eur(info.get('floor'))}",
-            flush=True
-        )
-
-        print(
-            f"   └─ Minimo: "
-            f"{format_eur(info.get('min_price'))}",
-            flush=True
-        )
+        print("   ├─ Motivo: FLOOR TROPPO BASSO", flush=True)
+        print(f"   ├─ Floor: {format_eur(info.get('floor'))}", flush=True)
+        print(f"   └─ Minimo: {format_eur(info.get('min_price'))}", flush=True)
 
     elif code == "PRICE_HIGH":
-        print(
-            "   ├─ Motivo: "
-            "FLOOR TROPPO ALTO",
-            flush=True
-        )
-
-        print(
-            f"   ├─ Floor: "
-            f"{format_eur(info.get('floor'))}",
-            flush=True
-        )
-
-        print(
-            f"   └─ Massimo: "
-            f"{format_eur(info.get('max_price'))}",
-            flush=True
-        )
+        print("   ├─ Motivo: FLOOR TROPPO ALTO", flush=True)
+        print(f"   ├─ Floor: {format_eur(info.get('floor'))}", flush=True)
+        print(f"   └─ Massimo: {format_eur(info.get('max_price'))}", flush=True)
 
     elif code == "COVERAGE_UNAVAILABLE":
-        print(
-            "   ├─ Motivo: "
-            "COVERAGE NON DISPONIBILE",
-            flush=True
-        )
-
-        print(
-            "   └─ Nessuna vendita; "
-            "il bot riproverà.",
-            flush=True
-        )
+        print("   ├─ Motivo: COVERAGE NON DISPONIBILE", flush=True)
+        print("   └─ Nessuna vendita; il bot riproverà.", flush=True)
 
     elif code == "COVERAGE":
-        active = (
-            info.get(
-                "active_competitions"
-            )
-            or []
-        )
+        active = info.get("active_competitions") or []
+        covered = info.get("covered_competitions") or []
 
-        covered = (
-            info.get(
-                "covered_competitions"
-            )
-            or []
-        )
-
+        print("   ├─ Motivo: COMPETIZIONE NON COPERTA", flush=True)
         print(
-            "   ├─ Motivo: "
-            "COMPETIZIONE NON COPERTA",
+            "   ├─ Attive: " + (", ".join(active) if active else "nessuna"),
             flush=True
         )
-
         print(
-            "   ├─ Attive: "
-            + (
-                ", ".join(active)
-                if active
-                else "nessuna"
-            ),
-            flush=True
-        )
-
-        print(
-            "   └─ Coperte: "
-            + (
-                ", ".join(covered)
-                if covered
-                else "nessuna"
-            ),
+            "   └─ Coperte: " + (", ".join(covered) if covered else "nessuna"),
             flush=True
         )
 
     else:
-        print(
-            "   └─ Motivo: "
-            "verifica fallita",
-            flush=True
-        )
+        print("   └─ Motivo: verifica fallita", flush=True)
 
 
 # ============================================================
 # NODE SIGNING
 # ============================================================
 
-def sign_authorizations(
-    authorizations
-):
-    node = (
-        shutil.which("node")
-        or shutil.which("nodejs")
-    )
+def sign_authorizations(authorizations):
+    node = shutil.which("node") or shutil.which("nodejs")
 
     if not node:
-        raise RuntimeError(
-            "Node.js non disponibile"
-        )
-
+        raise RuntimeError("Node.js non disponibile")
     if not STARK:
-        raise RuntimeError(
-            "SORARE_STARK_PRIVATE_KEY "
-            "non configurata"
-        )
+        raise RuntimeError("SORARE_STARK_PRIVATE_KEY non configurata")
 
     script = r'''
 const fs = require("fs");
-const {
-    signAuthorizationRequest
-} = require("@sorare/crypto");
-
-const input = JSON.parse(
-    fs.readFileSync(0, "utf8")
-);
+const { signAuthorizationRequest } = require("@sorare/crypto");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
 
 function sign(a) {
     const r = a.request;
-
-    if (!r) {
-        throw new Error(
-            "AuthorizationRequest mancante"
-        );
-    }
+    if (!r) throw new Error("AuthorizationRequest mancante");
 
     if (
-        r.__typename ===
-        "StarkexTransferAuthorizationRequest"
-        &&
+        r.__typename === "StarkexTransferAuthorizationRequest" &&
         r.amount != null
-    ) {
-        r.amount = BigInt(r.amount);
-    }
+    ) r.amount = BigInt(r.amount);
 
-    const signature =
-        signAuthorizationRequest(
-            input.privateKey,
-            r
-        );
+    const signature = signAuthorizationRequest(input.privateKey, r);
 
-    if (
-        r.__typename ===
-        "StarkexTransferAuthorizationRequest"
-    ) {
+    if (r.__typename === "StarkexTransferAuthorizationRequest")
         return {
             fingerprint: a.fingerprint,
-
             starkexTransferApproval: {
                 nonce: r.nonce,
-                expirationTimestamp:
-                    r.expirationTimestamp,
+                expirationTimestamp: r.expirationTimestamp,
                 signature
             }
         };
-    }
 
-    if (
-        r.__typename ===
-        "StarkexLimitOrderAuthorizationRequest"
-    ) {
+    if (r.__typename === "StarkexLimitOrderAuthorizationRequest")
         return {
             fingerprint: a.fingerprint,
-
             starkexLimitOrderApproval: {
                 nonce: r.nonce,
-                expirationTimestamp:
-                    r.expirationTimestamp,
+                expirationTimestamp: r.expirationTimestamp,
                 signature
             }
         };
-    }
 
-    if (
-        r.__typename ===
-        "MangopayWalletTransferAuthorizationRequest"
-    ) {
+    if (r.__typename === "MangopayWalletTransferAuthorizationRequest")
         return {
             fingerprint: a.fingerprint,
-
             mangopayWalletTransferApproval: {
                 nonce: r.nonce,
                 signature
             }
         };
-    }
 
-    throw new Error(
-        "Authorization non supportata: "
-        + r.__typename
-    );
+    throw new Error("Authorization non supportata: " + r.__typename);
 }
 
 process.stdout.write(
-    JSON.stringify(
-        input.authorizations.map(sign)
-    )
+    JSON.stringify(input.authorizations.map(sign))
 );
 '''
 
     p = subprocess.run(
-        [
-            node,
-            "-e",
-            script
-        ],
-
+        [node, "-e", script],
         input=json.dumps({
             "privateKey": STARK,
-            "authorizations":
-                authorizations
+            "authorizations": authorizations
         }),
-
         text=True,
-
         capture_output=True,
-
         timeout=TIMEOUT
     )
 
     if p.returncode != 0:
-        raise RuntimeError(
-            p.stderr.strip()
-            or "Firma fallita"
-        )
+        raise RuntimeError(p.stderr.strip() or "Firma fallita")
 
-    return json.loads(
-        p.stdout
-    )
+    return json.loads(p.stdout)
 
 
 # ============================================================
 # CREATE SALE
 # ============================================================
 
-def create_sale(
-    card,
-    price_cents
-):
-    asset_id = str(
-        card.get("assetId")
-        or ""
-    ).strip()
+def create_sale(card, price_cents):
+    asset_id = str(card.get("assetId") or "").strip()
 
     if not asset_id:
-        print(
-            "❌ AutoSell: "
-            "assetId mancante",
-            flush=True
-        )
-
+        print("❌ AutoSell: assetId mancante", flush=True)
         return None
 
-    # --------------------------------------------------------
-    # DRY RUN
-    # --------------------------------------------------------
-
     if DRY_RUN:
-        print(
-            "🟡 DRY RUN: "
-            "vendita simulata",
-            flush=True
-        )
-
-        print(
-            f"   ├─ Carta: "
-            f"{card_label(card)}",
-            flush=True
-        )
-
-        print(
-            f"   ├─ Asset: "
-            f"{asset_id}",
-            flush=True
-        )
-
-        print(
-            f"   └─ Prezzo: "
-            f"{format_eur(price_cents)}",
-            flush=True
-        )
-
+        print("🟡 DRY RUN: vendita simulata", flush=True)
+        print(f"   ├─ Carta: {card_label(card)}", flush=True)
+        print(f"   ├─ Asset: {asset_id}", flush=True)
+        print(f"   └─ Prezzo: {format_eur(price_cents)}", flush=True)
         return "DRY-RUN"
 
-    # --------------------------------------------------------
-    # PREPARE OFFER
-    # --------------------------------------------------------
-
     prepare_input = {
-        "type":
-            "SINGLE_SALE_OFFER",
-
-        "sendAssetIds": [
-            asset_id
-        ],
-
+        "type": "SINGLE_SALE_OFFER",
+        "sendAssetIds": [asset_id],
         "receiveAssetIds": [],
-
         "receiveAmount": {
-            "amount":
-                str(price_cents),
-            "currency":
-                "EUR"
+            "amount": str(price_cents),
+            "currency": "EUR"
         },
-
-        "clientMutationId":
-            str(uuid.uuid4())
+        "clientMutationId": str(uuid.uuid4())
     }
 
     data = graphql("""
-        mutation PrepareOffer(
-            $input: prepareOfferInput!
-        ) {
-            prepareOffer(
-                input: $input
-            ) {
+        mutation PrepareOffer($input: prepareOfferInput!) {
+            prepareOffer(input: $input) {
                 authorizations {
                     fingerprint
-
                     request {
                         __typename
 
-                        ... on
-                        StarkexTransferAuthorizationRequest {
+                        ... on StarkexTransferAuthorizationRequest {
                             amount
                             condition
                             expirationTimestamp
@@ -1600,7 +843,6 @@ def create_sale(
                             receiverVaultId
                             senderVaultId
                             token
-
                             feeInfoUser {
                                 feeLimit
                                 sourceVaultId
@@ -1608,8 +850,7 @@ def create_sale(
                             }
                         }
 
-                        ... on
-                        StarkexLimitOrderAuthorizationRequest {
+                        ... on StarkexLimitOrderAuthorizationRequest {
                             vaultIdSell
                             vaultIdBuy
                             amountSell
@@ -1618,7 +859,6 @@ def create_sale(
                             tokenBuy
                             nonce
                             expirationTimestamp
-
                             feeInfo {
                                 feeLimit
                                 tokenId
@@ -1626,8 +866,7 @@ def create_sale(
                             }
                         }
 
-                        ... on
-                        MangopayWalletTransferAuthorizationRequest {
+                        ... on MangopayWalletTransferAuthorizationRequest {
                             nonce
                             amount
                             currency
@@ -1642,91 +881,45 @@ def create_sale(
                 }
             }
         }
-    """, {
-        "input":
-            prepare_input
-    })
+    """, {"input": prepare_input})
 
-    result = (
-        ((data or {}).get("data") or {})
-        .get("prepareOffer")
-    )
+    result = ((data or {}).get("data") or {}).get("prepareOffer")
 
     if not result:
-        print(
-            "❌ AutoSell: "
-            "prepareOffer senza risultato",
-            flush=True
-        )
-
+        print("❌ AutoSell: prepareOffer senza risultato", flush=True)
         return None
 
-    errors = (
-        result.get("errors")
-        or []
-    )
+    errors = result.get("errors") or []
 
     if errors:
         print(
             "❌ AutoSell prepareOffer:",
-            json.dumps(
-                errors,
-                ensure_ascii=False
-            ),
+            json.dumps(errors, ensure_ascii=False),
             flush=True
         )
-
         return None
 
-    authorizations = (
-        result.get(
-            "authorizations"
-        )
-        or []
-    )
+    authorizations = result.get("authorizations") or []
 
     if not authorizations:
-        print(
-            "❌ AutoSell: "
-            "nessuna authorization",
-            flush=True
-        )
-
+        print("❌ AutoSell: nessuna authorization", flush=True)
         return None
-
-    # --------------------------------------------------------
-    # SIGN
-    # --------------------------------------------------------
 
     try:
-        approvals = sign_authorizations(
-            authorizations
-        )
-
+        approvals = sign_authorizations(authorizations)
     except Exception as e:
-        print(
-            f"❌ AutoSell firma: {e}",
-            flush=True
-        )
-
+        print(f"❌ AutoSell firma: {e}", flush=True)
         return None
-
-    # --------------------------------------------------------
-    # CREATE
-    # --------------------------------------------------------
 
     data = graphql("""
         mutation CreateSingleSaleOffer(
             $input: createSingleSaleOfferInput!
         ) {
-            createSingleSaleOffer(
-                input: $input
-            ) {
+            createSingleSaleOffer(input: $input) {
                 tokenOffer {
                     id
                     status
                 }
-
                 errors {
                     message
                 }
@@ -1734,86 +927,46 @@ def create_sale(
         }
     """, {
         "input": {
-            "approvals":
-                approvals,
-
-            "dealId":
-                str(uuid.uuid4()),
-
-            "assetId":
-                asset_id,
-
+            "approvals": approvals,
+            "dealId": str(uuid.uuid4()),
+            "assetId": asset_id,
             "receiveAmount": {
-                "amount":
-                    str(price_cents),
-                "currency":
-                    "EUR"
+                "amount": str(price_cents),
+                "currency": "EUR"
             },
-
-            "clientMutationId":
-                str(uuid.uuid4())
+            "clientMutationId": str(uuid.uuid4())
         }
     })
 
     result = (
         ((data or {}).get("data") or {})
-        .get(
-            "createSingleSaleOffer"
-        )
+        .get("createSingleSaleOffer")
     )
 
     if not result:
         print(
-            "❌ AutoSell: "
-            "createSingleSaleOffer "
-            "senza risultato",
+            "❌ AutoSell: createSingleSaleOffer senza risultato",
             flush=True
         )
-
         return None
 
-    errors = (
-        result.get("errors")
-        or []
-    )
+    errors = result.get("errors") or []
 
     if errors:
         print(
-            "❌ AutoSell "
-            "createSingleSaleOffer:",
-            json.dumps(
-                errors,
-                ensure_ascii=False
-            ),
+            "❌ AutoSell createSingleSaleOffer:",
+            json.dumps(errors, ensure_ascii=False),
             flush=True
         )
-
         return None
 
-    offer_id = (
-        (
-            result.get(
-                "tokenOffer"
-            )
-            or {}
-        ).get("id")
-    )
+    offer_id = (result.get("tokenOffer") or {}).get("id")
 
     if not offer_id:
-        print(
-            "❌ AutoSell: "
-            "tokenOffer ID mancante",
-            flush=True
-        )
-
+        print("❌ AutoSell: tokenOffer ID mancante", flush=True)
         return None
 
-    print(
-        f"✅ AUTOSELL CREATO: "
-        f"{offer_id}",
-        flush=True
-    )
-
+    print(f"✅ AUTOSELL CREATO: {offer_id}", flush=True)
     return offer_id
 
 
@@ -1822,226 +975,97 @@ def create_sale(
 # ============================================================
 
 def process_card(row):
-    asset_id = str(
-        row.get("asset_id")
-        or ""
-    ).strip()
-
-    source = (
-        row.get("source")
-        or "UNKNOWN"
-    )
+    asset_id = str(row.get("asset_id") or "").strip()
+    source = row.get("source") or "UNKNOWN"
 
     if not asset_id:
         return
 
-    print(
-        "\n💰 AUTOSELL CHECK",
-        flush=True
-    )
+    print("\n💰 AUTOSELL CHECK", flush=True)
+    print(f"   ├─ Asset: {asset_id}", flush=True)
+    print(f"   ├─ Provenienza: {source}", flush=True)
+    print("   └─ Età: NON UTILIZZATA", flush=True)
 
-    print(
-        f"   ├─ Asset: "
-        f"{asset_id}",
-        flush=True
-    )
-
-    print(
-        f"   ├─ Provenienza: "
-        f"{source}",
-        flush=True
-    )
-
-    print(
-        "   └─ Età: "
-        "NON UTILIZZATA",
-        flush=True
-    )
-
-    # --------------------------------------------------------
-    # CARD DETAILS
-    # --------------------------------------------------------
-
-    cards = card_details([
-        asset_id
-    ])
+    cards = card_details([asset_id])
 
     if len(cards) != 1:
         print(
-            "❌ AutoSell: "
-            "impossibile recuperare "
-            "la carta → NON VENDERE",
+            "❌ AutoSell: impossibile recuperare la carta → NON VENDERE",
             flush=True
         )
-
         update_json_card(
             asset_id,
             status="ERROR",
-            last_error=(
-                "CARD_DETAILS_UNAVAILABLE"
-            )
+            last_error="CARD_DETAILS_UNAVAILABLE"
         )
-
         return
 
     card = cards[0]
 
-    # --------------------------------------------------------
-    # ASSET ID CHECK
-    # --------------------------------------------------------
-
-    real_asset = str(
-        card.get("assetId")
-        or ""
-    ).strip()
-
-    if (
-        real_asset.lower()
-        != asset_id.lower()
-    ):
+    if norm(card.get("assetId")) != norm(asset_id):
         print(
-            "❌ AutoSell: "
-            "assetId non corrispondente "
-            "→ BLOCCATO",
+            "❌ AutoSell: assetId non corrispondente → BLOCCATO",
             flush=True
         )
-
         update_json_card(
             asset_id,
             status="ERROR",
-            last_error=(
-                "ASSET_ID_MISMATCH"
-            )
+            last_error="ASSET_ID_MISMATCH"
         )
-
         return
 
-    # --------------------------------------------------------
-    # VALIDATION
-    # --------------------------------------------------------
-
-    valid, info = (
-        validate_for_autosell(
-            card
-        )
-    )
+    valid, info = validate_for_autosell(card)
 
     if not valid:
-        print_rejection(
-            card,
-            info
-        )
-
-        code = (
-            info or {}
-        ).get(
-            "code",
-            "INVALID"
-        )
+        print_rejection(card, info)
+        code = (info or {}).get("code", "INVALID")
 
         update_json_card(
             asset_id,
-            status=(
-                "READY"
-                if code
-                == "COVERAGE_UNAVAILABLE"
-                else "BLOCKED"
-            ),
+            status="READY" if code == "COVERAGE_UNAVAILABLE" else "BLOCKED",
             last_error=code
         )
-
         return
 
-    floor = info.get(
-        "floor"
-    )
+    floor = info.get("floor")
 
     print(
-        "✅ AutoSell - "
-        f"Carta valida: "
-        f"{card_label(card)}",
+        f"✅ AutoSell - Carta valida: {card_label(card)}",
         flush=True
     )
-
-    print(
-        f"   ├─ Rarità: "
-        f"{info.get('rarity')}",
-        flush=True
-    )
-
-    print(
-        f"   ├─ Floor: "
-        f"{format_eur(floor)}",
-        flush=True
-    )
-
+    print(f"   ├─ Rarità: {info.get('rarity')}", flush=True)
+    print(f"   ├─ Floor: {format_eur(floor)}", flush=True)
     print(
         "   └─ Competizioni coperte: "
-        + ", ".join(
-            info.get(
-                "covered_competitions"
-            )
-            or []
-        ),
+        + ", ".join(info.get("covered_competitions") or []),
         flush=True
     )
-
-    # --------------------------------------------------------
-    # SELL PRICE MODE
-    # --------------------------------------------------------
 
     if SELL_PRICE_MODE != "FLOOR":
         print(
-            "❌ SELL_PRICE_MODE "
-            "non supportato: "
-            f"{SELL_PRICE_MODE}",
+            f"❌ SELL_PRICE_MODE non supportato: {SELL_PRICE_MODE}",
             flush=True
         )
-
         update_json_card(
             asset_id,
             status="ERROR",
-            last_error=(
-                "INVALID_SELL_PRICE_MODE"
-            )
+            last_error="INVALID_SELL_PRICE_MODE"
         )
-
         return
 
     sell_price = floor
 
-    # --------------------------------------------------------
-    # FINAL SAFETY CHECK
-    # --------------------------------------------------------
-
-    if (
-        sell_price is None
-        or not (
-            MIN_PRICE
-            <= sell_price
-            <= MAX_PRICE
-        )
-    ):
+    if sell_price is None or not MIN_PRICE <= sell_price <= MAX_PRICE:
         print(
-            "🛑 AutoSell: "
-            "prezzo finale fuori "
-            "dal range → BLOCCATO",
+            "🛑 AutoSell: prezzo finale fuori dal range → BLOCCATO",
             flush=True
         )
-
         update_json_card(
             asset_id,
             status="BLOCKED",
-            last_error=(
-                "FINAL_PRICE_OUT_OF_RANGE"
-            )
+            last_error="FINAL_PRICE_OUT_OF_RANGE"
         )
-
         return
-
-    # --------------------------------------------------------
-    # MARK SELLING
-    # --------------------------------------------------------
 
     if not update_json_card(
         asset_id,
@@ -2049,37 +1073,20 @@ def process_card(row):
         last_error=None
     ):
         print(
-            "❌ AutoSell: "
-            "impossibile aggiornare "
-            "il JSON → NON VENDERE",
+            "❌ AutoSell: impossibile aggiornare il JSON → NON VENDERE",
             flush=True
         )
-
         return
 
-    # --------------------------------------------------------
-    # CREATE SALE
-    # --------------------------------------------------------
-
-    offer_id = create_sale(
-        card,
-        sell_price
-    )
+    offer_id = create_sale(card, sell_price)
 
     if not offer_id:
         update_json_card(
             asset_id,
             status="READY",
-            last_error=(
-                "CREATE_SALE_FAILED"
-            )
+            last_error="CREATE_SALE_FAILED"
         )
-
         return
-
-    # --------------------------------------------------------
-    # SOLD
-    # --------------------------------------------------------
 
     if not update_json_card(
         asset_id,
@@ -2088,36 +1095,15 @@ def process_card(row):
         last_error=None
     ):
         print(
-            "⚠️ ATTENZIONE: "
-            "vendita creata ma "
-            "JSON non aggiornato",
+            "⚠️ ATTENZIONE: vendita creata ma JSON non aggiornato",
             flush=True
         )
-
         return
 
-    print(
-        "🎉 AUTOSELL COMPLETATO",
-        flush=True
-    )
-
-    print(
-        f"   ├─ Carta: "
-        f"{card_label(card)}",
-        flush=True
-    )
-
-    print(
-        f"   ├─ Prezzo: "
-        f"{format_eur(sell_price)}",
-        flush=True
-    )
-
-    print(
-        f"   └─ Offer ID: "
-        f"{offer_id}",
-        flush=True
-    )
+    print("🎉 AUTOSELL COMPLETATO", flush=True)
+    print(f"   ├─ Carta: {card_label(card)}", flush=True)
+    print(f"   ├─ Prezzo: {format_eur(sell_price)}", flush=True)
+    print(f"   └─ Offer ID: {offer_id}", flush=True)
 
 
 # ============================================================
@@ -2125,145 +1111,57 @@ def process_card(row):
 # ============================================================
 
 def worker():
+    print("🤖 AUTOSELL AVVIATO", flush=True)
+    print(f"📦 VERSIONE: {BOT_VERSION}", flush=True)
+    print(f"🧪 DRY_RUN={DRY_RUN}", flush=True)
     print(
-        "🤖 AUTOSELL AVVIATO",
+        f"💰 RANGE: {format_eur(MIN_PRICE)} - {format_eur(MAX_PRICE)}",
         flush=True
     )
-
-    print(
-        f"📦 VERSIONE: "
-        f"{BOT_VERSION}",
-        flush=True
-    )
-
-    print(
-        f"🧪 DRY_RUN={DRY_RUN}",
-        flush=True
-    )
-
-    print(
-        f"💰 RANGE: "
-        f"{format_eur(MIN_PRICE)} - "
-        f"{format_eur(MAX_PRICE)}",
-        flush=True
-    )
-
-    print(
-        f"📊 LISTING MINIME: "
-        f"{MIN_LIVE_LISTINGS}",
-        flush=True
-    )
-
-    print(
-        "🎂 ETÀ: NON UTILIZZATA",
-        flush=True
-    )
-
-    print(
-        "🔒 KULENOVIC: MAI VENDUTO",
-        flush=True
-    )
-
-    print(
-        "🛡️ SOURCE: AUTOBUY / SWAP",
-        flush=True
-    )
-
-    print(
-        f"💾 JSON: {JSON_PATH}",
-        flush=True
-    )
-
-    # --------------------------------------------------------
-    # CONFIG
-    # --------------------------------------------------------
+    print(f"📊 LISTING MINIME: {MIN_LIVE_LISTINGS}", flush=True)
+    print("🎂 ETÀ: NON UTILIZZATA", flush=True)
+    print("🔒 KULENOVIC: MAI VENDUTO", flush=True)
+    print("🛡️ SOURCE: AUTOBUY / SWAP", flush=True)
+    print(f"💾 JSON: {JSON_PATH}", flush=True)
 
     try:
         headers()
         ensure_json_file()
-
     except Exception as e:
-        print(
-            f"❌ Configurazione: {e}",
-            flush=True
-        )
-
+        print(f"❌ Configurazione: {e}", flush=True)
         return
 
-    # --------------------------------------------------------
-    # COVERAGE
-    # --------------------------------------------------------
-
-    coverage = load_coverage(
-        force=True
-    )
+    coverage = load_coverage(force=True)
 
     if coverage:
-        print(
-            f"🏆 COMPETIZIONI FOOTBALL: "
-            f"{len(coverage)}",
-            flush=True
-        )
-
+        print(f"🏆 COMPETIZIONI FOOTBALL: {len(coverage)}", flush=True)
     else:
+        print("⚠️ Coverage non disponibile.", flush=True)
         print(
-            "⚠️ Coverage non disponibile.",
+            "🛡️ AutoSell resta attivo ma NON venderà carte "
+            "finché la coverage non sarà verificata.",
             flush=True
         )
-
-        print(
-            "🛡️ AutoSell resta attivo "
-            "ma NON venderà carte "
-            "finché la coverage "
-            "non sarà verificata.",
-            flush=True
-        )
-
-    # --------------------------------------------------------
-    # ACCOUNT
-    # --------------------------------------------------------
 
     if not check_account():
         return
 
-    # --------------------------------------------------------
-    # LOOP
-    # --------------------------------------------------------
-
     while True:
         try:
             load_coverage()
-
             rows = get_ready_cards()
 
-            print(
-                f"🗄️ Carte READY nel JSON: "
-                f"{len(rows)}",
-                flush=True
-            )
+            print(f"🗄️ Carte READY nel JSON: {len(rows)}", flush=True)
 
             for row in rows:
                 try:
-                    process_card(
-                        row
-                    )
-
+                    process_card(row)
                 except Exception as e:
-                    asset_id = str(
-                        row.get(
-                            "asset_id"
-                        )
-                        or ""
-                    )
-
+                    asset_id = str(row.get("asset_id") or "")
                     print(
-                        f"❌ AutoSell "
-                        f"errore "
-                        f"{asset_id}: "
-                        f"{e}",
+                        f"❌ AutoSell errore {asset_id}: {e}",
                         flush=True
                     )
-
                     if asset_id:
                         update_json_card(
                             asset_id,
@@ -2271,20 +1169,11 @@ def worker():
                             last_error=str(e)
                         )
 
-            time.sleep(
-                INTERVAL
-            )
+            time.sleep(INTERVAL)
 
         except Exception as e:
-            print(
-                f"❌ AutoSell worker: "
-                f"{e}",
-                flush=True
-            )
-
-            time.sleep(
-                INTERVAL
-            )
+            print(f"❌ AutoSell worker: {e}", flush=True)
+            time.sleep(INTERVAL)
 
 
 # ============================================================
@@ -2306,103 +1195,53 @@ def start_worker():
             daemon=True
         ).start()
 
-        print(
-            "✅ Thread AutoSell avviato.",
-            flush=True
-        )
+        print("✅ Thread AutoSell avviato.", flush=True)
 
 
 @app.get("/")
 def home():
     with coverage_lock:
-        covered = set(
-            coverage_cache
-        )
-
-        coverage_ok = (
-            coverage_available
-        )
+        covered = set(coverage_cache)
+        coverage_ok = coverage_available
 
     return jsonify({
         "status": "online",
         "bot": "autosell",
         "version": BOT_VERSION,
-
         "dry_run": DRY_RUN,
-
-        "min_price_cents":
-            MIN_PRICE,
-
-        "max_price_cents":
-            MAX_PRICE,
-
-        "min_live_listings":
-            MIN_LIVE_LISTINGS,
-
-        "age_parameter":
-            "NOT_USED",
-
-        "rarity":
-            "LIMITED",
-
-        "coverage":
-            "REQUIRED",
-
-        "coverage_available":
-            coverage_ok,
-
-        "kulenovic":
-            "NEVER_SELL",
-
-        "source":
-            "AUTOBUY_OR_SWAP_ONLY",
-
-        "storage":
-            "PERSISTENT_JSON",
-
-        "json_path":
-            JSON_PATH,
-
-        "ready_cards":
-            len(get_ready_cards()),
-
-        "sell_price_mode":
-            SELL_PRICE_MODE,
-
-        "covered_competitions_count":
-            len(covered),
-
-        "covered_competitions":
-            sorted(covered),
-
-        "worker_started":
-            worker_started
+        "min_price_cents": MIN_PRICE,
+        "max_price_cents": MAX_PRICE,
+        "min_live_listings": MIN_LIVE_LISTINGS,
+        "age_parameter": "NOT_USED",
+        "rarity": "LIMITED",
+        "coverage": "REQUIRED",
+        "coverage_available": coverage_ok,
+        "kulenovic": "NEVER_SELL",
+        "source": "AUTOBUY_OR_SWAP_ONLY",
+        "storage": "PERSISTENT_JSON",
+        "json_path": JSON_PATH,
+        "ready_cards": len(get_ready_cards()),
+        "sell_price_mode": SELL_PRICE_MODE,
+        "covered_competitions_count": len(covered),
+        "covered_competitions": sorted(covered),
+        "worker_started": worker_started
     })
 
 
 @app.get("/health")
 def health():
     with coverage_lock:
-        loaded = bool(
-            coverage_cache
-        )
-
-        coverage_ok = (
-            coverage_available
-        )
+        loaded = bool(coverage_cache)
+        coverage_ok = coverage_available
 
     return jsonify({
         "status": "ok",
         "bot": "autosell",
         "version": BOT_VERSION,
-        "worker_started":
-            worker_started,
-        "coverage_loaded":
-            loaded,
-        "coverage_available":
-            coverage_ok,
-        "dry_run":
-            DRY_RUN
+        "worker_started": worker_started,
+        "coverage_loaded": loaded,
+        "coverage_available": coverage_ok,
+        "dry_run": DRY_RUN
     })
 
 
@@ -2417,19 +1256,9 @@ def cards_endpoint():
     })
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
 if __name__ == "__main__":
     start_worker()
-
     app.run(
         host="0.0.0.0",
-        port=int(
-            os.getenv(
-                "PORT",
-                "10000"
-            )
-        )
+        port=int(os.getenv("PORT", "10000"))
     )
