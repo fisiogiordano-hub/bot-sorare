@@ -23,13 +23,15 @@ TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 API_KEY = os.getenv("SORARE_API_KEY", "").strip()
 
-# CHIAVE STARKEX
-PRIVATE_KEY = os.getenv(
+# Chiave StarkEx separata.
+# NON viene usata per firmare le autorizzazioni Solana.
+STARK_PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
     ""
 ).strip()
 
-# CHIAVE SOLANA
+# Chiave Solana.
+# La leggiamo separatamente e la trattiamo come BASE58.
 SOLANA_PRIVATE_KEY = os.getenv(
     "SORARE_SOLANA_PRIVATE_KEY",
     ""
@@ -48,7 +50,7 @@ REQUEST_DELAY = float(
 
 TIMEOUT = 30
 
-BOT_VERSION = "40.0-SEPARATE-STARK-SOLANA-KEY"
+BOT_VERSION = "40.0-SOLANA-BASE58-FIX"
 
 
 # ============================================================
@@ -987,7 +989,7 @@ def sign_starkex(authorization):
             "Node.js non disponibile"
         )
 
-    if not PRIVATE_KEY:
+    if not STARK_PRIVATE_KEY:
         raise RuntimeError(
             "SORARE_STARK_PRIVATE_KEY "
             "non configurata"
@@ -1077,7 +1079,6 @@ async function main() {
 }
 
 main().catch(error => {
-
   console.error(
     error && error.stack
       ? error.stack
@@ -1085,7 +1086,6 @@ main().catch(error => {
   );
 
   process.exit(1);
-
 });
 """
 
@@ -1097,7 +1097,7 @@ main().catch(error => {
         ],
         input=json.dumps({
             "authorization": authorization,
-            "privateKey": PRIVATE_KEY,
+            "privateKey": STARK_PRIVATE_KEY,
         }),
         text=True,
         capture_output=True,
@@ -1117,13 +1117,10 @@ main().catch(error => {
         )
 
     try:
-
         return json.loads(
             process.stdout
         )
-
     except Exception as exc:
-
         raise RuntimeError(
             "Output firma StarkEx non valido: "
             + str(exc)
@@ -1131,29 +1128,23 @@ main().catch(error => {
 
 
 # ============================================================
-# SOLANA
+# SOLANA BASE58
 #
-# IMPORTANTE:
+# SORARE_SOLANA_PRIVATE_KEY:
 #
-# Questa funzione NON usa più
-# SORARE_STARK_PRIVATE_KEY.
+# - viene letta come Base58
+# - NON viene interpretata come HEX
+# - NON viene modificata aggiungendo 0x
 #
-# Usa esclusivamente:
+# Una chiave Base58 Solana da 88 caratteri normalmente
+# decodifica a 64 byte.
 #
-# SORARE_SOLANA_PRIVATE_KEY
+# Per il keypair Ed25519:
+# - 64 byte => primi 32 byte = private seed
+# - 32 byte => usati direttamente come private seed
 #
-# La chiave viene interpretata come HEX.
-#
-# Se è 32 byte:
-#   viene usata direttamente come private key
-#   Ed25519.
-#
-# Se è 64 byte:
-#   viene provata come secret key completa.
-#
-# Il codice NON modifica senderAddress.
-# Deve corrispondere esattamente all'indirizzo
-# restituito da Sorare.
+# Prima della firma controlliamo SEMPRE che l'indirizzo
+# derivato coincida con request.senderAddress.
 # ============================================================
 
 def sign_solana(authorization):
@@ -1217,93 +1208,100 @@ def sign_solana(authorization):
 const fs = require("fs");
 
 const {
-  createKeyPairSignerFromPrivateKeyBytes,
-  createKeyPairSignerFromBytes,
+  createKeyPairFromPrivateKeyBytes,
+  createSignerFromKeyPair,
   createSignableMessage,
-  getBase58Decoder
+  getBase58Decoder,
+  getBase58Encoder
 } = require("@solana/kit");
 
 
-async function signerFromHex(hex) {
+const BASE58_ALPHABET =
+  "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-  const clean =
-    String(hex)
-      .trim()
-      .replace(/^0x/i, "");
 
-  if (!/^[0-9a-fA-F]+$/.test(clean)) {
+function decodeBase58(value) {
+
+  if (
+    typeof value !== "string" ||
+    !value.length
+  ) {
     throw new Error(
-      "SORARE_SOLANA_PRIVATE_KEY "
-      + "non è HEX valida"
+      "Chiave Solana Base58 vuota"
     );
   }
 
-  if (clean.length % 2 !== 0) {
-    throw new Error(
-      "SORARE_SOLANA_PRIVATE_KEY "
-      + "ha lunghezza HEX dispari"
-    );
+  let bytes = [0];
+
+  for (const char of value) {
+
+    const index =
+      BASE58_ALPHABET.indexOf(char);
+
+    if (index === -1) {
+      throw new Error(
+        "SORARE_SOLANA_PRIVATE_KEY "
+        + "contiene un carattere non valido "
+        + "per Base58"
+      );
+    }
+
+    let carry = index;
+
+    for (
+      let i = 0;
+      i < bytes.length;
+      i++
+    ) {
+
+      const value2 =
+        bytes[i] * 58 + carry;
+
+      bytes[i] =
+        value2 & 0xff;
+
+      carry =
+        value2 >> 8;
+    }
+
+    while (carry > 0) {
+
+      bytes.push(
+        carry & 0xff
+      );
+
+      carry >>= 8;
+    }
   }
 
-  const bytes =
+  let leadingZeros = 0;
+
+  for (
+    let i = 0;
+    i < value.length &&
+    value[i] === "1";
+    i++
+  ) {
+    leadingZeros++;
+  }
+
+  const result =
     new Uint8Array(
-      Buffer.from(clean, "hex")
+      leadingZeros +
+      bytes.length
     );
 
-  console.error(
-    "🔑 Solana key bytes:",
-    bytes.length
-  );
-
-  /*
-   * Caso 32 byte:
-   *
-   * La chiave viene interpretata direttamente
-   * come private key Ed25519.
-   *
-   * NON viene applicato alcun path BIP44.
-   */
-
-  if (bytes.length === 32) {
-
-    const signer =
-      await createKeyPairSignerFromPrivateKeyBytes(
-        bytes
-      );
-
-    return {
-      signer,
-      mode: "RAW-32"
-    };
+  for (
+    let i = 0;
+    i < bytes.length;
+    i++
+  ) {
+    result[
+      result.length - 1 - i
+    ] = bytes[i];
   }
 
-
-  /*
-   * Caso 64 byte:
-   *
-   * Secret key completa Solana.
-   */
-
-  if (bytes.length === 64) {
-
-    const signer =
-      await createKeyPairSignerFromBytes(
-        bytes
-      );
-
-    return {
-      signer,
-      mode: "SECRET-64"
-    };
-  }
-
-
-  throw new Error(
-    "Lunghezza chiave Solana non supportata: "
-    + bytes.length
-    + " byte. "
-    + "Sono supportati 32 o 64 byte."
-  );
+  return result;
 }
 
 
@@ -1319,22 +1317,87 @@ async function main() {
   const request =
     authorization.request;
 
+  const privateKey =
+    String(input.privateKey).trim();
+
+  console.error(
+    "🔐 Solana private key format: Base58"
+  );
+
+  console.error(
+    "🔢 Solana private key length:",
+    privateKey.length
+  );
+
 
   // --------------------------------------------------------
-  // CHIAVE SOLANA
+  // BASE58 DECODE
   // --------------------------------------------------------
 
-  const result =
-    await signerFromHex(
-      input.privateKey
+  const decoded =
+    decodeBase58(privateKey);
+
+  console.error(
+    "🔑 Solana key bytes:",
+    decoded.length
+  );
+
+
+  let seed;
+
+
+  if (decoded.length === 64) {
+
+    // Standard Solana secret-key representation:
+    // 32 bytes private seed +
+    // 32 bytes public key.
+
+    seed =
+      decoded.slice(0, 32);
+
+    console.error(
+      "🔑 Formato rilevato: "
+      + "64-byte Solana secret key"
+    );
+
+  } else if (decoded.length === 32) {
+
+    seed = decoded;
+
+    console.error(
+      "🔑 Formato rilevato: "
+      + "32-byte Ed25519 seed"
+    );
+
+  } else {
+
+    throw new Error(
+      "SORARE_SOLANA_PRIVATE_KEY "
+      + "decodifica in "
+      + decoded.length
+      + " byte. "
+      + "Attesi 32 o 64 byte."
+    );
+  }
+
+
+  // --------------------------------------------------------
+  // KEYPAIR
+  // --------------------------------------------------------
+
+  const keyPair =
+    await createKeyPairFromPrivateKeyBytes(
+      seed
     );
 
   const signer =
-    result.signer;
+    await createSignerFromKeyPair(
+      keyPair
+    );
 
 
   // --------------------------------------------------------
-  // SENDER SORARE
+  // ADDRESS CHECK
   // --------------------------------------------------------
 
   const expected =
@@ -1347,7 +1410,6 @@ async function main() {
       signer.address
     ).trim();
 
-
   console.error(
     "📨 Sorare senderAddress:",
     expected
@@ -1358,22 +1420,13 @@ async function main() {
     derived
   );
 
-  console.error(
-    "🔐 Key mode:",
-    result.mode
-  );
-
-
-  // --------------------------------------------------------
-  // CONTROLLO FONDAMENTALE
-  // --------------------------------------------------------
 
   if (derived !== expected) {
 
     throw new Error(
       "SOLANA PRIVATE KEY NON CORRISPONDE "
       + "AL SENDER SORARE. "
-      + "La chiave fornita produce "
+      + "La chiave Base58 fornita produce "
       + derived
       + " mentre Sorare richiede "
       + expected
@@ -1382,13 +1435,20 @@ async function main() {
 
 
   console.error(
-    "✅ Solana private key CORRISPONDE "
-    + "al sender Sorare"
+    "✅ SOLANA KEY CORRISPONDE "
+    + "AL SENDER SORARE"
   );
 
 
   // --------------------------------------------------------
-  // MESSAGGIO SORARE
+  // SORARE MESSAGE
+  //
+  // ATTENZIONE:
+  // assetId NON fa parte del messaggio.
+  //
+  // senderAddress NON fa parte del messaggio.
+  //
+  // '0x' è letterale.
   // --------------------------------------------------------
 
   const message = [
@@ -1421,7 +1481,7 @@ async function main() {
 
 
   // --------------------------------------------------------
-  // SHA-256
+  // UTF-8
   // --------------------------------------------------------
 
   const messageBytes =
@@ -1429,6 +1489,10 @@ async function main() {
       message
     );
 
+
+  // --------------------------------------------------------
+  // SHA-256
+  // --------------------------------------------------------
 
   const messageHash =
     await crypto.subtle.digest(
@@ -1438,7 +1502,7 @@ async function main() {
 
 
   // --------------------------------------------------------
-  // SIGN
+  // SIGN HASH
   // --------------------------------------------------------
 
   const signableMessage =
@@ -1449,18 +1513,43 @@ async function main() {
     );
 
 
-  const resultSign =
+  const result =
     await signer.signMessages(
       [signableMessage]
     );
 
 
   const signatureBytes =
-    getBase58Decoder().decode(
-      resultSign[0][
-        signer.address
-      ]
-    );
+    result[0][
+      signer.address
+    ];
+
+
+  // --------------------------------------------------------
+  // BASE58 SIGNATURE
+  // --------------------------------------------------------
+
+  let signature;
+
+  if (
+    typeof signatureBytes === "string"
+  ) {
+
+    signature =
+      signatureBytes;
+
+  } else {
+
+    signature =
+      getBase58Encoder().encode(
+        signatureBytes
+      );
+  }
+
+
+  console.error(
+    "✍️ Firma Solana generata"
+  );
 
 
   // --------------------------------------------------------
@@ -1474,8 +1563,7 @@ async function main() {
 
     solanaTokenTransferApproval: {
 
-      signature:
-        signatureBytes,
+      signature,
 
       nonce:
         request.nonce,
@@ -1518,14 +1606,12 @@ main().catch(error => {
     )
 
     if process.stderr:
-
         print(
             process.stderr.strip(),
             flush=True,
         )
 
     if process.returncode != 0:
-
         raise RuntimeError(
             process.stderr.strip()
             or "Firma Solana fallita"
@@ -1981,22 +2067,7 @@ def worker():
     )
 
     print(
-        "🔐 StarkEx key: "
-        + (
-            "CONFIGURATA"
-            if PRIVATE_KEY
-            else "MANCANTE"
-        ),
-        flush=True,
-    )
-
-    print(
-        "🔐 Solana key: "
-        + (
-            "CONFIGURATA"
-            if SOLANA_PRIVATE_KEY
-            else "MANCANTE"
-        ),
+        "SOLANA KEY: BASE58",
         flush=True,
     )
 
