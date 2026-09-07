@@ -203,10 +203,7 @@ def update_json_card(
 
             return save_cards(cards)
 
-        print(
-            f"⚠️ JSON: asset_id non trovato: {asset_id}",
-            flush=True
-        )
+        print(f"⚠️ JSON: asset_id non trovato: {asset_id}", flush=True)
         return False
 
 
@@ -279,10 +276,7 @@ def graphql(query, variables=None):
                 timeout=TIMEOUT
             )
 
-            print(
-                f"🌐 Sorare HTTP {response.status_code}",
-                flush=True
-            )
+            print(f"🌐 Sorare HTTP {response.status_code}", flush=True)
 
             if response.status_code == 429:
                 retry = response.headers.get(
@@ -337,6 +331,56 @@ def graphql(query, variables=None):
 # COVERAGE
 # ============================================================
 
+def extract_coverage(text):
+    """
+    Estrae gli slug delle competizioni football dalla pagina
+    Coverage usando più formati possibili.
+    """
+
+    if not text:
+        return set()
+
+    patterns = [
+        r'/football/leagues/([a-zA-Z0-9_-]+)',
+        r'football/leagues/([a-zA-Z0-9_-]+)',
+        r'football_leagues/([a-zA-Z0-9_-]+)',
+        r'footballLeague["\']?\s*:\s*["\']([^"\']+)',
+        r'footballLeagueSlug["\']?\s*:\s*["\']([^"\']+)',
+        r'"slug"\s*:\s*"([a-zA-Z0-9_-]+)"'
+    ]
+
+    result = set()
+
+    for pattern in patterns:
+        for value in re.findall(pattern, text, re.I):
+            value = norm(value)
+
+            if not value:
+                continue
+
+            if (
+                "football" in value
+                or pattern.endswith("([a-zA-Z0-9_-]+)')")
+            ):
+                result.add(value)
+
+    # Rimuove valori chiaramente non appartenenti a competizioni
+    invalid = {
+        "football",
+        "leagues",
+        "league",
+        "coverage",
+        "undefined",
+        "null",
+        "true",
+        "false"
+    }
+
+    result -= invalid
+
+    return result
+
+
 def load_coverage(force=False):
     global coverage_cache, coverage_time, coverage_available
 
@@ -345,7 +389,6 @@ def load_coverage(force=False):
     with coverage_lock:
         cached = set(coverage_cache)
         cached_time = coverage_time
-        cached_available = coverage_available
 
     if (
         not force
@@ -360,7 +403,10 @@ def load_coverage(force=False):
             timeout=TIMEOUT,
             headers={
                 "User-Agent": f"Sorare-AutoSell/{BOT_VERSION}",
-                "Accept": "text/html,application/xhtml+xml"
+                "Accept": (
+                    "text/html,application/xhtml+xml,"
+                    "application/json"
+                )
             }
         )
 
@@ -374,35 +420,25 @@ def load_coverage(force=False):
                 "⚠️ Coverage temporaneamente non disponibile",
                 flush=True
             )
+
             with coverage_lock:
                 coverage_available = False
+
             return cached
 
         text = response.text or ""
 
-        matches = re.findall(
-            r'/football/leagues/([^"\'?#<>\s]+)',
-            text,
-            re.I
-        )
-
-        result = {norm(x) for x in matches if norm(x)}
-
-        if not result:
-            matches = re.findall(
-                r'football/leagues/([a-zA-Z0-9_-]+)',
-                text,
-                re.I
-            )
-            result = {norm(x) for x in matches if norm(x)}
+        result = extract_coverage(text)
 
         if not result:
             print(
                 "⚠️ Coverage ricevuta ma nessuna competizione riconosciuta",
                 flush=True
             )
+
             with coverage_lock:
                 coverage_available = False
+
             return cached
 
         with coverage_lock:
@@ -411,8 +447,7 @@ def load_coverage(force=False):
             coverage_available = True
 
         print(
-            f"🌐 Sorare Coverage aggiornata: "
-            f"{len(result)} competizioni",
+            f"🌐 Coverage Football: {len(result)} competizioni",
             flush=True
         )
 
@@ -458,7 +493,11 @@ def check_account():
 
     print(
         "🔐 Stark key account: "
-        + ("PRESENTE" if user.get("starkKey") else "NON DISPONIBILE"),
+        + (
+            "PRESENTE"
+            if user.get("starkKey")
+            else "NON DISPONIBILE"
+        ),
         flush=True
     )
 
@@ -538,6 +577,7 @@ def usd_eur():
 
         usd_rate = rate
         usd_time = now
+
         return rate
 
     except Exception as e:
@@ -551,8 +591,10 @@ def price_eur(amounts):
 
     try:
         eur = int(amounts.get("eurCents"))
+
         if eur > 0:
             return eur
+
     except (TypeError, ValueError):
         pass
 
@@ -563,6 +605,7 @@ def price_eur(amounts):
 
     if usd > 0:
         rate = usd_eur()
+
         if rate:
             return int(round(usd * rate))
 
@@ -645,6 +688,7 @@ def live_floor(card):
             c_player = norm(
                 (c.get("anyPlayer") or {}).get("slug")
             )
+
             c_rarity = norm(c.get("rarityTyped"))
 
             if (
@@ -841,11 +885,15 @@ def print_rejection(card, info):
             flush=True
         )
         print(
-            "   ├─ Attive: " + (", ".join(active) if active else "nessuna"),
+            "   ├─ Attive: " + (
+                ", ".join(active) if active else "nessuna"
+            ),
             flush=True
         )
         print(
-            "   └─ Coperte: " + (", ".join(covered) if covered else "nessuna"),
+            "   └─ Coperte: " + (
+                ", ".join(covered) if covered else "nessuna"
+            ),
             flush=True
         )
         return
@@ -1170,6 +1218,7 @@ def process_card(row):
             "→ NON VENDERE",
             flush=True
         )
+
         update_json_card(
             asset_id,
             status="ERROR",
@@ -1186,6 +1235,7 @@ def process_card(row):
             "❌ AutoSell: assetId non corrispondente → BLOCCATO",
             flush=True
         )
+
         update_json_card(
             asset_id,
             status="ERROR",
@@ -1202,7 +1252,11 @@ def process_card(row):
 
         update_json_card(
             asset_id,
-            status="READY" if code == "COVERAGE_UNAVAILABLE" else "BLOCKED",
+            status=(
+                "READY"
+                if code == "COVERAGE_UNAVAILABLE"
+                else "BLOCKED"
+            ),
             last_error=code
         )
         return
@@ -1213,14 +1267,17 @@ def process_card(row):
         f"✅ AutoSell - Carta valida: {card_label(card)}",
         flush=True
     )
+
     print(
         f"   ├─ Rarità: {info.get('rarity')}",
         flush=True
     )
+
     print(
         f"   ├─ Floor: {format_eur(floor)}",
         flush=True
     )
+
     print(
         "   └─ Competizioni coperte: "
         f"{', '.join(info.get('covered_competitions') or [])}",
@@ -1234,6 +1291,7 @@ def process_card(row):
             f"❌ SELL_PRICE_MODE non supportato: {SELL_PRICE_MODE}",
             flush=True
         )
+
         update_json_card(
             asset_id,
             status="ERROR",
@@ -1253,6 +1311,7 @@ def process_card(row):
             "🛑 AutoSell: prezzo finale fuori dal range → BLOCCATO",
             flush=True
         )
+
         update_json_card(
             asset_id,
             status="BLOCKED",
@@ -1308,14 +1367,17 @@ def worker():
     print("🤖 AUTOSELL AVVIATO", flush=True)
     print(f"📦 VERSIONE: {BOT_VERSION}", flush=True)
     print(f"🧪 DRY_RUN={DRY_RUN}", flush=True)
+
     print(
         f"💰 RANGE: {format_eur(MIN_PRICE)} - {format_eur(MAX_PRICE)}",
         flush=True
     )
+
     print(
         f"📊 LISTING MINIME: {MIN_LIVE_LISTINGS}",
         flush=True
     )
+
     print("🎂 ETÀ: NON UTILIZZATA", flush=True)
     print("🔒 KULENOVIC: MAI VENDUTO", flush=True)
     print("🛡️ SOURCE: AUTOBUY / SWAP", flush=True)
@@ -1360,6 +1422,7 @@ def worker():
             for row in rows:
                 try:
                     process_card(row)
+
                 except Exception as e:
                     asset_id = str(row.get("asset_id") or "")
 
