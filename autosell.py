@@ -697,6 +697,11 @@ def load_coverage(
                 coverage_cache
             )
 
+    # Non interroghiamo /coverage.
+    #
+    # La cache verrà popolata quando il bot riceve
+    # i dettagli delle carte.
+
     with coverage_lock:
 
         coverage_time = now
@@ -711,6 +716,9 @@ def register_card_competitions(
 ):
     """
     Registra le competizioni attive della carta.
+
+    Questa è la stessa fonte utilizzata dal codice
+    AutoBuy / Swap fornito dall'utente.
     """
 
     global coverage_time
@@ -954,6 +962,7 @@ def card_details(
         or []
     )
 
+    # Registra subito le competizioni trovate.
     for card in cards:
 
         try:
@@ -1280,6 +1289,15 @@ def is_kulenovic(
 def coverage_info(
     card
 ):
+    """
+    Verifica la coverage direttamente sulla carta.
+
+    Se Sorare restituisce almeno una activeCompetition,
+    la carta viene considerata appartenente a una
+    competizione seguita dal bot.
+
+    Non viene più usata la pagina /coverage.
+    """
 
     active = (
         register_card_competitions(
@@ -2355,3 +2373,767 @@ def prepare_accept(
 
         "exchangeRateId":
             rate
+    }
+
+    data = graphql("""
+        mutation PrepareAcceptOffer(
+            $input: prepareAcceptOfferInput!
+        ) {
+            prepareAcceptOffer(
+                input: $input
+            ) {
+                authorizations {
+                    fingerprint
+
+                    request {
+                        __typename
+
+                        ... on StarkexTransferAuthorizationRequest {
+                            amount
+                            condition
+                            expirationTimestamp
+                            nonce
+                            receiverPublicKey
+                            receiverVaultId
+                            senderVaultId
+                            token
+
+                            feeInfoUser {
+                                feeLimit
+                                sourceVaultId
+                                tokenId
+                            }
+                        }
+
+                        ... on StarkexLimitOrderAuthorizationRequest {
+                            vaultIdSell
+                            vaultIdBuy
+                            amountSell
+                            amountBuy
+                            tokenSell
+                            tokenBuy
+                            nonce
+                            expirationTimestamp
+
+                            feeInfo {
+                                feeLimit
+                                tokenId
+                                sourceVaultId
+                            }
+                        }
+
+                        ... on MangopayWalletTransferAuthorizationRequest {
+                            nonce
+                            amount
+                            currency
+                            operationHash
+                            mangopayWalletId
+                        }
+                    }
+                }
+
+                errors {
+                    message
+                }
+            }
+        }
+    """, {
+
+        "input": {
+
+            "offerId":
+                offer_id,
+
+            "settlementInfo":
+                settlement
+        }
+    })
+
+    result = (
+        ((data or {}).get("data") or {})
+        .get("prepareAcceptOffer")
+    )
+
+    if not result:
+        return None, None
+
+    errors = (
+        result.get("errors")
+        or []
+    )
+
+    if errors:
+
+        print(
+            "❌ prepareAcceptOffer errors:",
+            json.dumps(
+                errors,
+                ensure_ascii=False
+            ),
+            flush=True
+        )
+
+        return None, None
+
+    return (
+        result.get(
+            "authorizations"
+        ) or [],
+
+        rate
+    )
+
+
+def accept_offer(
+    offer
+):
+
+    offer_id = norm(
+        offer.get("id")
+    )
+
+    if DRY_RUN:
+
+        print(
+            "🟡 DRY RUN: ACCEPT simulato",
+            flush=True
+        )
+
+        return True
+
+    auth, rate = prepare_accept(
+        offer_id
+    )
+
+    if not auth:
+        return False
+
+    try:
+
+        approvals = sign_authorizations(
+            auth
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ Firma ACCEPT: {e}",
+            flush=True
+        )
+
+        return False
+
+    data = graphql("""
+        mutation AcceptOffer(
+            $input: acceptOfferInput!
+        ) {
+            acceptOffer(
+                input: $input
+            ) {
+                tokenOffer {
+                    id
+                    status
+                }
+
+                errors {
+                    message
+                }
+            }
+        }
+    """, {
+
+        "input": {
+
+            "approvals":
+                approvals,
+
+            "offerId":
+                offer_id,
+
+            "settlementInfo": {
+
+                "currency":
+                    "WEI",
+
+                "paymentMethod":
+                    "WALLET",
+
+                "exchangeRateId":
+                    rate
+            },
+
+            "clientMutationId":
+                str(uuid.uuid4())
+        }
+    })
+
+    result = (
+        ((data or {}).get("data") or {})
+        .get("acceptOffer")
+    )
+
+    if not result:
+        return False
+
+    errors = (
+        result.get("errors")
+        or []
+    )
+
+    if errors:
+
+        print(
+            "❌ acceptOffer errors:",
+            json.dumps(
+                errors,
+                ensure_ascii=False
+            ),
+            flush=True
+        )
+
+        return False
+
+    print(
+        "✅ SWAP ACCETTATO",
+        flush=True
+    )
+
+    return True
+
+
+def process_swap(
+    offer
+):
+
+    offer_id = norm(
+        offer.get("id")
+    )
+
+    if (
+        not offer_id
+        or not should_process(
+            offer_id
+        )
+    ):
+        return
+
+    sender_cards = (
+        (offer.get("senderSide") or {})
+        .get("anyCards")
+        or []
+    )
+
+    receiver_cards = (
+        (offer.get("receiverSide") or {})
+        .get("anyCards")
+        or []
+    )
+
+    if (
+        not sender_cards
+        or not receiver_cards
+    ):
+        return
+
+    give_ids = [
+
+        c.get("assetId")
+
+        for c in receiver_cards
+
+        if c.get("assetId")
+    ]
+
+    receive_ids = [
+
+        c.get("assetId")
+
+        for c in sender_cards
+
+        if c.get("assetId")
+    ]
+
+    if (
+        not give_ids
+        or not receive_ids
+    ):
+
+        mark_done(
+            offer_id
+        )
+
+        return
+
+    print(
+        f"\n🔄 SWAP "
+        f"{offer_id}",
+        flush=True
+    )
+
+    give = card_details(
+        give_ids
+    )
+
+    receive = card_details(
+        receive_ids
+    )
+
+    if (
+        len(give) != len(give_ids)
+        or
+        len(receive) != len(receive_ids)
+    ):
+
+        print(
+            "❌ SWAP: impossibile "
+            "verificare tutte le carte "
+            "→ RIFIUTO",
+            flush=True
+        )
+
+        if reject_offer(
+            offer
+        ):
+
+            mark_done(
+                offer_id
+            )
+
+        return
+
+    # ========================================================
+    # KULENOVIC NON È MAI CEDIBILE
+    # ========================================================
+
+    if any(
+        is_kulenovic(c)
+        for c in give
+    ):
+
+        print(
+            "🔒 SWAP - Carta ceduta: "
+            "KULENOVIC",
+            flush=True
+        )
+
+        print(
+            "   └─ Motivo: "
+            "KULENOVIC NON È CEDIBILE",
+            flush=True
+        )
+
+        if reject_offer(
+            offer
+        ):
+
+            mark_done(
+                offer_id
+            )
+
+        return
+
+    total_given = 0
+
+    for card in give:
+
+        floor = live_floor(
+            card
+        )
+
+        if floor is None:
+
+            print_card_rejection(
+
+                card,
+
+                {
+                    "code":
+                        "PRICE_UNKNOWN",
+
+                    "min_live_listings":
+                        MIN_LIVE_LISTINGS
+                },
+
+                "SWAP - CARTA CEDUTA"
+            )
+
+            if reject_offer(
+                offer
+            ):
+
+                mark_done(
+                    offer_id
+                )
+
+            return
+
+        print(
+            f"📤 SWAP - Carta ceduta: "
+            f"{card_label(card)}",
+            flush=True
+        )
+
+        print(
+            f"   └─ Floor live: "
+            f"{format_eur(floor)}",
+            flush=True
+        )
+
+        total_given += floor
+
+    total_received = 0
+
+    for card in receive:
+
+        ok, info = validate_card(
+            card
+        )
+
+        if not ok:
+
+            print_card_rejection(
+                card,
+                info,
+                "SWAP - CARTA RICEVUTA"
+            )
+
+            if reject_offer(
+                offer
+            ):
+
+                mark_done(
+                    offer_id
+                )
+
+            return
+
+        floor = info.get(
+            "floor"
+        )
+
+        print(
+            f"📥 SWAP - Carta ricevuta: "
+            f"{card_label(card)}",
+            flush=True
+        )
+
+        print(
+            f"   └─ Floor live: "
+            f"{format_eur(floor)}",
+            flush=True
+        )
+
+        total_received += floor
+
+    cash = price_eur(
+
+        (offer.get("senderSide") or {})
+        .get("amounts")
+        or {}
+    ) or 0
+
+    total_received += cash
+
+    if total_given <= 0:
+
+        print(
+            "🔴 SWAP RIFIUTATO: "
+            "valore ceduto non valido",
+            flush=True
+        )
+
+        mark_done(
+            offer_id
+        )
+
+        return
+
+    minimum = int(
+        round(
+            total_given
+            * SWAP_MIN
+        )
+    )
+
+    maximum = int(
+        round(
+            total_given
+            * SWAP_MAX
+        )
+    )
+
+    print(
+        f"📤 Totale ceduto: "
+        f"{format_eur(total_given)}",
+        flush=True
+    )
+
+    print(
+        f"📥 Totale ricevuto: "
+        f"{format_eur(total_received)}",
+        flush=True
+    )
+
+    print(
+        f"💶 Cash già offerto: "
+        f"{format_eur(cash)}",
+        flush=True
+    )
+
+    print(
+        f"🎯 Range richiesto: "
+        f"{format_eur(minimum)} - "
+        f"{format_eur(maximum)}",
+        flush=True
+    )
+
+    if total_received < minimum:
+
+        premium = (
+            total_received
+            / total_given
+            - 1
+        ) * 100
+
+        print(
+            f"🔴 SWAP RIFIUTATO: "
+            f"valore ricevuto sotto "
+            f"+20% ({premium:.2f}%)",
+            flush=True
+        )
+
+        if reject_offer(
+            offer
+        ):
+
+            mark_done(
+                offer_id
+            )
+
+        return
+
+    if total_received > maximum:
+
+        premium = (
+            total_received
+            / total_given
+            - 1
+        ) * 100
+
+        print(
+            f"🔴 SWAP RIFIUTATO: "
+            f"valore ricevuto sopra "
+            f"+25% ({premium:.2f}%)",
+            flush=True
+        )
+
+        if reject_offer(
+            offer
+        ):
+
+            mark_done(
+                offer_id
+            )
+
+        return
+
+    premium = (
+        total_received
+        / total_given
+        - 1
+    ) * 100
+
+    print(
+        f"✅ SWAP APPROVABILE: "
+        f"+{premium:.2f}%",
+        flush=True
+    )
+
+    if not SWAP_AUTO_ACCEPT:
+
+        print(
+            "🛑 SWAP_AUTO_ACCEPT=False → "
+            "nessuna azione",
+            flush=True
+        )
+
+        mark_done(
+            offer_id
+        )
+
+        return
+
+    if accept_offer(
+        offer
+    ):
+
+        mark_done(
+            offer_id
+        )
+
+
+# ============================================================
+# DISPATCH
+# ============================================================
+
+def process_offer(
+    offer
+):
+
+    receiver_cards = (
+        (offer.get("receiverSide") or {})
+        .get("anyCards")
+        or []
+    )
+
+    sender_cards = (
+        (offer.get("senderSide") or {})
+        .get("anyCards")
+        or []
+    )
+
+    # Kulenovic ricevuto → AUTOBUY
+    if any(
+        is_kulenovic(c)
+        for c in receiver_cards
+    ):
+
+        process_autobuy(
+            offer
+        )
+
+        return
+
+    # Scambio carta ↔ carta → SWAP
+    if (
+        sender_cards
+        and receiver_cards
+    ):
+
+        process_swap(
+            offer
+        )
+
+
+# ============================================================
+# WORKER
+# ============================================================
+
+def worker():
+
+    print(
+        "🤖 AUTOSELL AVVIATO",
+        flush=True
+    )
+
+    print(
+        f"📦 VERSIONE: "
+        f"{BOT_VERSION}",
+        flush=True
+    )
+
+    print(
+        f"🧪 DRY_RUN={DRY_RUN}",
+        flush=True
+    )
+
+    print(
+        "✅ Thread AutoSell avviato.",
+        flush=True
+    )
+
+    print(
+        f"💰 RANGE: "
+        f"€{MIN_PRICE / 100:.2f} - "
+        f"€{MAX_PRICE / 100:.2f}",
+        flush=True
+    )
+
+    print(
+        f"📊 LISTING MINIME: "
+        f"{MIN_LIVE_LISTINGS}",
+        flush=True
+    )
+
+    print(
+        f"🎂 ETÀ: < {MAX_AGE}",
+        flush=True
+    )
+
+    print(
+        "🔒 KULENOVIC: MAI VENDUTO",
+        flush=True
+    )
+
+    print(
+        "🛡️ SOURCE: "
+        "SORARE activeCompetitions",
+        flush=True
+    )
+
+    print(
+        "💾 JSON: "
+        f"{STATE_FILE}",
+        flush=True
+    )
+
+    print(
+        "🔄 SWAP: "
+        f"+{int((SWAP_MIN - 1) * 100)}% / "
+        f"+{int((SWAP_MAX - 1) * 100)}%",
+        flush=True
+    )
+
+    print(
+        f"🔄 SWAP_AUTO_ACCEPT="
+        f"{SWAP_AUTO_ACCEPT}",
+        flush=True
+    )
+
+    # ========================================================
+    # STATE
+    # ========================================================
+
+    load_state()
+
+    # ========================================================
+    # COVERAGE
+    # ========================================================
+
+    print(
+        "🏆 COVERAGE: "
+        "NON viene più usata /coverage",
+        flush=True
+    )
+
+    print(
+        "🛡️ Coverage: "
+        "verifica tramite "
+        "activeCompetitions di Sorare",
+        flush=True
+    )
+
+    # NON FERMARE IL BOT QUI.
+    #
+    # La lista delle competizioni viene popolata
+    # progressivamente dalle carte.
+
+    # ========================================================
+    # ACCOUNT
+    # ========================================================
+
+    if not check_account():
+
+        return
+
+    # ========================================================
+    # LOOP
+    # ========================================================
+
+    while True:
+
+        try:
+
+            offers = get_offers()
+
+            print(
