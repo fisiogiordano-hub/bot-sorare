@@ -23,19 +23,35 @@ TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 API_KEY = os.getenv("SORARE_API_KEY", "").strip()
 
-# Chiave StarkEx separata.
-# NON viene usata per firmare le autorizzazioni Solana.
+# ============================================================
+# STARKEX PRIVATE KEY
+#
+# SEPARATA dalla chiave Solana.
+# Viene usata SOLO per authorization StarkEx.
+# ============================================================
+
 STARK_PRIVATE_KEY = os.getenv(
     "SORARE_STARK_PRIVATE_KEY",
     ""
 ).strip()
 
-# Chiave Solana.
-# La leggiamo separatamente e la trattiamo come BASE58.
+
+# ============================================================
+# SOLANA PRIVATE KEY
+#
+# Questa è la chiave Base58 da 88 caratteri
+# che hai verificato essere corretta.
+#
+# NON viene interpretata come HEX.
+# NON viene modificata.
+# NON viene messo 0x davanti.
+# ============================================================
+
 SOLANA_PRIVATE_KEY = os.getenv(
     "SORARE_SOLANA_PRIVATE_KEY",
     ""
 ).strip()
+
 
 DRY_RUN = False
 
@@ -50,7 +66,7 @@ REQUEST_DELAY = float(
 
 TIMEOUT = 30
 
-BOT_VERSION = "40.0-SOLANA-BASE58-FIX"
+BOT_VERSION = "41.0-SOLANA-ED25519-NATIVE"
 
 
 # ============================================================
@@ -64,7 +80,10 @@ KASSET = (
     "ac587bd3d40c7136796b6c0ed10ba0a6"
 )
 
-KID = os.getenv("KULENOVIC_ID", "").strip()
+KID = os.getenv(
+    "KULENOVIC_ID",
+    ""
+).strip()
 
 
 # ============================================================
@@ -125,10 +144,14 @@ def label(card):
     ]
 
     if card.get("seasonYear"):
-        parts.append(str(card["seasonYear"]))
+        parts.append(
+            str(card["seasonYear"])
+        )
 
     if card.get("rarityTyped"):
-        parts.append(str(card["rarityTyped"]))
+        parts.append(
+            str(card["rarityTyped"])
+        )
 
     if card.get("serialNumber"):
         parts.append(
@@ -179,7 +202,11 @@ def headers():
 # GRAPHQL
 # ============================================================
 
-def graphql(query, variables=None, operation_name=None):
+def graphql(
+    query,
+    variables=None,
+    operation_name=None
+):
 
     for attempt in range(5):
 
@@ -193,7 +220,9 @@ def graphql(query, variables=None, operation_name=None):
             }
 
             if operation_name:
-                payload["operationName"] = operation_name
+                payload["operationName"] = (
+                    operation_name
+                )
 
             response = session.post(
                 URL,
@@ -218,10 +247,14 @@ def graphql(query, variables=None, operation_name=None):
                 except Exception:
                     wait = 3 * (attempt + 1)
 
-                wait = min(max(wait, 2), 30)
+                wait = min(
+                    max(wait, 2),
+                    30
+                )
 
                 print(
-                    f"⏳ Rate limit → attendo {wait}s",
+                    f"⏳ Rate limit → "
+                    f"attendo {wait}s",
                     flush=True,
                 )
 
@@ -244,6 +277,7 @@ def graphql(query, variables=None, operation_name=None):
 
             try:
                 data = response.json()
+
             except Exception:
 
                 print(
@@ -347,7 +381,8 @@ def get_gallery():
         page_number += 1
 
         print(
-            f"🔎 Gallery page {page_number}...",
+            f"🔎 Gallery page "
+            f"{page_number}...",
             flush=True,
         )
 
@@ -412,7 +447,8 @@ def get_gallery():
         nodes = result.get("nodes") or []
 
         print(
-            f"📄 Gallery page {page_number}: "
+            f"📄 Gallery page "
+            f"{page_number}: "
             f"{len(nodes)} carte",
             flush=True,
         )
@@ -426,12 +462,18 @@ def get_gallery():
             else:
                 cards.append(card)
 
-        page = result.get("pageInfo") or {}
+        page = result.get(
+            "pageInfo"
+        ) or {}
 
-        if not page.get("hasNextPage"):
+        if not page.get(
+            "hasNextPage"
+        ):
             break
 
-        after = page.get("endCursor")
+        after = page.get(
+            "endCursor"
+        )
 
         if not after:
             break
@@ -439,7 +481,9 @@ def get_gallery():
     cards = [
         card
         for card in cards
-        if norm(card.get("rarityTyped")) == "limited"
+        if norm(
+            card.get("rarityTyped")
+        ) == "limited"
     ]
 
     print(
@@ -498,8 +542,13 @@ def identifiers(card):
 
     result = set()
 
-    asset_id = norm(card.get("assetId"))
-    slug = norm(card.get("slug"))
+    asset_id = norm(
+        card.get("assetId")
+    )
+
+    slug = norm(
+        card.get("slug")
+    )
 
     if asset_id:
         result.add(asset_id)
@@ -532,7 +581,9 @@ def is_kulenovic(card):
     }
 
     if KID:
-        wanted.add(norm(KID))
+        wanted.add(
+            norm(KID)
+        )
 
     return bool(
         identifiers(card) & wanted
@@ -592,13 +643,18 @@ def usd_eur():
 
 def price_eur(amounts):
 
-    if not isinstance(amounts, dict):
+    if not isinstance(
+        amounts,
+        dict
+    ):
         return None
 
     try:
 
         value = int(
-            amounts.get("eurCents")
+            amounts.get(
+                "eurCents"
+            )
         )
 
         if value > 0:
@@ -610,7 +666,9 @@ def price_eur(amounts):
     try:
 
         usd_cents = float(
-            amounts.get("usdCents")
+            amounts.get(
+                "usdCents"
+            )
         )
 
     except Exception:
@@ -625,7 +683,11 @@ def price_eur(amounts):
     if not rate:
         return None
 
-    return int(round(usd_cents * rate))
+    return int(
+        round(
+            usd_cents * rate
+        )
+    )
 
 
 # ============================================================
@@ -634,7 +696,10 @@ def price_eur(amounts):
 
 def live_floor(card):
 
-    player = card.get("anyPlayer") or {}
+    player = (
+        card.get("anyPlayer")
+        or {}
+    )
 
     player_slug = norm(
         player.get("slug")
@@ -645,9 +710,11 @@ def live_floor(card):
     )
 
     try:
+
         season = int(
             card.get("seasonYear")
         )
+
     except Exception:
         return None
 
@@ -665,11 +732,15 @@ def live_floor(card):
 
     now = time.time()
 
-    cached = floor_cache.get(cache_key)
+    cached = floor_cache.get(
+        cache_key
+    )
 
     if cached:
 
-        cached_time, cached_floor = cached
+        cached_time, cached_floor = (
+            cached
+        )
 
         if (
             now - cached_time
@@ -759,14 +830,18 @@ def live_floor(card):
         )
 
         market_cards = (
-            sender_side.get("anyCards")
+            sender_side.get(
+                "anyCards"
+            )
             or []
         )
 
         for market_card in market_cards:
 
             market_player = (
-                market_card.get("anyPlayer")
+                market_card.get(
+                    "anyPlayer"
+                )
                 or {}
             )
 
@@ -783,7 +858,9 @@ def live_floor(card):
 
             same_card = (
                 norm(
-                    market_player.get("slug")
+                    market_player.get(
+                        "slug"
+                    )
                 ) == player_slug
                 and
                 norm(
@@ -799,11 +876,17 @@ def live_floor(card):
                 continue
 
             amounts = (
-                offer.get("receiverSide")
+                offer.get(
+                    "receiverSide"
+                )
                 or {}
-            ).get("amounts") or {}
+            ).get(
+                "amounts"
+            ) or {}
 
-            price = price_eur(amounts)
+            price = price_eur(
+                amounts
+            )
 
             if price is not None:
                 prices.append(price)
@@ -814,9 +897,10 @@ def live_floor(card):
 
         print(
             f"⚠️ {label(card)}: "
-            f"solo {len(prices)} listing "
-            f"comparabili "
-            f"(minimo {MIN_LIVE_LISTINGS})",
+            f"solo {len(prices)} "
+            f"listing comparabili "
+            f"(minimo "
+            f"{MIN_LIVE_LISTINGS})",
             flush=True,
         )
 
@@ -890,15 +974,30 @@ def validate(card, lineup):
 # REJECT
 # ============================================================
 
-def reject(card, reason, value=None):
+def reject(
+    card,
+    reason,
+    value=None
+):
 
     messages = {
-        "VAULT": "CARTA IN CASSAFORTE",
-        "KULENOVIC": "KULENOVIC MAI IN VENDITA",
-        "RARITY": "RARITÀ DIVERSA DA LIMITED",
-        "LINEUP": "CARTA IN LINEUP",
-        "LINEUP_UNKNOWN": "LINEUP NON VERIFICABILE",
-        "PRICE_UNKNOWN": "PREZZO LIVE NON VERIFICABILE",
+        "VAULT":
+            "CARTA IN CASSAFORTE",
+
+        "KULENOVIC":
+            "KULENOVIC MAI IN VENDITA",
+
+        "RARITY":
+            "RARITÀ DIVERSA DA LIMITED",
+
+        "LINEUP":
+            "CARTA IN LINEUP",
+
+        "LINEUP_UNKNOWN":
+            "LINEUP NON VERIFICABILE",
+
+        "PRICE_UNKNOWN":
+            "PREZZO LIVE NON VERIFICABILE",
     }
 
     if reason == "PRICE_LOW":
@@ -918,6 +1017,7 @@ def reject(card, reason, value=None):
         )
 
     else:
+
         msg = messages.get(
             reason,
             reason,
@@ -943,7 +1043,9 @@ def node():
     if configured:
 
         if (
-            os.path.isfile(configured)
+            os.path.isfile(
+                configured
+            )
             and os.access(
                 configured,
                 os.X_OK,
@@ -965,7 +1067,9 @@ def node():
         )
 
         if (
-            os.path.isfile(executable)
+            os.path.isfile(
+                executable
+            )
             and os.access(
                 executable,
                 os.X_OK,
@@ -980,7 +1084,9 @@ def node():
 # STARKEX
 # ============================================================
 
-def sign_starkex(authorization):
+def sign_starkex(
+    authorization
+):
 
     executable = node()
 
@@ -1000,13 +1106,19 @@ def sign_starkex(authorization):
         or {}
     )
 
-    if request.get("__typename") != (
+    if request.get(
+        "__typename"
+    ) != (
         "StarkexTransferAuthorizationRequest"
     ):
         raise RuntimeError(
             "Authorization StarkEx "
             "non supportata: "
-            + str(request.get("__typename"))
+            + str(
+                request.get(
+                    "__typename"
+                )
+            )
         )
 
     required = [
@@ -1079,6 +1191,7 @@ async function main() {
 }
 
 main().catch(error => {
+
   console.error(
     error && error.stack
       ? error.stack
@@ -1096,8 +1209,11 @@ main().catch(error => {
             script,
         ],
         input=json.dumps({
-            "authorization": authorization,
-            "privateKey": STARK_PRIVATE_KEY,
+            "authorization":
+                authorization,
+
+            "privateKey":
+                STARK_PRIVATE_KEY,
         }),
         text=True,
         capture_output=True,
@@ -1105,74 +1221,224 @@ main().catch(error => {
     )
 
     if process.stderr:
+
         print(
             process.stderr.strip(),
             flush=True,
         )
 
     if process.returncode != 0:
+
         raise RuntimeError(
             process.stderr.strip()
             or "Firma StarkEx fallita"
         )
 
     try:
+
         return json.loads(
             process.stdout
         )
+
     except Exception as exc:
+
         raise RuntimeError(
-            "Output firma StarkEx non valido: "
+            "Output firma StarkEx "
+            "non valido: "
             + str(exc)
         )
 
 
 # ============================================================
 # SOLANA BASE58
-#
-# SORARE_SOLANA_PRIVATE_KEY:
-#
-# - viene letta come Base58
-# - NON viene interpretata come HEX
-# - NON viene modificata aggiungendo 0x
-#
-# Una chiave Base58 Solana da 88 caratteri normalmente
-# decodifica a 64 byte.
-#
-# Per il keypair Ed25519:
-# - 64 byte => primi 32 byte = private seed
-# - 32 byte => usati direttamente come private seed
-#
-# Prima della firma controlliamo SEMPRE che l'indirizzo
-# derivato coincida con request.senderAddress.
 # ============================================================
 
-def sign_solana(authorization):
+BASE58_ALPHABET = (
+    "123456789"
+    "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    "abcdefghijkmnopqrstuvwxyz"
+)
+
+
+def base58_decode(value):
+
+    if not isinstance(
+        value,
+        str
+    ) or not value:
+
+        raise ValueError(
+            "Valore Base58 vuoto"
+        )
+
+    number = 0
+
+    for char in value:
+
+        index = (
+            BASE58_ALPHABET.find(
+                char
+            )
+        )
+
+        if index == -1:
+
+            raise ValueError(
+                "Chiave Solana contiene "
+                "un carattere non valido "
+                "per Base58"
+            )
+
+        number = (
+            number * 58
+            + index
+        )
+
+    raw = (
+        number.to_bytes(
+            (
+                number.bit_length()
+                + 7
+            ) // 8,
+            "big"
+        )
+        if number
+        else b""
+    )
+
+    leading_zeroes = 0
+
+    for char in value:
+
+        if char != "1":
+            break
+
+        leading_zeroes += 1
+
+    return (
+        b"\x00" * leading_zeroes
+        + raw
+    )
+
+
+def base58_encode(data):
+
+    if not data:
+        return ""
+
+    number = int.from_bytes(
+        bytes(data),
+        "big"
+    )
+
+    encoded = ""
+
+    while number > 0:
+
+        number, remainder = divmod(
+            number,
+            58
+        )
+
+        encoded = (
+            BASE58_ALPHABET[
+                remainder
+            ]
+            + encoded
+        )
+
+    leading_zeroes = 0
+
+    for byte in data:
+
+        if byte != 0:
+            break
+
+        leading_zeroes += 1
+
+    return (
+        "1" * leading_zeroes
+        + encoded
+    )
+
+
+# ============================================================
+# SOLANA
+#
+# IMPORTANTISSIMO:
+#
+# La chiave ricevuta dall'environment è Base58.
+#
+# 88 caratteri -> 64 byte.
+#
+# Per la rappresentazione standard Solana:
+#
+#   byte 0..31  = seed Ed25519
+#   byte 32..63 = public key
+#
+# Per firmare:
+#
+#   message
+#       ↓
+#   UTF-8
+#       ↓
+#   SHA-256
+#       ↓
+#   32 byte hash
+#       ↓
+#   Ed25519 signature
+#       ↓
+#   Base58
+#
+# NON usiamo createSignableMessage().
+#
+# Questo evita il TypeError:
+#
+# value.split is not a function
+#
+# che viene dalla versione di @solana/kit
+# installata sul server.
+# ============================================================
+
+def sign_solana(
+    authorization
+):
 
     executable = node()
 
     if not executable:
+
         raise RuntimeError(
             "Node.js non disponibile"
         )
 
     if not SOLANA_PRIVATE_KEY:
+
         raise RuntimeError(
             "SORARE_SOLANA_PRIVATE_KEY "
             "non configurata"
         )
 
     request = (
-        authorization.get("request")
+        authorization.get(
+            "request"
+        )
         or {}
     )
 
-    if request.get("__typename") != (
+    if request.get(
+        "__typename"
+    ) != (
         "SolanaTokenTransferAuthorizationRequest"
     ):
+
         raise RuntimeError(
             "Authorization non Solana: "
-            + str(request.get("__typename"))
+            + str(
+                request.get(
+                    "__typename"
+                )
+            )
         )
 
     required = [
@@ -1193,6 +1459,7 @@ def sign_solana(authorization):
     ]
 
     if missing:
+
         raise RuntimeError(
             "Authorization Solana "
             "incompleta. Mancano: "
@@ -1200,21 +1467,20 @@ def sign_solana(authorization):
         )
 
     payload = {
-        "authorization": authorization,
-        "privateKey": SOLANA_PRIVATE_KEY,
+        "authorization":
+            authorization,
+
+        "privateKey":
+            SOLANA_PRIVATE_KEY,
     }
+
+    # --------------------------------------------------------
+    # NODE SCRIPT
+    # --------------------------------------------------------
 
     script = r"""
 const fs = require("fs");
-
-const {
-  createKeyPairFromPrivateKeyBytes,
-  createSignerFromKeyPair,
-  createSignableMessage,
-  getBase58Decoder,
-  getBase58Encoder
-} = require("@solana/kit");
-
+const crypto = require("crypto");
 
 const BASE58_ALPHABET =
   "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -1224,14 +1490,14 @@ function decodeBase58(value) {
 
   if (
     typeof value !== "string" ||
-    !value.length
+    value.length === 0
   ) {
     throw new Error(
       "Chiave Solana Base58 vuota"
     );
   }
 
-  let bytes = [0];
+  let number = 0n;
 
   for (const char of value) {
 
@@ -1239,6 +1505,7 @@ function decodeBase58(value) {
       BASE58_ALPHABET.indexOf(char);
 
     if (index === -1) {
+
       throw new Error(
         "SORARE_SOLANA_PRIVATE_KEY "
         + "contiene un carattere non valido "
@@ -1246,35 +1513,24 @@ function decodeBase58(value) {
       );
     }
 
-    let carry = index;
-
-    for (
-      let i = 0;
-      i < bytes.length;
-      i++
-    ) {
-
-      const value2 =
-        bytes[i] * 58 + carry;
-
-      bytes[i] =
-        value2 & 0xff;
-
-      carry =
-        value2 >> 8;
-    }
-
-    while (carry > 0) {
-
-      bytes.push(
-        carry & 0xff
-      );
-
-      carry >>= 8;
-    }
+    number =
+      number * 58n
+      + BigInt(index);
   }
 
-  let leadingZeros = 0;
+  let hex =
+    number.toString(16);
+
+  if (hex.length % 2 !== 0) {
+    hex = "0" + hex;
+  }
+
+  let bytes =
+    hex.length
+      ? Buffer.from(hex, "hex")
+      : Buffer.alloc(0);
+
+  let leadingZeroes = 0;
 
   for (
     let i = 0;
@@ -1282,33 +1538,81 @@ function decodeBase58(value) {
     value[i] === "1";
     i++
   ) {
-    leadingZeros++;
+    leadingZeroes++;
   }
 
-  const result =
-    new Uint8Array(
-      leadingZeros +
-      bytes.length
-    );
+  if (leadingZeroes > 0) {
+
+    bytes = Buffer.concat([
+      Buffer.alloc(
+        leadingZeroes
+      ),
+      bytes
+    ]);
+  }
+
+  return bytes;
+}
+
+
+function encodeBase58(buffer) {
+
+  if (!buffer || buffer.length === 0) {
+    return "";
+  }
+
+  let number = 0n;
+
+  for (const byte of buffer) {
+
+    number =
+      number * 256n
+      + BigInt(byte);
+  }
+
+  let result = "";
+
+  while (number > 0n) {
+
+    const remainder =
+      Number(number % 58n);
+
+    result =
+      BASE58_ALPHABET[
+        remainder
+      ] + result;
+
+    number =
+      number / 58n;
+  }
+
+  let leadingZeroes = 0;
 
   for (
     let i = 0;
-    i < bytes.length;
+    i < buffer.length &&
+    buffer[i] === 0;
     i++
   ) {
-    result[
-      result.length - 1 - i
-    ] = bytes[i];
+    leadingZeroes++;
   }
 
-  return result;
+  return (
+    "1".repeat(
+      leadingZeroes
+    )
+    + result
+  );
 }
 
 
 async function main() {
 
   const input = JSON.parse(
-    fs.readFileSync(0, "utf8")
+    fs.readFileSync(
+      0,
+      "utf8"
+    )
   );
 
   const authorization =
@@ -1318,7 +1622,14 @@ async function main() {
     authorization.request;
 
   const privateKey =
-    String(input.privateKey).trim();
+    String(
+      input.privateKey
+    ).trim();
+
+
+  // --------------------------------------------------------
+  // KEY
+  // --------------------------------------------------------
 
   console.error(
     "🔐 Solana private key format: Base58"
@@ -1330,12 +1641,10 @@ async function main() {
   );
 
 
-  // --------------------------------------------------------
-  // BASE58 DECODE
-  // --------------------------------------------------------
-
   const decoded =
-    decodeBase58(privateKey);
+    decodeBase58(
+      privateKey
+    );
 
   console.error(
     "🔑 Solana key bytes:",
@@ -1348,19 +1657,20 @@ async function main() {
 
   if (decoded.length === 64) {
 
-    // Standard Solana secret-key representation:
-    // 32 bytes private seed +
-    // 32 bytes public key.
-
     seed =
-      decoded.slice(0, 32);
+      decoded.subarray(
+        0,
+        32
+      );
 
     console.error(
       "🔑 Formato rilevato: "
       + "64-byte Solana secret key"
     );
 
-  } else if (decoded.length === 32) {
+  } else if (
+    decoded.length === 32
+  ) {
 
     seed = decoded;
 
@@ -1382,17 +1692,57 @@ async function main() {
 
 
   // --------------------------------------------------------
-  // KEYPAIR
+  // DERIVE PUBLIC KEY
+  //
+  // Usiamo Node crypto per costruire
+  // il keypair Ed25519.
   // --------------------------------------------------------
 
-  const keyPair =
-    await createKeyPairFromPrivateKeyBytes(
-      seed
+  const PKCS8_PREFIX =
+    Buffer.from(
+      "302e020100300506032b657004220420",
+      "hex"
     );
 
-  const signer =
-    await createSignerFromKeyPair(
-      keyPair
+  const privateKeyDer =
+    Buffer.concat([
+      PKCS8_PREFIX,
+      Buffer.from(seed)
+    ]);
+
+  const privateKeyObject =
+    crypto.createPrivateKey({
+      key: privateKeyDer,
+      format: "der",
+      type: "pkcs8"
+    });
+
+
+  const publicKeyObject =
+    crypto.createPublicKey(
+      privateKeyObject
+    );
+
+
+  // --------------------------------------------------------
+  // PUBLIC KEY RAW 32 BYTE
+  // --------------------------------------------------------
+
+  const publicKeyDer =
+    publicKeyObject.export({
+      format: "der",
+      type: "spki"
+    });
+
+  const publicKeyBytes =
+    publicKeyDer.subarray(
+      publicKeyDer.length - 32
+    );
+
+
+  const derivedAddress =
+    encodeBase58(
+      publicKeyBytes
     );
 
 
@@ -1405,11 +1755,6 @@ async function main() {
       request.senderAddress
     ).trim();
 
-  const derived =
-    String(
-      signer.address
-    ).trim();
-
   console.error(
     "📨 Sorare senderAddress:",
     expected
@@ -1417,17 +1762,19 @@ async function main() {
 
   console.error(
     "🔑 Derived Solana address:",
-    derived
+    derivedAddress
   );
 
 
-  if (derived !== expected) {
+  if (
+    derivedAddress !== expected
+  ) {
 
     throw new Error(
-      "SOLANA PRIVATE KEY NON CORRISPONDE "
-      + "AL SENDER SORARE. "
-      + "La chiave Base58 fornita produce "
-      + derived
+      "SOLANA PRIVATE KEY NON "
+      + "CORRISPONDE AL SENDER SORARE. "
+      + "La chiave fornita produce "
+      + derivedAddress
       + " mentre Sorare richiede "
       + expected
     );
@@ -1441,14 +1788,13 @@ async function main() {
 
 
   // --------------------------------------------------------
-  // SORARE MESSAGE
+  // MESSAGE
   //
-  // ATTENZIONE:
-  // assetId NON fa parte del messaggio.
+  // IDENTICO A QUELLO PREVISTO DA SORARE.
   //
-  // senderAddress NON fa parte del messaggio.
-  //
-  // '0x' è letterale.
+  // assetId NON incluso.
+  // senderAddress NON incluso.
+  // "0x" è letterale.
   // --------------------------------------------------------
 
   const message = [
@@ -1485,8 +1831,9 @@ async function main() {
   // --------------------------------------------------------
 
   const messageBytes =
-    new TextEncoder().encode(
-      message
+    Buffer.from(
+      message,
+      "utf8"
     );
 
 
@@ -1495,60 +1842,76 @@ async function main() {
   // --------------------------------------------------------
 
   const messageHash =
-    await crypto.subtle.digest(
-      "SHA-256",
-      messageBytes
-    );
+    crypto
+      .createHash("sha256")
+      .update(messageBytes)
+      .digest();
+
+
+  console.error(
+    "🔐 SHA-256:",
+    messageHash.toString("hex")
+  );
 
 
   // --------------------------------------------------------
-  // SIGN HASH
+  // ED25519 SIGN
+  //
+  // IMPORTANTE:
+  //
+  // Signiamo ESATTAMENTE i 32 byte
+  // dello SHA-256.
+  //
+  // crypto.sign(null, ...)
+  // per Ed25519 firma i dati forniti
+  // direttamente.
   // --------------------------------------------------------
-
-  const signableMessage =
-    createSignableMessage(
-      new Uint8Array(
-        messageHash
-      )
-    );
-
-
-  const result =
-    await signer.signMessages(
-      [signableMessage]
-    );
-
 
   const signatureBytes =
-    result[0][
-      signer.address
-    ];
+    crypto.sign(
+      null,
+      messageHash,
+      privateKeyObject
+    );
+
+
+  if (
+    !Buffer.isBuffer(
+      signatureBytes
+    )
+    ||
+    signatureBytes.length !== 64
+  ) {
+
+    throw new Error(
+      "Firma Ed25519 non valida: "
+      + "attesi 64 byte, ricevuti "
+      + (
+        signatureBytes
+          ? signatureBytes.length
+          : "N/D"
+      )
+    );
+  }
 
 
   // --------------------------------------------------------
   // BASE58 SIGNATURE
   // --------------------------------------------------------
 
-  let signature;
-
-  if (
-    typeof signatureBytes === "string"
-  ) {
-
-    signature =
-      signatureBytes;
-
-  } else {
-
-    signature =
-      getBase58Encoder().encode(
-        signatureBytes
-      );
-  }
+  const signature =
+    encodeBase58(
+      signatureBytes
+    );
 
 
   console.error(
     "✍️ Firma Solana generata"
+  );
+
+  console.error(
+    "🔢 Signature bytes:",
+    signatureBytes.length
   );
 
 
@@ -1589,7 +1952,6 @@ main().catch(error => {
   );
 
   process.exit(1);
-
 });
 """
 
@@ -1599,19 +1961,23 @@ main().catch(error => {
             "-e",
             script,
         ],
-        input=json.dumps(payload),
+        input=json.dumps(
+            payload
+        ),
         text=True,
         capture_output=True,
         timeout=60,
     )
 
     if process.stderr:
+
         print(
             process.stderr.strip(),
             flush=True,
         )
 
     if process.returncode != 0:
+
         raise RuntimeError(
             process.stderr.strip()
             or "Firma Solana fallita"
@@ -1626,7 +1992,8 @@ main().catch(error => {
     except Exception as exc:
 
         raise RuntimeError(
-            "Output firma Solana non valido: "
+            "Output firma Solana "
+            "non valido: "
             + str(exc)
             + " | OUTPUT="
             + process.stdout[:1000]
@@ -1637,11 +2004,15 @@ main().catch(error => {
 # PREPARE OFFER
 # ============================================================
 
-def prepare_offer(asset_id, price):
+def prepare_offer(
+    asset_id,
+    price
+):
 
     print(
         f"🧾 prepareOffer → "
-        f"{eur(price)} ({price} cents)",
+        f"{eur(price)} "
+        f"({price} cents)",
         flush=True,
     )
 
@@ -1736,17 +2107,21 @@ def prepare_offer(asset_id, price):
     data = graphql(
         query,
         {
-            "input": input_data
+            "input":
+                input_data
         },
         operation_name="PrepareOffer",
     )
 
     if not data:
+
         raise RuntimeError(
-            "prepareOffer: nessuna risposta"
+            "prepareOffer: "
+            "nessuna risposta"
         )
 
     if data.get("errors"):
+
         raise RuntimeError(
             "prepareOffer GraphQL error: "
             + json.dumps(
@@ -1761,9 +2136,15 @@ def prepare_offer(asset_id, price):
         or {}
     )
 
-    errors = prepare.get("errors") or []
+    errors = (
+        prepare.get(
+            "errors"
+        )
+        or []
+    )
 
     if errors:
+
         raise RuntimeError(
             "prepareOffer: "
             + "; ".join(
@@ -1778,14 +2159,17 @@ def prepare_offer(asset_id, price):
         )
 
     authorizations = (
-        prepare.get("authorizations")
+        prepare.get(
+            "authorizations"
+        )
         or []
     )
 
     if not authorizations:
+
         raise RuntimeError(
-            "prepareOffer non ha restituito "
-            "autorizzazioni"
+            "prepareOffer non ha "
+            "restituito autorizzazioni"
         )
 
     print(
@@ -1796,12 +2180,17 @@ def prepare_offer(asset_id, price):
 
     approvals = []
 
-    for index, authorization in enumerate(
+    for (
+        index,
+        authorization
+    ) in enumerate(
         authorizations
     ):
 
         request = (
-            authorization.get("request")
+            authorization.get(
+                "request"
+            )
             or {}
         )
 
@@ -1836,11 +2225,14 @@ def prepare_offer(asset_id, price):
         else:
 
             raise RuntimeError(
-                "Authorization non supportata: "
+                "Authorization non "
+                "supportata: "
                 + str(typename)
             )
 
-        approvals.append(approval)
+        approvals.append(
+            approval
+        )
 
     return approvals
 
@@ -1849,7 +2241,11 @@ def prepare_offer(asset_id, price):
 # CREATE OFFER
 # ============================================================
 
-def create_offer(asset_id, price, approvals):
+def create_offer(
+    asset_id,
+    price,
+    approvals
+):
 
     input_data = {
 
@@ -1898,20 +2294,26 @@ def create_offer(asset_id, price, approvals):
         }
         """,
         {
-            "input": input_data
+            "input":
+                input_data
         },
-        operation_name="CreateSingleSaleOffer",
+        operation_name=(
+            "CreateSingleSaleOffer"
+        ),
     )
 
     if not data:
+
         raise RuntimeError(
             "createSingleSaleOffer: "
             "nessuna risposta"
         )
 
     if data.get("errors"):
+
         raise RuntimeError(
-            "createSingleSaleOffer GraphQL error: "
+            "createSingleSaleOffer "
+            "GraphQL error: "
             + json.dumps(
                 data["errors"],
                 ensure_ascii=False,
@@ -1920,13 +2322,21 @@ def create_offer(asset_id, price, approvals):
 
     result = (
         ((data.get("data") or {})
-         .get("createSingleSaleOffer"))
+         .get(
+             "createSingleSaleOffer"
+         ))
         or {}
     )
 
-    errors = result.get("errors") or []
+    errors = (
+        result.get(
+            "errors"
+        )
+        or []
+    )
 
     if errors:
+
         raise RuntimeError(
             "createSingleSaleOffer: "
             + "; ".join(
@@ -1940,12 +2350,16 @@ def create_offer(asset_id, price, approvals):
             )
         )
 
-    offer = result.get("tokenOffer")
+    offer = result.get(
+        "tokenOffer"
+    )
 
     if not offer:
+
         raise RuntimeError(
             "createSingleSaleOffer "
-            "non ha restituito tokenOffer"
+            "non ha restituito "
+            "tokenOffer"
         )
 
     return offer
@@ -1955,11 +2369,17 @@ def create_offer(asset_id, price, approvals):
 # AUTOSELL
 # ============================================================
 
-def autosell(card, price):
+def autosell(
+    card,
+    price
+):
 
-    asset_id = card.get("assetId")
+    asset_id = card.get(
+        "assetId"
+    )
 
     if not asset_id:
+
         raise RuntimeError(
             "assetId mancante"
         )
@@ -2003,14 +2423,20 @@ def autosell(card, price):
         flush=True,
     )
 
-    if offer.get("startDate"):
+    if offer.get(
+        "startDate"
+    ):
+
         print(
             f"🕐 Start: "
             f"{offer.get('startDate')}",
             flush=True,
         )
 
-    if offer.get("endDate"):
+    if offer.get(
+        "endDate"
+    ):
+
         print(
             f"🕐 End: "
             f"{offer.get('endDate')}",
@@ -2072,6 +2498,12 @@ def worker():
     )
 
     print(
+        "SOLANA SIGN: "
+        "NODE NATIVE ED25519",
+        flush=True,
+    )
+
+    print(
         "========================================",
         flush=True,
     )
@@ -2117,7 +2549,8 @@ def worker():
             if lineup is None:
 
                 print(
-                    "❌ Impossibile verificare lineup",
+                    "❌ Impossibile verificare "
+                    "lineup",
                     flush=True,
                 )
 
@@ -2148,7 +2581,11 @@ def worker():
 
                         continue
 
-                    ok, reason, price = validate(
+                    (
+                        ok,
+                        reason,
+                        price
+                    ) = validate(
                         card,
                         lineup,
                     )
@@ -2208,7 +2645,8 @@ def worker():
 
             print(
                 f"🏁 SCANSIONE COMPLETATA "
-                f"| candidate={sell_candidates}",
+                f"| candidate="
+                f"{sell_candidates}",
                 flush=True,
             )
 
@@ -2242,17 +2680,20 @@ def home():
 
         "dry_run": DRY_RUN,
 
-        "min_price": MIN_PRICE,
+        "min_price":
+            MIN_PRICE,
 
         "min_price_eur":
             eur(MIN_PRICE),
 
-        "max_price": MAX_PRICE,
+        "max_price":
+            MAX_PRICE,
 
         "max_price_eur":
             eur(MAX_PRICE),
 
-        "last_scan": last_scan,
+        "last_scan":
+            last_scan,
 
     })
 
@@ -2268,11 +2709,14 @@ def health():
 
         "dry_run": DRY_RUN,
 
-        "min_price": MIN_PRICE,
+        "min_price":
+            MIN_PRICE,
 
-        "max_price": MAX_PRICE,
+        "max_price":
+            MAX_PRICE,
 
-        "last_scan": last_scan,
+        "last_scan":
+            last_scan,
 
     })
 
