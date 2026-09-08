@@ -30,7 +30,7 @@ MIN_LIVE_LISTINGS = 5
 COVERAGE_CACHE = 3600
 USD_CACHE = 300
 
-BOT_VERSION = "AUTOSell-2.5-SOLANA-SIGN-FIX"
+BOT_VERSION = "AUTOSell-2.6-SOLANA-PREPARE-FIX"
 SELL_PRICE_MODE = os.getenv("SELL_PRICE_MODE", "FLOOR").upper()
 JSON_PATH = os.getenv("AUTOSSELL_JSON_PATH", "autosell_cards.json").strip()
 
@@ -1210,13 +1210,14 @@ def create_sale(card, price_cents):
         )
         return "DRY-RUN"
 
+    # ========================================================
+    # PREPARE OFFER
+    # ========================================================
+
     prepare_input = {
-        # IMPORTANTE:
-        # "type" NON viene inviato.
-        # Il tuo endpoint lo rifiuta su prepareOfferInput.
+        "type": "SINGLE_SALE_OFFER",
         "sendAssetIds": [asset_id],
         "receiveAssetIds": [],
-        "settlementCurrencies": ["EUR"],
         "receiveAmount": {
             "amount": str(price_cents),
             "currency": "EUR"
@@ -1231,6 +1232,11 @@ def create_sale(card, price_cents):
 
     print(
         "🛠️ prepareOffer...",
+        flush=True
+    )
+
+    print(
+        f"   ├─ type: SINGLE_SALE_OFFER",
         flush=True
     )
 
@@ -1364,8 +1370,6 @@ def create_sale(card, price_cents):
         )
         return None
 
-    # Mostriamo il tipo ricevuto per capire
-    # immediatamente quale signer viene usato.
     for a in authorizations:
         r = a.get("request") or {}
 
