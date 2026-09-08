@@ -30,7 +30,7 @@ MIN_LIVE_LISTINGS = 5
 COVERAGE_CACHE = 3600
 USD_CACHE = 300
 
-BOT_VERSION = "AUTOSell-2.6-SOLANA-PREPARE-FIX"
+BOT_VERSION = "AUTOSell-2.5-SOLANA-SIGN-FIX"
 SELL_PRICE_MODE = os.getenv("SELL_PRICE_MODE", "FLOOR").upper()
 JSON_PATH = os.getenv("AUTOSSELL_JSON_PATH", "autosell_cards.json").strip()
 
@@ -1211,13 +1211,13 @@ def create_sale(card, price_cents):
         return "DRY-RUN"
 
     # ========================================================
-    # PREPARE OFFER
+    # CORREZIONE:
+    # prepareOfferInput NON accetta il campo "type".
     # ========================================================
-
     prepare_input = {
-        "type": "SINGLE_SALE_OFFER",
         "sendAssetIds": [asset_id],
         "receiveAssetIds": [],
+        "settlementCurrencies": ["EUR"],
         "receiveAmount": {
             "amount": str(price_cents),
             "currency": "EUR"
@@ -1232,11 +1232,6 @@ def create_sale(card, price_cents):
 
     print(
         "🛠️ prepareOffer...",
-        flush=True
-    )
-
-    print(
-        f"   ├─ type: SINGLE_SALE_OFFER",
         flush=True
     )
 
@@ -1744,139 +1739,3 @@ def worker():
             try:
                 sync_operations_bot_deck()
             except Exception as e:
-                print(
-                    f"⚠️ Sync deck: {e}",
-                    flush=True
-                )
-
-            rows = get_ready_cards()
-
-            print(
-                f"🗄️ Carte READY nel JSON: {len(rows)}",
-                flush=True
-            )
-
-            for row in rows:
-                try:
-                    process_card(row)
-                except Exception as e:
-                    asset_id = str(
-                        row.get("asset_id") or ""
-                    )
-
-                    print(
-                        f"❌ AutoSell errore "
-                        f"{asset_id}: {e}",
-                        flush=True
-                    )
-
-                    if asset_id:
-                        update_json_card(
-                            asset_id,
-                            status="ERROR",
-                            last_error=str(e)
-                        )
-
-            time.sleep(INTERVAL)
-
-        except Exception as e:
-            print(
-                f"❌ AutoSell worker: {e}",
-                flush=True
-            )
-
-            time.sleep(INTERVAL)
-
-
-# ============================================================
-# FLASK
-# ============================================================
-
-def start_worker():
-    global worker_started
-
-    with worker_lock:
-        if worker_started:
-            return
-
-        worker_started = True
-
-        threading.Thread(
-            target=worker,
-            name="autosell-worker",
-            daemon=True
-        ).start()
-
-        print(
-            "✅ Thread AutoSell avviato.",
-            flush=True
-        )
-
-
-@app.get("/")
-def home():
-    with coverage_lock:
-        covered = set(coverage_cache)
-        coverage_ok = coverage_available
-
-    return jsonify({
-        "status": "online",
-        "bot": "autosell",
-        "version": BOT_VERSION,
-        "dry_run": DRY_RUN,
-        "min_price_cents": MIN_PRICE,
-        "max_price_cents": MAX_PRICE,
-        "min_live_listings": MIN_LIVE_LISTINGS,
-        "age_parameter": "NOT_USED",
-        "rarity": "LIMITED",
-        "coverage": "REQUIRED",
-        "coverage_available": coverage_ok,
-        "kulenovic": "NEVER_SELL",
-        "source": "AUTOBUY_OR_SWAP_ONLY",
-        "additional_source": "SORARE_DECK",
-        "operations_deck": OPERATIONS_DECK_NAME,
-        "storage": "PERSISTENT_JSON",
-        "json_path": JSON_PATH,
-        "ready_cards": len(get_ready_cards()),
-        "sell_price_mode": SELL_PRICE_MODE,
-        "covered_competitions_count": len(covered),
-        "covered_competitions": sorted(covered),
-        "worker_started": worker_started
-    })
-
-
-@app.get("/health")
-def health():
-    with coverage_lock:
-        loaded = bool(coverage_cache)
-        coverage_ok = coverage_available
-
-    return jsonify({
-        "status": "ok",
-        "bot": "autosell",
-        "version": BOT_VERSION,
-        "worker_started": worker_started,
-        "coverage_loaded": loaded,
-        "coverage_available": coverage_ok,
-        "dry_run": DRY_RUN
-    })
-
-
-@app.get("/cards")
-def cards_endpoint():
-    with json_lock:
-        cards = load_cards()
-
-    return jsonify({
-        "count": len(cards),
-        "cards": cards
-    })
-
-
-if __name__ == "__main__":
-    start_worker()
-
-    app.run(
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "10000"))
-    )
