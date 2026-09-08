@@ -1324,6 +1324,8 @@ def create_sale(
 
     prepare_input = {
 
+        "type": "SINGLE_SALE_OFFER",
+
         "sendAssetIds": [
             asset_id
         ],
@@ -1335,36 +1337,10 @@ def create_sale(
             "currency": "EUR"
         },
 
-        "settlementCurrencies": [
-            "EUR"
-        ],
-
         "clientMutationId": str(
             uuid.uuid4()
         )
     }
-
-    print(
-        "🛠️ prepareOffer...",
-        flush=True
-    )
-
-    print(
-        "   ├─ sendAssetIds: "
-        + asset_id,
-        flush=True
-    )
-
-    print(
-        "   ├─ receiveAmount: "
-        + format_eur(price_cents),
-        flush=True
-    )
-
-    print(
-        "   └─ settlementCurrencies: EUR",
-        flush=True
-    )
 
     data = graphql("""
         mutation PrepareOffer(
@@ -1483,12 +1459,6 @@ def create_sale(
 
         return None
 
-    print(
-        f"✅ Authorization ricevute: "
-        f"{len(authorizations)}",
-        flush=True
-    )
-
     try:
 
         approvals = sign_authorizations(
@@ -1536,10 +1506,6 @@ def create_sale(
                 "amount": str(price_cents),
                 "currency": "EUR"
             },
-
-            "settlementCurrencies": [
-                "EUR"
-            ],
 
             "clientMutationId": str(
                 uuid.uuid4()
