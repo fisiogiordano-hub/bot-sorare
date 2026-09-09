@@ -9,11 +9,12 @@ import requests
 
 from flask import Flask, jsonify
 
-app = Flask(__name__)
 
 # ============================================================
 # CONFIG
 # ============================================================
+
+app = Flask(__name__)
 
 SORARE_URL = "https://api.sorare.com/graphql"
 
@@ -22,6 +23,7 @@ AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+
 INTERVAL = int(os.getenv("INTERVAL", "30"))
 TIMEOUT = int(os.getenv("TIMEOUT", "25"))
 
@@ -29,24 +31,35 @@ MIN_PRICE = 32          # €0.32
 MAX_PRICE = 70          # €0.70
 MIN_LISTINGS = 5
 
-BOT_STATE_PATH = os.getenv(
+STATE_FILE = os.getenv(
     "BOT_STATE_PATH",
     "bot_state.json"
 ).strip()
+
+# ------------------------------------------------------------
+# KULENOVIC PROTETTO
+# ------------------------------------------------------------
 
 KULENOVIC_ID = os.getenv(
     "KULENOVIC_ID",
     ""
 ).strip()
 
-KULENOVIC_SLUG = "sandro-kulenovic-2025-limited-385"
+KULENOVIC_SLUG = (
+    "sandro-kulenovic-2025-limited-385"
+)
 
 KULENOVIC_ASSET = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
     "6796b6c0ed10ba0a6"
 )
 
-VERSION = "AUTOSell-7.0-FIX-ACQUIRED-CARDS"
+VERSION = "AUTOSell-7.0-FIX-PREPARE"
+
+
+# ============================================================
+# LOCK
+# ============================================================
 
 state_lock = threading.RLock()
 worker_lock = threading.Lock()
@@ -69,7 +82,7 @@ def now():
     )
 
 
-def get_asset(card):
+def asset_id(card):
     return str(
         card.get("assetId")
         or card.get("asset_id")
@@ -77,16 +90,16 @@ def get_asset(card):
     ).strip()
 
 
-def card_label(card):
+def label(card):
     return (
         card.get("name")
         or card.get("slug")
-        or get_asset(card)
+        or card.get("assetId")
         or "Carta"
     )
 
 
-def euro(cents):
+def eur(cents):
     if cents is None:
         return "N/D"
 
@@ -98,139 +111,143 @@ def euro(cents):
 # ============================================================
 
 def ensure_state():
-    path = os.path.abspath(BOT_STATE_PATH)
+    path = os.path.abspath(STATE_FILE)
+
     directory = os.path.dirname(path)
 
     if directory:
         os.makedirs(directory, exist_ok=True)
 
     if not os.path.exists(path):
-        data = {
-            "processed_offers": [],
-            "acquired_cards": [],
-            "pending_autobuys": [],
-            "updated_at": int(time.time())
-        }
-
-        save_raw_state(data)
+        save_state([])
 
 
-def load_state():
+def raw_state():
     ensure_state()
 
     try:
         with open(
-            BOT_STATE_PATH,
+            STATE_FILE,
             "r",
             encoding="utf-8"
         ) as f:
-            data = json.load(f)
+            return json.load(f)
 
-        if not isinstance(data, dict):
-            print(
-                "❌ bot_state.json non è un oggetto JSON",
-                flush=True
-            )
-            return {
-                "processed_offers": [],
-                "acquired_cards": [],
-                "pending_autobuys": []
-            }
+    except Exception as e:
+        print(
+            f"❌ Errore lettura state: {e}",
+            flush=True
+        )
+        return {}
 
-        if not isinstance(
-            data.get("acquired_cards"),
-            list
-        ):
-            data["acquired_cards"] = []
 
+def extract_cards(data):
+    # Il tuo JSON reale contiene:
+    # {
+    #   "processed_offers": [],
+    #   "acquired_cards": [],
+    #   "pending_autobuys": []
+    # }
+
+    if isinstance(data, list):
         return data
 
-    except Exception as e:
-        print(
-            f"❌ Errore lettura bot_state.json: {e}",
-            flush=True
-        )
+    if not isinstance(data, dict):
+        return []
 
-        return {
-            "processed_offers": [],
-            "acquired_cards": [],
-            "pending_autobuys": []
-        }
+    cards = data.get("acquired_cards")
+
+    if isinstance(cards, list):
+        return cards
+
+    cards = data.get("cards")
+
+    if isinstance(cards, list):
+        return cards
+
+    if isinstance(cards, dict):
+        return list(cards.values())
+
+    return []
 
 
-def save_raw_state(data):
-    tmp = (
-        f"{BOT_STATE_PATH}."
-        f"{uuid.uuid4().hex}.tmp"
-    )
+def state():
+    with state_lock:
+        return extract_cards(raw_state())
 
-    try:
-        with open(
-            tmp,
-            "w",
-            encoding="utf-8"
-        ) as f:
 
-            json.dump(
-                data,
-                f,
-                ensure_ascii=False,
-                indent=2
-            )
+def save_state(cards):
+    """
+    IMPORTANTE:
+    preserva la struttura reale del bot_state.json.
+    """
 
-            f.flush()
-            os.fsync(f.fileno())
+    with state_lock:
 
-        os.replace(
-            tmp,
-            BOT_STATE_PATH
-        )
+        data = raw_state()
 
-        return True
+        if not isinstance(data, dict):
+            data = {}
 
-    except Exception as e:
+        data["acquired_cards"] = cards
+        data["updated_at"] = int(time.time())
 
-        print(
-            f"❌ Errore scrittura state: {e}",
-            flush=True
+        tmp = (
+            f"{STATE_FILE}."
+            f"{uuid.uuid4().hex}.tmp"
         )
 
         try:
-            os.remove(tmp)
-        except Exception:
-            pass
 
-        return False
+            with open(
+                tmp,
+                "w",
+                encoding="utf-8"
+            ) as f:
 
+                json.dump(
+                    data,
+                    f,
+                    ensure_ascii=False,
+                    indent=2
+                )
 
-def acquired_cards():
-    with state_lock:
-        data = load_state()
+                f.flush()
+                os.fsync(f.fileno())
 
-        return [
-            dict(card)
-            for card in data.get(
-                "acquired_cards",
-                []
+            os.replace(
+                tmp,
+                STATE_FILE
             )
-            if isinstance(card, dict)
-        ]
+
+            return True
+
+        except Exception as e:
+
+            print(
+                f"❌ Errore scrittura state: {e}",
+                flush=True
+            )
+
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+
+            return False
 
 
 def find_card(asset):
     wanted = norm(asset)
 
-    with state_lock:
-        data = load_state()
+    cards = state()
 
-        cards = data["acquired_cards"]
+    for i, card in enumerate(cards):
 
-        for index, card in enumerate(cards):
+        if norm(asset_id(card)) == wanted:
+            return cards, i
 
-            if norm(get_asset(card)) == wanted:
-                return data, index
-
-    return None, None
+    return cards, None
 
 
 def update_card(
@@ -241,18 +258,18 @@ def update_card(
 ):
     with state_lock:
 
-        data, index = find_card(asset)
+        cards, index = find_card(asset)
 
-        if data is None or index is None:
+        if index is None:
 
             print(
-                f"⚠️ Carta non trovata nello state: {asset}",
+                f"⚠️ Carta non presente: {asset}",
                 flush=True
             )
 
             return False
 
-        card = data["acquired_cards"][index]
+        card = cards[index]
 
         if status is not None:
             card["status"] = status
@@ -262,33 +279,23 @@ def update_card(
 
         if error is not None:
             card["last_error"] = error
-        elif status in {
-            "SELLING",
-            "da_vendere"
-        }:
+
+        elif status == "SELLING":
             card["last_error"] = None
 
         if status == "SELLING":
             card["selling_at"] = now()
 
-        data["updated_at"] = int(time.time())
-
-        return save_raw_state(data)
+        return save_state(cards)
 
 
 def sellable_cards():
-    """
-    Il bot AutoBuy salva le carte con:
-
-        status = da_vendere
-
-    Accettiamo anche READY per compatibilità
-    con eventuali vecchi record.
-    """
-
     result = []
 
-    for card in acquired_cards():
+    for card in state():
+
+        if not isinstance(card, dict):
+            continue
 
         status = norm(
             card.get("status")
@@ -300,26 +307,26 @@ def sellable_cards():
         }:
             continue
 
-        if not get_asset(card):
+        if not asset_id(card):
             continue
 
-        result.append(card)
+        result.append(dict(card))
 
     return result
 
 
 # ============================================================
-# SORARE API
+# SORARE GRAPHQL
 # ============================================================
 
-def headers():
+def auth_headers():
 
     if not TOKEN:
         raise RuntimeError(
             "SORARE_JWT_TOKEN mancante"
         )
 
-    result = {
+    headers = {
         "Authorization": (
             TOKEN
             if TOKEN.lower().startswith("bearer ")
@@ -327,13 +334,13 @@ def headers():
         ),
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": f"Sorare-AutoSell/{VERSION}"
+        "User-Agent": "Sorare-AutoSell"
     }
 
     if AUD:
-        result["JWT-AUD"] = AUD
+        headers["JWT-AUD"] = AUD
 
-    return result
+    return headers
 
 
 def gql(query, variables=None):
@@ -348,7 +355,7 @@ def gql(query, variables=None):
                     "query": query,
                     "variables": variables or {}
                 },
-                headers=headers(),
+                headers=auth_headers(),
                 timeout=TIMEOUT
             )
 
@@ -360,7 +367,7 @@ def gql(query, variables=None):
             if response.status_code == 429:
 
                 time.sleep(
-                    min(2 + attempt * 2, 8)
+                    2 + attempt * 2
                 )
 
                 continue
@@ -369,11 +376,12 @@ def gql(query, variables=None):
 
                 print(
                     f"❌ Sorare: "
-                    f"{response.text[:1200]}",
+                    f"{response.text[:1000]}",
                     flush=True
                 )
 
                 time.sleep(attempt + 1)
+
                 continue
 
             data = response.json()
@@ -385,7 +393,7 @@ def gql(query, variables=None):
                     json.dumps(
                         data["errors"],
                         ensure_ascii=False
-                    )[:2000],
+                    )[:2500],
                     flush=True
                 )
 
@@ -459,16 +467,22 @@ def check_account():
 def card_details(asset):
 
     data = gql("""
-        query Cards($ids: [String!]!) {
+        query Card($ids: [String!]!) {
             anyCards(assetIds: $ids) {
                 assetId
                 slug
                 name
                 rarityTyped
                 seasonYear
+
                 anyPlayer {
                     slug
                     displayName
+
+                    activeClub {
+                        slug
+                        name
+                    }
                 }
             }
         }
@@ -476,12 +490,9 @@ def card_details(asset):
         "ids": [asset]
     })
 
-    if not data or data.get("errors"):
-        return None
-
     cards = (
-        ((data.get("data") or {})
-        .get("anyCards"))
+        ((data or {}).get("data") or {})
+        .get("anyCards")
         or []
     )
 
@@ -489,73 +500,8 @@ def card_details(asset):
 
 
 # ============================================================
-# PRICE
+# FLOOR
 # ============================================================
-
-def usd_to_eur(usd_cents):
-
-    try:
-
-        response = requests.get(
-            "https://api.frankfurter.app/latest",
-            params={
-                "from": "USD",
-                "to": "EUR"
-            },
-            timeout=10
-        )
-
-        rate = float(
-            response.json()["rates"]["EUR"]
-        )
-
-        return round(
-            usd_cents * rate
-        )
-
-    except Exception as e:
-
-        print(
-            f"⚠️ Cambio USD/EUR: {e}",
-            flush=True
-        )
-
-        return None
-
-
-def offer_price(amounts):
-
-    if not isinstance(amounts, dict):
-        return None
-
-    try:
-
-        eur_cents = int(
-            amounts.get("eurCents") or 0
-        )
-
-        if eur_cents > 0:
-            return eur_cents
-
-    except Exception:
-        pass
-
-    try:
-
-        usd_cents = float(
-            amounts.get("usdCents") or 0
-        )
-
-        if usd_cents > 0:
-            return usd_to_eur(
-                usd_cents
-            )
-
-    except Exception:
-        pass
-
-    return None
-
 
 def floor(card):
 
@@ -580,7 +526,7 @@ def floor(card):
         return None
 
     data = gql("""
-        query Live(
+        query LiveOffers(
             $slug: String,
             $first: Int
         ) {
@@ -590,11 +536,13 @@ def floor(card):
                     first: $first
                 ) {
                     nodes {
+
                         senderSide {
                             anyCards {
                                 assetId
                                 rarityTyped
                                 seasonYear
+
                                 anyPlayer {
                                     slug
                                 }
@@ -616,69 +564,63 @@ def floor(card):
         "first": 50
     })
 
-    if not data or data.get("errors"):
-        return None
-
     offers = (
-        (((data.get("data") or {})
+        (((data or {}).get("data") or {})
         .get("tokens") or {})
-        .get("liveSingleSaleOffers") or {})
-        .get("nodes")
-        or []
-    )
+        .get("liveSingleSaleOffers") or {}
+    ).get("nodes") or []
 
     prices = []
 
     for offer in offers:
 
-        sender = (
-            offer.get("senderSide")
-            or {}
-        )
+        sender = offer.get("senderSide") or {}
 
         listed_cards = (
-            sender.get("anyCards")
-            or []
+            sender.get("anyCards") or []
         )
 
         for listed in listed_cards:
 
             listed_player = (
-                listed.get("anyPlayer")
-                or {}
+                listed.get("anyPlayer") or {}
             )
 
+            if norm(
+                listed_player.get("slug")
+            ) != player_slug:
+                continue
+
+            if norm(
+                listed.get("rarityTyped")
+            ) != rarity:
+                continue
+
             try:
-                listed_season = int(
+
+                if int(
                     listed.get("seasonYear")
-                )
+                ) != season:
+                    continue
+
             except Exception:
                 continue
 
-            same = (
-                norm(
-                    listed_player.get("slug")
-                ) == player_slug
-                and
-                norm(
-                    listed.get("rarityTyped")
-                ) == rarity
-                and
-                listed_season == season
-            )
-
-            if not same:
-                continue
-
             amounts = (
-                offer.get("receiverSide")
-                or {}
-            ).get("amounts")
+                offer.get("receiverSide") or {}
+            ).get("amounts") or {}
 
-            price = offer_price(amounts)
+            try:
 
-            if price is not None:
-                prices.append(price)
+                value = int(
+                    amounts.get("eurCents") or 0
+                )
+
+                if value > 0:
+                    prices.append(value)
+
+            except Exception:
+                pass
 
             break
 
@@ -695,7 +637,7 @@ def floor(card):
 
 
 # ============================================================
-# VALIDATION
+# VALIDAZIONE
 # ============================================================
 
 def is_kulenovic(card):
@@ -712,8 +654,7 @@ def is_kulenovic(card):
 
     return (
         norm(card.get("assetId")) in wanted
-        or
-        norm(card.get("slug")) in wanted
+        or norm(card.get("slug")) in wanted
     )
 
 
@@ -725,6 +666,7 @@ def validate(card):
     if norm(
         card.get("rarityTyped")
     ).upper() != "LIMITED":
+
         return False, "RARITY"
 
     price = floor(card)
@@ -742,10 +684,10 @@ def validate(card):
 
 
 # ============================================================
-# SIGN
+# SIGNATURE
 # ============================================================
 
-def sign(authorizations):
+def sign_authorizations(authorizations):
 
     node = (
         shutil.which("node")
@@ -762,105 +704,117 @@ def sign(authorizations):
             "SORARE_STARK_PRIVATE_KEY mancante"
         )
 
-    js = r'''
+    js = r"""
 const fs = require("fs");
 const {
-    signAuthorizationRequest
+  signAuthorizationRequest
 } = require("@sorare/crypto");
 
 const input = JSON.parse(
-    fs.readFileSync(0, "utf8")
+  fs.readFileSync(0, "utf8")
 );
 
 function signOne(auth) {
 
-    const request = auth.request;
+  const request = auth.request;
 
-    if (!request) {
-        throw new Error(
-            "AuthorizationRequest mancante"
-        );
-    }
-
-    if (
-        request.__typename ===
-        "StarkexTransferAuthorizationRequest"
-        &&
-        request.amount != null
-    ) {
-        request.amount = BigInt(
-            request.amount
-        );
-    }
-
-    const signature =
-        signAuthorizationRequest(
-            input.privateKey,
-            request
-        );
-
-    if (
-        request.__typename ===
-        "StarkexTransferAuthorizationRequest"
-    ) {
-        return {
-            fingerprint: auth.fingerprint,
-            starkexTransferApproval: {
-                nonce: request.nonce,
-                expirationTimestamp:
-                    request.expirationTimestamp,
-                signature
-            }
-        };
-    }
-
-    if (
-        request.__typename ===
-        "StarkexLimitOrderAuthorizationRequest"
-    ) {
-        return {
-            fingerprint: auth.fingerprint,
-            starkexLimitOrderApproval: {
-                nonce: request.nonce,
-                expirationTimestamp:
-                    request.expirationTimestamp,
-                signature
-            }
-        };
-    }
-
-    if (
-        request.__typename ===
-        "MangopayWalletTransferAuthorizationRequest"
-    ) {
-        return {
-            fingerprint: auth.fingerprint,
-            mangopayWalletTransferApproval: {
-                nonce: request.nonce,
-                signature
-            }
-        };
-    }
-
+  if (!request) {
     throw new Error(
-        "Authorization non supportata: "
-        + request.__typename
+      "AuthorizationRequest mancante"
     );
+  }
+
+  const type = request.__typename;
+
+  if (
+    type !==
+      "StarkexTransferAuthorizationRequest" &&
+    type !==
+      "StarkexLimitOrderAuthorizationRequest" &&
+    type !==
+      "MangopayWalletTransferAuthorizationRequest"
+  ) {
+    throw new Error(
+      "Authorization non Stark/Mangopay: " + type
+    );
+  }
+
+  if (
+    type ===
+    "StarkexTransferAuthorizationRequest"
+    &&
+    request.amount != null
+  ) {
+    request.amount = BigInt(
+      request.amount
+    );
+  }
+
+  const signature =
+    signAuthorizationRequest(
+      input.privateKey,
+      request
+    );
+
+  if (
+    type ===
+    "StarkexTransferAuthorizationRequest"
+  ) {
+
+    return {
+      fingerprint: auth.fingerprint,
+
+      starkexTransferApproval: {
+        nonce: request.nonce,
+        expirationTimestamp:
+          request.expirationTimestamp,
+        signature
+      }
+    };
+  }
+
+  if (
+    type ===
+    "StarkexLimitOrderAuthorizationRequest"
+  ) {
+
+    return {
+      fingerprint: auth.fingerprint,
+
+      starkexLimitOrderApproval: {
+        nonce: request.nonce,
+        expirationTimestamp:
+          request.expirationTimestamp,
+        signature
+      }
+    };
+  }
+
+  return {
+    fingerprint: auth.fingerprint,
+
+    mangopayWalletTransferApproval: {
+      nonce: request.nonce,
+      signature
+    }
+  };
 }
 
 process.stdout.write(
-    JSON.stringify(
-        input.authorizations.map(signOne)
-    )
+  JSON.stringify(
+    input.authorizations.map(signOne)
+  )
 );
-'''
+"""
+
+    payload = {
+        "privateKey": STARK,
+        "authorizations": authorizations
+    }
 
     process = subprocess.run(
         [node, "-e", js],
-        input=json.dumps({
-            "privateKey": STARK,
-            "authorizations": authorizations
-        }),
+        input=json.dumps(payload),
         text=True,
         capture_output=True,
         timeout=TIMEOUT
@@ -873,9 +827,14 @@ process.stdout.write(
             or "Firma fallita"
         )
 
-    return json.loads(
-        process.stdout
-    )
+    try:
+        return json.loads(
+            process.stdout
+        )
+    except Exception:
+        raise RuntimeError(
+            "Output firma non valido"
+        )
 
 
 # ============================================================
@@ -884,7 +843,7 @@ process.stdout.write(
 
 def create_sale(card, price):
 
-    asset = get_asset(card)
+    asset = asset_id(card)
 
     if not asset:
         return None
@@ -893,19 +852,30 @@ def create_sale(card, price):
 
         print(
             f"🟡 DRY RUN → "
-            f"{card_label(card)} → "
-            f"{euro(price)}",
+            f"{label(card)} → {eur(price)}",
             flush=True
         )
 
         return "DRY-RUN"
 
     # --------------------------------------------------------
-    # PREPARE
+    # PREPARE OFFER
+    # --------------------------------------------------------
+    #
+    # NOTA IMPORTANTE:
+    #
+    # NON inseriamo:
+    #
+    #     type: "SINGLE_SALE_OFFER"
+    #
+    # perché il tuo endpoint attuale ha risposto:
+    #
+    # Field is not defined on prepareOfferInput
+    #
     # --------------------------------------------------------
 
-    data = gql("""
-        mutation Prepare(
+    prepare_query = """
+        mutation PrepareOffer(
             $input: prepareOfferInput!
         ) {
             prepareOffer(input: $input) {
@@ -965,20 +935,22 @@ def create_sale(card, price):
                 }
             }
         }
-    """, {
-        "input": {
-            "type": "SINGLE_SALE_OFFER",
-            "sendAssetIds": [asset],
-            "receiveAssetIds": [],
-            "receiveAmount": {
-                "amount": str(price),
-                "currency": "EUR"
-            },
-            "clientMutationId": str(
-                uuid.uuid4()
-            )
-        }
-    })
+    """
+
+    prepare_input = {
+        "sendAssetIds": [asset],
+        "receiveAssetIds": [],
+        "receiveAmount": {
+            "amount": str(price),
+            "currency": "EUR"
+        },
+        "clientMutationId": str(uuid.uuid4())
+    }
+
+    data = gql(
+        prepare_query,
+        {"input": prepare_input}
+    )
 
     result = (
         ((data or {}).get("data") or {})
@@ -986,10 +958,12 @@ def create_sale(card, price):
     )
 
     if not result:
+
         print(
             "❌ prepareOffer: nessun risultato",
             flush=True
         )
+
         return None
 
     errors = result.get("errors") or []
@@ -1001,7 +975,7 @@ def create_sale(card, price):
             json.dumps(
                 errors,
                 ensure_ascii=False
-            ),
+            )[:2500],
             flush=True
         )
 
@@ -1015,18 +989,37 @@ def create_sale(card, price):
     if not authorizations:
 
         print(
-            "❌ Nessuna authorization",
+            "❌ prepareOffer: "
+            "nessuna authorization",
             flush=True
         )
 
         return None
 
     # --------------------------------------------------------
+    # DEBUG AUTHORIZATION TYPE
+    # --------------------------------------------------------
+
+    for auth in authorizations:
+
+        request = (
+            auth.get("request")
+            or {}
+        )
+
+        print(
+            "🔐 Authorization → "
+            f"{request.get('__typename')}",
+            flush=True
+        )
+
+    # --------------------------------------------------------
     # SIGN
     # --------------------------------------------------------
 
     try:
-        approvals = sign(
+
+        approvals = sign_authorizations(
             authorizations
         )
 
@@ -1040,11 +1033,11 @@ def create_sale(card, price):
         return None
 
     # --------------------------------------------------------
-    # CREATE
+    # CREATE SINGLE SALE
     # --------------------------------------------------------
 
-    data = gql("""
-        mutation Create(
+    create_query = """
+        mutation CreateSingleSale(
             $input: createSingleSaleOfferInput!
         ) {
             createSingleSaleOffer(
@@ -1060,20 +1053,31 @@ def create_sale(card, price):
                 }
             }
         }
-    """, {
-        "input": {
-            "approvals": approvals,
-            "dealId": str(uuid.uuid4()),
-            "assetId": asset,
-            "receiveAmount": {
-                "amount": str(price),
-                "currency": "EUR"
-            },
-            "clientMutationId": str(
-                uuid.uuid4()
-            )
-        }
-    })
+    """
+
+    create_input = {
+        "approvals": approvals,
+
+        "dealId": str(
+            uuid.uuid4()
+        ),
+
+        "assetId": asset,
+
+        "receiveAmount": {
+            "amount": str(price),
+            "currency": "EUR"
+        },
+
+        "clientMutationId": str(
+            uuid.uuid4()
+        )
+    }
+
+    data = gql(
+        create_query,
+        {"input": create_input}
+    )
 
     result = (
         ((data or {}).get("data") or {})
@@ -1099,7 +1103,7 @@ def create_sale(card, price):
             json.dumps(
                 errors,
                 ensure_ascii=False
-            ),
+            )[:2500],
             flush=True
         )
 
@@ -1113,7 +1117,7 @@ def create_sale(card, price):
     if not offer_id:
 
         print(
-            "❌ Inserzione non creata: "
+            "❌ Vendita non creata: "
             "offer ID assente",
             flush=True
         )
@@ -1121,7 +1125,8 @@ def create_sale(card, price):
         return None
 
     print(
-        f"✅ INSERZIONE CREATA: {offer_id}",
+        f"✅ INSERZIONE CREATA → "
+        f"{offer_id}",
         flush=True
     )
 
@@ -1134,7 +1139,7 @@ def create_sale(card, price):
 
 def process(card):
 
-    asset = get_asset(card)
+    asset = asset_id(card)
 
     if not asset:
         return
@@ -1149,28 +1154,26 @@ def process(card):
     if not details:
 
         print(
-            "❌ Carta non recuperabile → RITENTO",
+            "❌ Carta non recuperabile",
             flush=True
         )
 
         update_card(
             asset,
-            status="da_vendere",
+            "da_vendere",
             error="CARD_DETAILS"
         )
 
         return
 
     print(
-        f"🃏 {card_label(details)}",
+        f"🃏 {label(details)}",
         flush=True
     )
 
-    valid_card, result = validate(
-        details
-    )
+    ok, result = validate(details)
 
-    if not valid_card:
+    if not ok:
 
         messages = {
             "KULENOVIC":
@@ -1190,7 +1193,7 @@ def process(card):
         }
 
         print(
-            f"🚫 ESCLUSA: "
+            f"🚫 ESCLUSA → "
             f"{messages.get(result, result)}",
             flush=True
         )
@@ -1202,7 +1205,7 @@ def process(card):
 
             update_card(
                 asset,
-                status="BLOCKED",
+                "BLOCKED",
                 error=result
             )
 
@@ -1210,7 +1213,7 @@ def process(card):
 
             update_card(
                 asset,
-                status="da_vendere",
+                "da_vendere",
                 error=result
             )
 
@@ -1220,17 +1223,17 @@ def process(card):
 
     print(
         f"✅ CARTA VALIDA → "
-        f"floor {euro(price)}",
+        f"floor {eur(price)}",
         flush=True
     )
 
     # --------------------------------------------------------
-    # LOCK
+    # BLOCCO PRE-VENDITA
     # --------------------------------------------------------
 
     if not update_card(
         asset,
-        status="SELLING"
+        "SELLING"
     ):
 
         print(
@@ -1241,7 +1244,7 @@ def process(card):
         return
 
     # --------------------------------------------------------
-    # SALE
+    # CREA INSERZIONE
     # --------------------------------------------------------
 
     offer_id = create_sale(
@@ -1253,7 +1256,7 @@ def process(card):
 
         update_card(
             asset,
-            status="da_vendere",
+            "da_vendere",
             error="CREATE_SALE_FAILED"
         )
 
@@ -1270,15 +1273,15 @@ def process(card):
 
     update_card(
         asset,
-        status="SELLING",
+        "SELLING",
         offer_id=offer_id,
         error=None
     )
 
     print(
         f"🎉 AUTOSELL COMPLETATO → "
-        f"{card_label(details)} | "
-        f"{euro(price)} | "
+        f"{label(details)} | "
+        f"{eur(price)} | "
         f"{offer_id}",
         flush=True
     )
@@ -1290,11 +1293,15 @@ def process(card):
 
 def recovery():
 
-    selling = [
-        card
-        for card in acquired_cards()
-        if norm(card.get("status")) == "selling"
-    ]
+    selling = []
+
+    for card in state():
+
+        if norm(
+            card.get("status")
+        ) == "selling":
+
+            selling.append(card)
 
     if not selling:
 
@@ -1307,7 +1314,7 @@ def recovery():
         return
 
     print(
-        f"🛡️ Recovery: "
+        f"🔄 Recovery: "
         f"{len(selling)} carte SELLING",
         flush=True
     )
@@ -1315,9 +1322,8 @@ def recovery():
     for card in selling:
 
         print(
-            f"   └─ {get_asset(card)} "
-            f"| offer="
-            f"{card.get('sale_offer_id')}",
+            f"   └─ {asset_id(card)} "
+            f"| offer={card.get('sale_offer_id')}",
             flush=True
         )
 
@@ -1374,13 +1380,13 @@ def worker():
     )
 
     print(
-        f"💾 STORAGE: {BOT_STATE_PATH}",
+        f"💾 STORAGE: {STATE_FILE}",
         flush=True
     )
 
     try:
 
-        headers()
+        auth_headers()
         ensure_state()
 
     except Exception as e:
@@ -1416,7 +1422,7 @@ def worker():
 
                 except Exception as e:
 
-                    asset = get_asset(card)
+                    asset = asset_id(card)
 
                     print(
                         f"❌ AutoSell "
@@ -1428,7 +1434,7 @@ def worker():
 
                         update_card(
                             asset,
-                            status="da_vendere",
+                            "da_vendere",
                             error=str(e)
                         )
 
@@ -1474,30 +1480,43 @@ def start_worker():
 @app.get("/")
 def home():
 
-    cards = acquired_cards()
+    cards = state()
 
     return jsonify({
         "status": "online",
         "bot": "autosell",
         "version": VERSION,
         "dry_run": DRY_RUN,
+
         "range": "€0.32-€0.70",
         "min_live_listings": MIN_LISTINGS,
+
         "rarity": "LIMITED",
         "age": "NOT_USED",
+
         "kulenovic": "NEVER_SELL",
         "coverage": "DISABLED",
-        "storage": BOT_STATE_PATH,
+        "source": "AUTOBUY / SWAP",
+
+        "storage": STATE_FILE,
+
         "cards": len(cards),
+
         "da_vendere": len([
             c for c in cards
             if norm(c.get("status"))
-            in {"da_vendere", "ready"}
+            in {
+                "da_vendere",
+                "ready"
+            }
         ]),
+
         "selling": len([
             c for c in cards
-            if norm(c.get("status")) == "selling"
+            if norm(c.get("status"))
+            == "selling"
         ]),
+
         "worker": worker_started
     })
 
@@ -1517,7 +1536,7 @@ def health():
 @app.get("/cards")
 def cards_endpoint():
 
-    cards = acquired_cards()
+    cards = state()
 
     return jsonify({
         "count": len(cards),
