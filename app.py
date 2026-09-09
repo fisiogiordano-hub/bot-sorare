@@ -34,9 +34,14 @@ GITHUB_BRANCH = os.getenv(
     "main"
 ).strip()
 
-DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+DRY_RUN = os.getenv(
+    "DRY_RUN",
+    "false"
+).lower() == "true"
+
 SWAP_AUTO_ACCEPT = os.getenv(
-    "SWAP_AUTO_ACCEPT", "false"
+    "SWAP_AUTO_ACCEPT",
+    "false"
 ).lower() == "true"
 
 MIN_PRICE = 32
@@ -53,9 +58,10 @@ TIMEOUT = 25
 USD_CACHE = 300
 COVERAGE_CACHE = 3600
 
-BOT_VERSION = "23.0-AUTOBUY-PENDING-FIX"
+BOT_VERSION = "23.1-AUTOBUY-PENDING-FIX"
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
+
 KASSET = (
     "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
     "6796b6c0ed10ba0a6"
@@ -66,11 +72,7 @@ KASSET = (
 # ============================================================
 
 processed = set()
-
-# Carte realmente acquisite dal bot
 acquired_cards = {}
-
-# AutoBuy creati ma NON ancora completati
 pending_autobuys = {}
 
 state_lock = threading.Lock()
@@ -167,17 +169,17 @@ def graphql(query, variables=None):
             )
 
             if r.status_code == 429:
-                time.sleep(
-                    min(
-                        int(
-                            r.headers.get(
-                                "Retry-After",
-                                attempt + 2
-                            )
-                        ),
-                        15
-                    )
+                retry_after = r.headers.get(
+                    "Retry-After",
+                    attempt + 2
                 )
+
+                try:
+                    retry_after = int(retry_after)
+                except Exception:
+                    retry_after = attempt + 2
+
+                time.sleep(min(retry_after, 15))
                 continue
 
             if r.status_code != 200:
@@ -186,6 +188,7 @@ def graphql(query, variables=None):
                     f"{r.text[:500]}",
                     flush=True
                 )
+
                 time.sleep(attempt + 1)
                 continue
 
@@ -214,7 +217,7 @@ def graphql(query, variables=None):
 
 
 # ============================================================
-# LOCAL / GITHUB STATE
+# STATE LOCALE / GITHUB
 # ============================================================
 
 def normalize_acquired_card(item):
@@ -280,19 +283,11 @@ def normalize_pending_autobuy(item):
 def build_state():
     with state_lock:
         return {
-            "processed_offers":
-                sorted(processed),
-
+            "processed_offers": sorted(processed),
             "acquired_cards":
-                list(
-                    acquired_cards.values()
-                ),
-
+                list(acquired_cards.values()),
             "pending_autobuys":
-                list(
-                    pending_autobuys.values()
-                ),
-
+                list(pending_autobuys.values()),
             "updated_at":
                 int(time.time())
         }
@@ -350,13 +345,12 @@ def load_local_state():
         ) as f:
             data = json.load(f)
 
-        # Compatibilità con vecchio file
         if isinstance(data, dict):
             load_state_data(data)
+
         else:
             print(
-                "⚠️ bot_state.json non è un oggetto "
-                "→ ignorato",
+                "⚠️ bot_state.json non valido",
                 flush=True
             )
 
@@ -444,9 +438,7 @@ def load_github_state():
             )
             return
 
-        data = r.json()
-
-        content = data.get("content")
+        content = r.json().get("content")
 
         if not content:
             return
@@ -458,10 +450,6 @@ def load_github_state():
         state = json.loads(decoded)
 
         if not isinstance(state, dict):
-            print(
-                "⚠️ GitHub bot_state.json non valido",
-                flush=True
-            )
             return
 
         with state_lock:
@@ -555,7 +543,6 @@ def save_github_state():
 def load_state():
     load_local_state()
     load_github_state()
-
     save_local_state()
 
     print(
@@ -587,7 +574,7 @@ def mark_done(offer_id):
 
 
 # ============================================================
-# ACQUIRED CARDS
+# CARTE ACQUISITE
 # ============================================================
 
 def persist_acquired_card(
@@ -641,7 +628,7 @@ def persist_acquired_card(
 
 
 # ============================================================
-# PENDING AUTOBUY
+# AUTOBUY PENDING
 # ============================================================
 
 def add_pending_autobuy(
@@ -822,58 +809,6 @@ def get_received_offers():
 # OFFERTE AUTOBUY INVIATE
 # ============================================================
 
-def get_sent_pending_offers():
-    data = graphql("""
-        query {
-            currentUser {
-                pendingTokenOffersSent(first: 50) {
-                    nodes {
-                        id
-                        status
-                        type
-                        sender {
-                            ... on User {
-                                slug
-                            }
-                        }
-                        receiver {
-                            ... on User {
-                                slug
-                            }
-                        }
-                        senderSide {
-                            anyCards {
-                                assetId
-                                slug
-                            }
-                        }
-                        receiverSide {
-                            anyCards {
-                                assetId
-                                slug
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    """)
-
-    user = (
-        ((data or {}).get("data") or {})
-        .get("currentUser")
-        or {}
-    )
-
-    return (
-        (user.get(
-            "pendingTokenOffersSent"
-        ) or {})
-        .get("nodes")
-        or []
-    )
-
-
 def get_offer_by_id(offer_id):
     data = graphql("""
         query OfferById($id: String!) {
@@ -940,7 +875,7 @@ def get_offer_by_id(offer_id):
 
 
 # ============================================================
-# CARD DETAILS
+# DETTAGLI CARTE
 # ============================================================
 
 def card_details(asset_ids):
@@ -963,14 +898,17 @@ def card_details(asset_ids):
                 name
                 rarityTyped
                 seasonYear
+
                 user {
                     slug
                 }
+
                 tokenOwner {
                     user {
                         slug
                     }
                 }
+
                 anyPlayer {
                     slug
                     displayName
@@ -1015,14 +953,11 @@ def card_owned_by_me(card):
     owner = card.get("tokenOwner") or {}
     owner_user = owner.get("user") or {}
 
-    if norm(owner_user.get("slug")) == wanted:
-        return True
-
-    return False
+    return norm(owner_user.get("slug")) == wanted
 
 
 # ============================================================
-# PRICES
+# PREZZI
 # ============================================================
 
 def usd_eur():
@@ -1138,6 +1073,7 @@ def live_floor(card):
                                 assetId
                                 rarityTyped
                                 seasonYear
+
                                 anyPlayer {
                                     slug
                                 }
@@ -1199,14 +1135,14 @@ def live_floor(card):
                 ) == rarity
                 and c_season == season
             ):
-                p = price_eur(
+                price = price_eur(
                     (offer.get("receiverSide") or {})
                     .get("amounts")
                     or {}
                 )
 
-                if p is not None:
-                    prices.append(p)
+                if price is not None:
+                    prices.append(price)
 
                 break
 
@@ -1230,8 +1166,7 @@ def load_coverage(force=False):
         if (
             not force
             and coverage_cache
-            and now - coverage_time
-            < COVERAGE_CACHE
+            and now - coverage_time < COVERAGE_CACHE
         ):
             return set(coverage_cache)
 
@@ -1295,13 +1230,13 @@ def is_kulenovic(card):
         norm(KASSET)
     }
 
-    kid = os.getenv(
+    extra_id = os.getenv(
         "KULENOVIC_ID",
         ""
     ).strip()
 
-    if kid:
-        wanted.add(norm(kid))
+    if extra_id:
+        wanted.add(norm(extra_id))
 
     return (
         norm(card.get("assetId")) in wanted
@@ -1403,19 +1338,25 @@ def print_rejection(card, info, context):
     messages = {
         "AGE":
             f"Età {info.get('age')} >= {MAX_AGE}",
+
         "AGE_UNKNOWN":
             "Età non disponibile",
+
         "RARITY":
             f"Rarità {info.get('rarity')}",
+
         "PRICE_UNKNOWN":
             "Floor live non disponibile "
             f"o meno di {MIN_LIVE_LISTINGS} inserzioni",
+
         "PRICE_LOW":
             f"Floor {format_eur(info.get('floor'))} "
             f"< {format_eur(MIN_PRICE)}",
+
         "PRICE_HIGH":
             f"Floor {format_eur(info.get('floor'))} "
             f"> {format_eur(MAX_PRICE)}",
+
         "COVERAGE":
             "Nessuna competizione coperta"
     }
@@ -1429,7 +1370,21 @@ def print_rejection(card, info, context):
 
 
 # ============================================================
-# REJECT OFFER
+# CONTROLLO OFFERA GIÀ PROCESSATA
+# ============================================================
+
+def already_processed(offer_id):
+    key = norm(offer_id)
+
+    if not key:
+        return True
+
+    with state_lock:
+        return key in processed
+
+
+# ============================================================
+# REJECT
 # ============================================================
 
 def reject_offer(offer):
@@ -1460,6 +1415,7 @@ def reject_offer(offer):
                     id
                     status
                 }
+
                 errors {
                     message
                 }
@@ -1524,8 +1480,10 @@ def sign_authorizations(authorizations):
 
     script = r'''
 const fs = require("fs");
-const { signAuthorizationRequest } =
-require("@sorare/crypto");
+
+const {
+    signAuthorizationRequest
+} = require("@sorare/crypto");
 
 const input = JSON.parse(
     fs.readFileSync(0, "utf8")
@@ -1534,10 +1492,11 @@ const input = JSON.parse(
 function sign(a) {
     const r = a.request;
 
-    if (!r)
+    if (!r) {
         throw new Error(
             "AuthorizationRequest mancante"
         );
+    }
 
     if (
         r.__typename ===
@@ -1635,7 +1594,7 @@ process.stdout.write(
 
 
 # ============================================================
-# CREATE AUTOBUY COUNTER-OFFER
+# CREA AUTOBUY
 # ============================================================
 
 def counter_offer(offer, cards):
@@ -1653,10 +1612,7 @@ def counter_offer(offer, cards):
     if not receiver or not ids:
         return None
 
-    amount = (
-        len(ids)
-        * PAY_PER_CARD
-    )
+    amount = len(ids) * PAY_PER_CARD
 
     print(
         f"🟢 AUTOBUY: creo controproposta "
@@ -1685,6 +1641,7 @@ def counter_offer(offer, cards):
             prepareOffer(input: $input) {
                 authorizations {
                     fingerprint
+
                     request {
                         __typename
 
@@ -1697,6 +1654,7 @@ def counter_offer(offer, cards):
                             receiverVaultId
                             senderVaultId
                             token
+
                             feeInfoUser {
                                 feeLimit
                                 sourceVaultId
@@ -1713,6 +1671,7 @@ def counter_offer(offer, cards):
                             tokenBuy
                             nonce
                             expirationTimestamp
+
                             feeInfo {
                                 feeLimit
                                 tokenId
@@ -1783,6 +1742,7 @@ def counter_offer(offer, cards):
 
     try:
         approvals = sign_authorizations(auth)
+
     except Exception as e:
         print(
             f"❌ Firma AutoBuy: {e}",
@@ -1846,7 +1806,10 @@ def counter_offer(offer, cards):
         )
         return None
 
-    token_offer = result.get("tokenOffer") or {}
+    token_offer = result.get(
+        "tokenOffer"
+    ) or {}
+
     new_id = token_offer.get("id")
 
     if not new_id:
@@ -1875,10 +1838,11 @@ def process_autobuy(offer):
         offer.get("id")
     )
 
-    if (
-        not original_id
-        or not should_process(original_id)
-    ):
+    if not original_id:
+        return
+
+    # FIX: non usare should_process()
+    if already_processed(original_id):
         return
 
     receiver_cards = (
@@ -1887,7 +1851,7 @@ def process_autobuy(offer):
         or []
     )
 
-    # AutoBuy solo se l'offerta richiede Kulenovic
+    # AutoBuy solo quando l'offerta richiede Kulenovic
     if not any(
         is_kulenovic(c)
         for c in receiver_cards
@@ -1909,6 +1873,7 @@ def process_autobuy(offer):
     if not ids:
         if reject_offer(offer):
             mark_done(original_id)
+
         return
 
     print(
@@ -1982,21 +1947,15 @@ def process_autobuy(offer):
         )
         return
 
-    # ========================================================
-    # IMPORTANTE:
-    #
-    # NON registriamo ancora le carte come acquisite.
-    #
-    # Registriamo invece la SingleBuyOffer da monitorare.
-    # ========================================================
-
+    # La carta NON viene ancora registrata come acquisita.
+    # Prima aspettiamo che l'AutoBuy venga accettato.
     add_pending_autobuy(
         offer_id=new_offer_id,
         original_offer_id=original_id,
         cards=valid
     )
 
-    # Ora possiamo chiudere l'offerta originale
+    # Chiudiamo l'offerta ricevuta originale.
     if reject_offer(offer):
         mark_done(original_id)
 
@@ -2055,10 +2014,6 @@ def check_pending_autobuys():
                 flush=True
             )
 
-            # =================================================
-            # RIFIUTATA / CANCELLATA / TERMINATA
-            # =================================================
-
             if status in {
                 "CANCELLED",
                 "REJECTED",
@@ -2074,15 +2029,8 @@ def check_pending_autobuys():
                 remove_pending_autobuy(
                     offer_id
                 )
-                continue
 
-            # =================================================
-            # ACCETTATA
-            #
-            # Non registriamo ancora alla cieca.
-            # Verifichiamo che le carte siano effettivamente
-            # di proprietà del nostro account.
-            # =================================================
+                continue
 
             if status not in {
                 "ACCEPTED",
@@ -2123,16 +2071,13 @@ def check_pending_autobuys():
                 print(
                     f"⏳ AUTOBUY {offer_id}: "
                     f"offerta {status}, "
-                    f"ma carta non ancora risultata "
+                    f"ma carta non ancora "
                     f"di proprietà",
                     flush=True
                 )
                 continue
 
-            # =================================================
-            # QUI la carta è realmente nostra.
-            # =================================================
-
+            # SOLO QUI la carta è realmente nostra.
             for card in details:
                 persist_acquired_card(
                     card=card,
@@ -2308,6 +2253,7 @@ def accept_offer(offer):
 
     try:
         approvals = sign_authorizations(auth)
+
     except Exception as e:
         print(
             f"❌ Firma ACCEPT: {e}",
@@ -2378,10 +2324,11 @@ def process_swap(offer):
         offer.get("id")
     )
 
-    if (
-        not offer_id
-        or not should_process(offer_id)
-    ):
+    if not offer_id:
+        return
+
+    # FIX: non usare should_process()
+    if already_processed(offer_id):
         return
 
     sender_cards = (
@@ -2431,7 +2378,7 @@ def process_swap(offer):
             mark_done(offer_id)
         return
 
-    # Kulenovic mai cedibile
+    # Kulenovic non può mai essere ceduto.
     if any(
         is_kulenovic(c)
         for c in give
@@ -2499,6 +2446,7 @@ def process_swap(offer):
             flush=True
         )
 
+    # Cash SOLO quello già presente nell'offerta.
     cash = price_eur(
         (offer.get("senderSide") or {})
         .get("amounts")
@@ -2583,6 +2531,7 @@ def process_offer(offer):
         or []
     )
 
+    # Kulenovic richiesto → AutoBuy.
     if any(
         is_kulenovic(c)
         for c in receiver_cards
@@ -2590,6 +2539,8 @@ def process_offer(offer):
         process_autobuy(offer)
         return
 
+    # Altrimenti, se ci sono carte da entrambe le parti,
+    # è una possibile proposta di swap.
     if sender_cards and receiver_cards:
         process_swap(offer)
 
@@ -2675,7 +2626,8 @@ def worker():
 
     if not coverage:
         print(
-            "❌ Coverage non disponibile → bot fermato",
+            "❌ Coverage non disponibile → "
+            "bot fermato",
             flush=True
         )
         return
@@ -2691,16 +2643,10 @@ def worker():
 
     while True:
         try:
-            # ------------------------------------------------
-            # 1. CONTROLLA GLI AUTOBUY GIÀ CREATI
-            # ------------------------------------------------
-
+            # 1. Controlla gli AutoBuy creati dal bot.
             check_pending_autobuys()
 
-            # ------------------------------------------------
-            # 2. LEGGE LE OFFERTE RICEVUTE
-            # ------------------------------------------------
-
+            # 2. Legge le offerte ricevute dal nostro account.
             offers = get_received_offers()
 
             print(
@@ -2712,6 +2658,7 @@ def worker():
             for offer in offers:
                 try:
                     process_offer(offer)
+
                 except Exception as e:
                     print(
                         f"❌ Errore offerta: {e}",
@@ -2768,7 +2715,6 @@ def home():
         "status": "online",
         "bot": "sorare",
         "version": BOT_VERSION,
-
         "dry_run": DRY_RUN,
 
         "autobuy": {
