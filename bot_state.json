@@ -2,7 +2,16 @@
   "processed_offers": [
     "directoffer:afde77fb-bc24-4bad-bc17-d566029504a4"
   ],
-  "acquired_cards": [],
+  "acquired_cards": [
+    {
+      "assetId": "0x040002eaa24047315ab81f13938cd226a33893c347a43d4f57a7feadd1a384f4",
+      "slug": "toichi-suzuki-2026-limited-63-1",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:0817b229-0129-42d0-a484-048e91b4b458"
+    }
+  ],
   "pending_autobuys": [
     {
       "offer_id": "DirectOffer:0817b229-0129-42d0-a484-048e91b4b458",
@@ -34,5 +43,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1788973645
+  "updated_at": 1788974023
 }
