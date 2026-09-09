@@ -2,8 +2,9 @@ import os
 import json
 import time
 import uuid
-import threading
+import shutil
 import subprocess
+import threading
 import requests
 
 from flask import Flask, jsonify
@@ -20,27 +21,19 @@ SORARE_URL = "https://api.sorare.com/graphql"
 TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 
-# StarkEx / Mangopay
+# Stark key: usata SOLO per authorization StarkEx/Mangopay
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
-# Solana
-SOLANA_KEY = os.getenv(
-    "SORARE_SOLANA_PRIVATE_KEY",
-    ""
-).strip()
+# Solana key: usata SOLO per SolanaTokenTransferAuthorizationRequest
+SOLANA = os.getenv("SORARE_SOLANA_PRIVATE_KEY", "").strip()
 
 DRY_RUN = (
     os.getenv("DRY_RUN", "false").strip().lower()
     == "true"
 )
 
-INTERVAL = int(
-    os.getenv("INTERVAL", "30")
-)
-
-TIMEOUT = int(
-    os.getenv("TIMEOUT", "25")
-)
+INTERVAL = int(os.getenv("INTERVAL", "30"))
+TIMEOUT = int(os.getenv("TIMEOUT", "25"))
 
 MIN_PRICE = 32
 MAX_PRICE = 70
@@ -51,15 +44,13 @@ STATE_FILE = os.getenv(
     "bot_state.json"
 ).strip()
 
-VERSION = "AUTOSell-10.0-SOLANA-BASE58-FIX"
+VERSION = "AUTOSell-11.0-SOLANA-NATIVE-BASE58"
 
-KULENOVIC_SLUG = (
-    "sandro-kulenovic-2025-limited-385"
-)
+KULENOVIC_SLUG = "sandro-kulenovic-2025-limited-385"
 
 KULENOVIC_ASSET = (
-    "0x0400756aff980aff1d36e274f1c38af4"
-    "ac587bd3d40c7136796b6c0ed10ba0a6"
+    "0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
+    "6796b6c0ed10ba0a6"
 )
 
 
@@ -131,52 +122,33 @@ def default_state():
 
 def ensure_state():
     path = os.path.abspath(STATE_FILE)
-
     directory = os.path.dirname(path)
 
     if directory:
-        os.makedirs(
-            directory,
-            exist_ok=True
-        )
+        os.makedirs(directory, exist_ok=True)
 
     if not os.path.exists(path):
-        save_document(
-            default_state()
-        )
+        save_document(default_state())
 
 
 def load_document():
-
     ensure_state()
 
     try:
-
         with open(
             STATE_FILE,
             "r",
             encoding="utf-8"
         ) as f:
-
             data = json.load(f)
 
         if not isinstance(data, dict):
             return default_state()
 
-        data.setdefault(
-            "processed_offers",
-            []
-        )
-
-        data.setdefault(
-            "acquired_cards",
-            []
-        )
-
-        data.setdefault(
-            "pending_autobuys",
-            []
-        )
+        data.setdefault("processed_offers", [])
+        data.setdefault("acquired_cards", [])
+        data.setdefault("pending_autobuys", [])
+        data.setdefault("updated_at", int(time.time()))
 
         return data
 
@@ -280,9 +252,7 @@ def update_card(
             if not isinstance(card, dict):
                 continue
 
-            if norm(
-                asset_id(card)
-            ) != wanted:
+            if norm(asset_id(card)) != wanted:
                 continue
 
             found = True
@@ -291,11 +261,12 @@ def update_card(
                 card["status"] = status
 
             if offer_id:
-                card["sale_offer_id"] = (
-                    offer_id
-                )
+                card["sale_offer_id"] = offer_id
 
-            card["last_error"] = error
+            if error is not None:
+                card["last_error"] = error
+            else:
+                card["last_error"] = None
 
             if status == "SELLING":
                 card["selling_at"] = now()
@@ -305,8 +276,7 @@ def update_card(
         if not found:
 
             print(
-                f"⚠️ Carta non presente nello state: "
-                f"{asset}",
+                f"⚠️ Carta non presente nello state: {asset}",
                 flush=True
             )
 
@@ -361,16 +331,12 @@ def auth_headers():
     headers = {
         "Authorization": (
             TOKEN
-            if TOKEN.lower().startswith(
-                "bearer "
-            )
+            if TOKEN.lower().startswith("bearer ")
             else f"Bearer {TOKEN}"
         ),
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": (
-            f"Sorare-AutoSell/{VERSION}"
-        )
+        "User-Agent": f"Sorare-AutoSell/{VERSION}"
     }
 
     if AUD:
@@ -379,7 +345,10 @@ def auth_headers():
     return headers
 
 
-def gql(query, variables=None):
+def gql(
+    query,
+    variables=None
+):
 
     for attempt in range(3):
 
@@ -413,7 +382,7 @@ def gql(query, variables=None):
 
                 print(
                     "❌ Sorare:",
-                    response.text[:1500],
+                    response.text[:1000],
                     flush=True
                 )
 
@@ -423,14 +392,7 @@ def gql(query, variables=None):
 
                 continue
 
-            try:
-                data = response.json()
-            except Exception:
-                print(
-                    "❌ Risposta Sorare non JSON",
-                    flush=True
-                )
-                return None
+            data = response.json()
 
             if data.get("errors"):
 
@@ -439,7 +401,7 @@ def gql(query, variables=None):
                     json.dumps(
                         data["errors"],
                         ensure_ascii=False
-                    )[:4000],
+                    )[:3000],
                     flush=True
                 )
 
@@ -490,8 +452,11 @@ def check_account():
         return False
 
     print(
-        f"✅ Sorare: "
-        f"{user.get('nickname') or user.get('slug')}",
+        "✅ Sorare: "
+        + str(
+            user.get("nickname")
+            or user.get("slug")
+        ),
         flush=True
     )
 
@@ -509,7 +474,7 @@ def check_account():
         "🔑 Solana private key: "
         + (
             "PRESENTE"
-            if SOLANA_KEY
+            if SOLANA
             else "NON DISPONIBILE"
         ),
         flush=True
@@ -587,6 +552,7 @@ def usd_to_eur(usd_cents):
         )
 
     except Exception:
+
         return None
 
 
@@ -621,7 +587,9 @@ def amount_to_eur(amounts):
         )
 
         if value > 0:
-            return usd_to_eur(value)
+            return usd_to_eur(
+                value
+            )
 
     except Exception:
         pass
@@ -672,6 +640,7 @@ def get_floor(card):
                     first: $first
                 ) {
                     nodes {
+
                         senderSide {
                             anyCards {
                                 assetId
@@ -742,18 +711,22 @@ def get_floor(card):
             if not same_season:
                 continue
 
-            if norm(
-                listed_player.get(
-                    "slug"
+            if (
+                norm(
+                    listed_player.get("slug")
                 )
-            ) != player_slug:
+                != player_slug
+            ):
                 continue
 
-            if norm(
-                listed.get(
-                    "rarityTyped"
+            if (
+                norm(
+                    listed.get(
+                        "rarityTyped"
+                    )
                 )
-            ) != rarity:
+                != rarity
+            ):
                 continue
 
             price = amount_to_eur(
@@ -834,275 +807,615 @@ def validate(card):
 
 
 # ============================================================
-# SOLANA SIGNER
+# SOLANA BASE58
+#
+# Nessuna dipendenza "bs58".
 # ============================================================
 
-def sign_authorizations(authorizations):
+SOLANA_ALPHABET = (
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+    "abcdefghijkmnopqrstuvwxyz"
+)
 
-    node = (
-        shutil_which("node")
-        or shutil_which("nodejs")
-    )
 
-    if not node:
-        raise RuntimeError(
-            "Node.js non disponibile"
+def base58_decode(value):
+
+    value = str(value).strip()
+
+    if not value:
+        raise ValueError(
+            "Base58 vuoto"
         )
 
-    if not SOLANA_KEY:
+    number = 0
+
+    for char in value:
+
+        index = SOLANA_ALPHABET.find(
+            char
+        )
+
+        if index < 0:
+            raise ValueError(
+                f"Carattere Base58 non valido: {char}"
+            )
+
+        number = (
+            number * 58
+        ) + index
+
+    raw = (
+        number.to_bytes(
+            max(
+                1,
+                (
+                    number.bit_length()
+                    + 7
+                ) // 8
+            ),
+            "big"
+        )
+    )
+
+    leading_zeroes = 0
+
+    for char in value:
+
+        if char != "1":
+            break
+
+        leading_zeroes += 1
+
+    return (
+        b"\x00" * leading_zeroes
+    ) + raw.lstrip(b"\x00")
+
+
+def base58_encode(data):
+
+    if not data:
+        return ""
+
+    number = int.from_bytes(
+        bytes(data),
+        "big"
+    )
+
+    chars = []
+
+    while number > 0:
+
+        number, remainder = divmod(
+            number,
+            58
+        )
+
+        chars.append(
+            SOLANA_ALPHABET[
+                remainder
+            ]
+        )
+
+    leading_zeroes = 0
+
+    for byte in bytes(data):
+
+        if byte != 0:
+            break
+
+        leading_zeroes += 1
+
+    return (
+        "1" * leading_zeroes
+        + "".join(
+            reversed(chars)
+        )
+    )
+
+
+# ============================================================
+# SOLANA KEY NORMALIZATION
+# ============================================================
+
+def solana_key_info():
+
+    if not SOLANA:
+
         raise RuntimeError(
             "SORARE_SOLANA_PRIVATE_KEY mancante"
         )
 
+    value = SOLANA.strip()
+
+    # --------------------------------------------------------
+    # Base58
+    # --------------------------------------------------------
+
+    try:
+
+        decoded = base58_decode(
+            value
+        )
+
+        if len(decoded) in {
+            32,
+            64
+        }:
+
+            return {
+                "format": "base58",
+                "bytes": decoded
+            }
+
+    except Exception:
+        pass
+
+    # --------------------------------------------------------
+    # HEX
+    # --------------------------------------------------------
+
+    hex_value = value
+
+    if hex_value.startswith(
+        "0x"
+    ):
+        hex_value = hex_value[2:]
+
+    if (
+        len(hex_value) % 2 == 0
+        and all(
+            c in "0123456789abcdefABCDEF"
+            for c in hex_value
+        )
+    ):
+
+        decoded = bytes.fromhex(
+            hex_value
+        )
+
+        if len(decoded) in {
+            32,
+            64
+        }:
+
+            return {
+                "format": "hex",
+                "bytes": decoded
+            }
+
+    raise RuntimeError(
+        "SORARE_SOLANA_PRIVATE_KEY "
+        "non valida. Atteso Base58 "
+        "da 32/64 byte oppure HEX "
+        "da 32/64 byte."
+    )
+
+
+# ============================================================
+# SIGN AUTHORIZATIONS
+# ============================================================
+
+def sign_authorizations(
+    authorizations
+):
+
+    node = (
+        shutil.which("node")
+        or shutil.which("nodejs")
+    )
+
+    if not node:
+
+        raise RuntimeError(
+            "Node.js non disponibile"
+        )
+
+    if not STARK and any(
+        (
+            a.get("request") or {}
+        ).get("__typename")
+        not in {
+            "SolanaTokenTransferAuthorizationRequest"
+        }
+        for a in authorizations
+    ):
+
+        raise RuntimeError(
+            "SORARE_STARK_PRIVATE_KEY "
+            "mancante per authorization Stark/Mangopay"
+        )
+
+    if not SOLANA and any(
+        (
+            a.get("request") or {}
+        ).get("__typename")
+        == "SolanaTokenTransferAuthorizationRequest"
+        for a in authorizations
+    ):
+
+        raise RuntimeError(
+            "SORARE_SOLANA_PRIVATE_KEY "
+            "mancante"
+        )
+
     js = r'''
-const fs = require("fs");
 const crypto = require("crypto");
 
-const bs58 = require("bs58");
-const nacl = require("tweetnacl");
+const {
+    signAuthorizationRequest
+} = require("@sorare/crypto");
+
+const {
+    createSignableMessage,
+    getBase58Decoder,
+    createKeyPairFromPrivateKeyBytes,
+    createSignerFromKeyPair
+} = require("@solana/kit");
+
+const {
+    HDKey
+} = require("micro-key-producer/slip10.js");
+
 
 const input = JSON.parse(
-    fs.readFileSync(0, "utf8")
+    require("fs").readFileSync(
+        0,
+        "utf8"
+    )
 );
 
 
-function decodeBase58(value) {
+// ==========================================================
+// BASE58 — implementazione interna
+// ==========================================================
 
-    const result = bs58.decode(value);
+const ALPHABET =
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZ" +
+    "abcdefghijkmnopqrstuvwxyz";
 
-    return Buffer.from(result);
-}
 
+function base58Decode(value) {
 
-function decodePrivateKey(value) {
+    let num = 0n;
 
-    let key = String(value || "").trim();
+    for (const char of value) {
 
-    /*
-     * --------------------------------------------------------
-     * JSON ARRAY
-     * --------------------------------------------------------
-     */
+        const index =
+            ALPHABET.indexOf(char);
 
-    if (
-        key.startsWith("[") &&
-        key.endsWith("]")
-    ) {
-
-        let parsed;
-
-        try {
-            parsed = JSON.parse(key);
-        } catch (e) {
+        if (index < 0) {
             throw new Error(
-                "SORARE_SOLANA_PRIVATE_KEY: JSON non valido"
+                "Carattere Base58 non valido: "
+                + char
             );
         }
 
-        if (
-            !Array.isArray(parsed) ||
-            parsed.some(
-                x =>
-                    !Number.isInteger(x) ||
-                    x < 0 ||
-                    x > 255
-            )
-        ) {
-            throw new Error(
-                "SORARE_SOLANA_PRIVATE_KEY: array non valido"
-            );
-        }
-
-        return Buffer.from(parsed);
+        num =
+            num * 58n
+            + BigInt(index);
     }
 
+    let hex =
+        num.toString(16);
 
-    /*
-     * --------------------------------------------------------
-     * HEX
-     * --------------------------------------------------------
-     */
+    if (hex.length % 2) {
+        hex = "0" + hex;
+    }
 
-    const hex = key.replace(/^0x/i, "");
+    let bytes =
+        hex === ""
+            ? Buffer.alloc(0)
+            : Buffer.from(
+                hex,
+                "hex"
+            );
 
-    if (
-        hex.length > 0 &&
-        hex.length % 2 === 0 &&
-        /^[0-9a-f]+$/i.test(hex)
+    let zeros = 0;
+
+    for (
+        const char of value
     ) {
 
-        return Buffer.from(
-            hex,
-            "hex"
-        );
+        if (char !== "1") {
+            break;
+        }
+
+        zeros++;
     }
 
+    if (zeros > 0) {
 
-    /*
-     * --------------------------------------------------------
-     * BASE58
-     * --------------------------------------------------------
-     */
-
-    try {
-
-        return decodeBase58(key);
-
-    } catch (e) {
-
-        throw new Error(
-            "SORARE_SOLANA_PRIVATE_KEY: " +
-            "formato non riconosciuto"
-        );
-    }
-}
-
-
-function makeKeyPair(raw) {
-
-    /*
-     * Solana secret key standard:
-     * 64 bytes = seed/private 32 + public 32
-     */
-
-    if (raw.length === 64) {
-
-        const seed = raw.subarray(
-            0,
-            32
-        );
-
-        return nacl.sign.keyPair.fromSeed(
-            new Uint8Array(seed)
-        );
+        bytes = Buffer.concat([
+            Buffer.alloc(zeros),
+            bytes
+        ]);
     }
 
-
-    /*
-     * Seed Ed25519 puro
-     */
-
-    if (raw.length === 32) {
-
-        return nacl.sign.keyPair.fromSeed(
-            new Uint8Array(raw)
-        );
-    }
-
-
-    throw new Error(
-        "La Solana key decodificata contiene " +
-        raw.length +
-        " byte. Attesi 32 o 64 byte."
+    return new Uint8Array(
+        bytes
     );
 }
 
 
 function base58Encode(bytes) {
 
-    return bs58.encode(
-        Buffer.from(bytes)
+    const data =
+        Buffer.from(bytes);
+
+    let num = 0n;
+
+    for (const byte of data) {
+
+        num =
+            num * 256n
+            + BigInt(byte);
+    }
+
+    let result = "";
+
+    while (num > 0n) {
+
+        const remainder =
+            Number(num % 58n);
+
+        result =
+            ALPHABET[remainder]
+            + result;
+
+        num =
+            num / 58n;
+    }
+
+    let zeros = 0;
+
+    for (
+        const byte of data
+    ) {
+
+        if (byte !== 0) {
+            break;
+        }
+
+        zeros++;
+    }
+
+    return (
+        "1".repeat(zeros)
+        + result
     );
 }
 
 
-function signSolana(auth) {
+// ==========================================================
+// KEY PARSING
+// ==========================================================
 
-    const req = auth.request;
+function parsePrivateKey(value) {
 
-    const raw = decodePrivateKey(
-        input.privateKey
+    const clean =
+        String(value || "")
+            .trim();
+
+    // Base58
+    try {
+
+        const decoded =
+            base58Decode(clean);
+
+        if (
+            decoded.length === 32
+            || decoded.length === 64
+        ) {
+
+            return decoded;
+        }
+
+    } catch (_) {
+        // prova HEX
+    }
+
+    // HEX
+    let hex = clean;
+
+    if (
+        hex.startsWith("0x")
+    ) {
+        hex = hex.slice(2);
+    }
+
+    if (
+        /^[0-9a-fA-F]+$/.test(hex)
+        && hex.length % 2 === 0
+    ) {
+
+        const decoded =
+            new Uint8Array(
+                Buffer.from(
+                    hex,
+                    "hex"
+                )
+            );
+
+        if (
+            decoded.length === 32
+            || decoded.length === 64
+        ) {
+
+            return decoded;
+        }
+    }
+
+    throw new Error(
+        "Chiave Solana non riconosciuta. " +
+        "Atteso Base58/HEX da 32 o 64 byte."
     );
+}
 
-    const keyPair = makeKeyPair(raw);
 
-    const derivedAddress =
-        base58Encode(
-            keyPair.publicKey
+// ==========================================================
+// SOLANA SIGNER
+// ==========================================================
+
+async function createSolanaSigner(
+    privateKey
+) {
+
+    let keyBytes =
+        parsePrivateKey(
+            privateKey
         );
 
-
     /*
-     * --------------------------------------------------------
-     * SAFETY CHECK
-     * --------------------------------------------------------
+     * Solana JSON keypair:
+     *
+     * 64 byte =
+     *   first 32  -> secret seed
+     *   last 32   -> public key
+     *
+     * @solana/kit vuole i 32 byte
+     * della private key seed.
      */
 
     if (
-        derivedAddress !==
-        req.senderAddress
+        keyBytes.length === 64
+    ) {
+
+        keyBytes =
+            keyBytes.slice(
+                0,
+                32
+            );
+    }
+
+    if (
+        keyBytes.length !== 32
     ) {
 
         throw new Error(
-            "Solana senderAddress non corrisponde " +
-            "alla SORARE_SOLANA_PRIVATE_KEY. " +
+            "Private key Solana: "
+            + keyBytes.length
+            + " byte, attesi 32 o 64."
+        );
+    }
+
+    const keyPair =
+        await createKeyPairFromPrivateKeyBytes(
+            keyBytes
+        );
+
+    return createSignerFromKeyPair(
+        keyPair
+    );
+}
+
+
+// ==========================================================
+// SOLANA AUTHORIZATION
+// ==========================================================
+
+async function signSolana(
+    auth
+) {
+
+    const req =
+        auth.request;
+
+    const signer =
+        await createSolanaSigner(
+            input.solanaPrivateKey
+        );
+
+    console.error(
+        "🔑 Solana signer → "
+        + signer.address
+    );
+
+    console.error(
+        "🎯 senderAddress → "
+        + req.senderAddress
+    );
+
+    if (
+        signer.address
+        !== req.senderAddress
+    ) {
+
+        throw new Error(
+            "La Solana private key NON " +
+            "corrisponde al senderAddress " +
+            "della authorization. " +
             "Derivato=" +
-            derivedAddress +
+            signer.address +
             " richiesto=" +
             req.senderAddress
         );
     }
 
-
     /*
-     * --------------------------------------------------------
-     * SORARE MESSAGE
-     * --------------------------------------------------------
-     *
-     * NON aggiungere assetId.
-     * NON aggiungere senderAddress.
+     * QUESTO È IL MESSAGGIO UFFICIALE
+     * PER SOLANATOKEN TRANSFER.
      */
 
     const message = [
         "TRANSFER",
         req.transferProxyProgramAddress,
         req.merkleTreeAddress,
-        String(req.leafIndex),
-        String(req.nonce),
-        String(req.expirationTimestamp),
+        req.leafIndex.toString(),
+        req.nonce,
+        req.expirationTimestamp.toString(),
         req.receiverAddress,
         "0x",
         req.originator
     ].join(":");
 
+    console.error(
+        "📝 Solana message costruito"
+    );
 
-    /*
-     * SHA-256
-     */
-
-    const hash = crypto
-        .createHash("sha256")
-        .update(
-            Buffer.from(
-                message,
-                "utf8"
-            )
-        )
-        .digest();
-
-
-    /*
-     * Ed25519
-     */
-
-    const signature =
-        nacl.sign.detached(
-            new Uint8Array(hash),
-            keyPair.secretKey
+    const messageBytes =
+        Buffer.from(
+            message,
+            "utf8"
         );
 
-
     /*
-     * Sorare vuole la signature Base58
+     * Sorare richiede SHA-256
+     * del messaggio e firma Ed25519
+     * del digest.
      */
+
+    const hash =
+        crypto
+            .createHash("sha256")
+            .update(messageBytes)
+            .digest();
+
+    const signable =
+        createSignableMessage(
+            new Uint8Array(hash)
+        );
+
+    const signatures =
+        await signer.signMessages([
+            signable
+        ]);
+
+    const signatureBytes =
+        signatures[0][
+            signer.address
+        ];
+
+    const signature =
+        base58Encode(
+            signatureBytes
+        );
 
     return {
         fingerprint:
             auth.fingerprint,
 
         solanaTokenTransferApproval: {
-            signature:
-                base58Encode(signature),
+            signature,
 
             nonce:
                 req.nonce,
@@ -1114,18 +1427,16 @@ function signSolana(auth) {
 }
 
 
-function signStark(auth) {
+// ==========================================================
+// STARK / MANGOPAY
+// ==========================================================
 
-    /*
-     * Per le authorization Stark/Mangopay
-     * usiamo @sorare/crypto.
-     */
+function signStark(
+    auth
+) {
 
-    const {
-        signAuthorizationRequest
-    } = require("@sorare/crypto");
-
-    const req = auth.request;
+    const req =
+        auth.request;
 
     const signature =
         signAuthorizationRequest(
@@ -1133,9 +1444,9 @@ function signStark(auth) {
             req
         );
 
-
     if (
-        req.__typename ===
+        req.__typename
+        ===
         "StarkexTransferAuthorizationRequest"
     ) {
 
@@ -1155,9 +1466,9 @@ function signStark(auth) {
         };
     }
 
-
     if (
-        req.__typename ===
+        req.__typename
+        ===
         "StarkexLimitOrderAuthorizationRequest"
     ) {
 
@@ -1177,9 +1488,9 @@ function signStark(auth) {
         };
     }
 
-
     if (
-        req.__typename ===
+        req.__typename
+        ===
         "MangopayWalletTransferAuthorizationRequest"
     ) {
 
@@ -1196,64 +1507,77 @@ function signStark(auth) {
         };
     }
 
-
     throw new Error(
-        "Authorization non supportata: " +
-        req.__typename
+        "Authorization non supportata: "
+        + req.__typename
     );
 }
 
+
+// ==========================================================
+// MAIN
+// ==========================================================
 
 async function main() {
 
     const approvals = [];
 
-
     for (
-        const auth of input.authorizations
+        const auth
+        of input.authorizations
     ) {
 
         const type =
-            auth.request.__typename;
+            (
+                auth.request
+                || {}
+            ).__typename;
 
         console.error(
-            "🔐 Authorization → " +
-            type
+            "🔐 Authorization → "
+            + type
         );
 
-
         if (
-            type ===
+            type
+            ===
             "SolanaTokenTransferAuthorizationRequest"
         ) {
 
             approvals.push(
-                signSolana(auth)
+                await signSolana(
+                    auth
+                )
             );
 
         } else {
 
             approvals.push(
-                signStark(auth)
+                signStark(
+                    auth
+                )
             );
         }
     }
 
-
     process.stdout.write(
-        JSON.stringify(approvals)
+        JSON.stringify(
+            approvals
+        )
     );
 }
 
 
-main().catch(error => {
+main().catch(
+    error => {
 
-    console.error(
-        error.stack || error
-    );
+        console.error(
+            error.stack || error
+        );
 
-    process.exit(1);
-});
+        process.exit(1);
+    }
+);
 '''
 
     process = subprocess.run(
@@ -1264,10 +1588,9 @@ main().catch(error => {
         ],
 
         input=json.dumps({
-            "privateKey": SOLANA_KEY,
             "starkPrivateKey": STARK,
-            "authorizations":
-                authorizations
+            "solanaPrivateKey": SOLANA,
+            "authorizations": authorizations
         }),
 
         text=True,
@@ -1277,7 +1600,6 @@ main().catch(error => {
         timeout=TIMEOUT
     )
 
-
     if process.stderr:
 
         print(
@@ -1285,14 +1607,12 @@ main().catch(error => {
             flush=True
         )
 
-
     if process.returncode != 0:
 
         raise RuntimeError(
             process.stderr.strip()
             or "Firma fallita"
         )
-
 
     try:
 
@@ -1308,13 +1628,6 @@ main().catch(error => {
         )
 
 
-def shutil_which(name):
-
-    import shutil
-
-    return shutil.which(name)
-
-
 # ============================================================
 # PREPARE OFFER
 # ============================================================
@@ -1323,7 +1636,9 @@ PREPARE_QUERY = """
 mutation PrepareOffer(
     $input: prepareOfferInput!
 ) {
-    prepareOffer(input: $input) {
+    prepareOffer(
+        input: $input
+    ) {
 
         authorizations {
             fingerprint
@@ -1395,21 +1710,28 @@ mutation PrepareOffer(
 """
 
 
-def prepare_offer(asset, price):
+def prepare_sale(
+    asset,
+    price
+):
 
     # --------------------------------------------------------
-    # PRIMA PROVA
-    # Il tuo endpoint ha già dimostrato di rifiutare "type".
-    # Quindi la variante compatibile è quella senza type.
+    # Prima versione:
+    # alcune versioni dello schema non espongono "type".
     # --------------------------------------------------------
 
-    input_without_type = {
+    input_with_type = {
+        "type": "SINGLE_SALE_OFFER",
 
         "sendAssetIds": [
             asset
         ],
 
         "receiveAssetIds": [],
+
+        "settlementCurrencies": [
+            "EUR"
+        ],
 
         "receiveAmount": {
             "amount": str(price),
@@ -1419,71 +1741,129 @@ def prepare_offer(asset, price):
         "clientMutationId": new_id()
     }
 
-
     data = gql(
         PREPARE_QUERY,
         {
-            "input":
-                input_without_type
+            "input": input_with_type
         }
     )
-
 
     result = (
         ((data or {}).get("data") or {})
         .get("prepareOffer")
     )
 
+    # --------------------------------------------------------
+    # Se lo schema rifiuta "type", retry SENZA type.
+    # --------------------------------------------------------
 
-    if result:
+    if result is None:
 
-        errors = (
-            result.get("errors")
-            or []
+        print(
+            "🔁 prepareOffer: "
+            "schema senza campo 'type' → "
+            "retry compatibile",
+            flush=True
         )
 
-        authorizations = (
-            result.get("authorizations")
-            or []
+        input_without_type = {
+            "sendAssetIds": [
+                asset
+            ],
+
+            "receiveAssetIds": [],
+
+            "settlementCurrencies": [
+                "EUR"
+            ],
+
+            "receiveAmount": {
+                "amount": str(price),
+                "currency": "EUR"
+            },
+
+            "clientMutationId": new_id()
+        }
+
+        data = gql(
+            PREPARE_QUERY,
+            {
+                "input": input_without_type
+            }
         )
 
-        if authorizations:
+        result = (
+            ((data or {}).get("data") or {})
+            .get("prepareOffer")
+        )
 
-            print(
-                f"✅ Authorization ricevute: "
-                f"{len(authorizations)}",
-                flush=True
-            )
+    if not result:
 
-            return authorizations
+        print(
+            "❌ prepareOffer: "
+            "nessun risultato",
+            flush=True
+        )
 
+        return None
 
-        if errors:
+    errors = (
+        result.get("errors")
+        or []
+    )
 
-            print(
-                "❌ prepareOffer:",
-                json.dumps(
-                    errors,
-                    ensure_ascii=False
-                ),
-                flush=True
-            )
+    if errors:
 
+        print(
+            "❌ prepareOffer:",
+            json.dumps(
+                errors,
+                ensure_ascii=False
+            ),
+            flush=True
+        )
 
-    return None
+        return None
+
+    authorizations = (
+        result.get(
+            "authorizations"
+        )
+        or []
+    )
+
+    if not authorizations:
+
+        print(
+            "❌ prepareOffer: "
+            "nessuna authorization",
+            flush=True
+        )
+
+        return None
+
+    print(
+        f"✅ Authorization ricevute: "
+        f"{len(authorizations)}",
+        flush=True
+    )
+
+    return authorizations
 
 
 # ============================================================
 # CREATE SALE
 # ============================================================
 
-def create_sale(card, price):
+def create_sale(
+    card,
+    price
+):
 
     asset = asset_id(card)
 
     if not asset:
         return None
-
 
     if DRY_RUN:
 
@@ -1496,27 +1876,17 @@ def create_sale(card, price):
 
         return "DRY-RUN"
 
-
     # --------------------------------------------------------
     # PREPARE
     # --------------------------------------------------------
 
-    authorizations = prepare_offer(
+    authorizations = prepare_sale(
         asset,
         price
     )
 
-
     if not authorizations:
-
-        print(
-            "❌ prepareOffer: "
-            "nessun risultato",
-            flush=True
-        )
-
         return None
-
 
     # --------------------------------------------------------
     # SIGN
@@ -1536,7 +1906,6 @@ def create_sale(card, price):
         )
 
         return None
-
 
     # --------------------------------------------------------
     # CREATE
@@ -1563,45 +1932,32 @@ def create_sale(card, price):
         }
     """
 
-
     create_input = {
+        "approvals": approvals,
 
-        "approvals":
-            approvals,
+        "dealId": new_id(),
 
-        "dealId":
-            new_id(),
-
-        "assetId":
-            asset,
+        "assetId": asset,
 
         "receiveAmount": {
-            "amount":
-                str(price),
-
-            "currency":
-                "EUR"
+            "amount": str(price),
+            "currency": "EUR"
         },
 
-        "clientMutationId":
-            new_id()
+        "clientMutationId": new_id()
     }
-
 
     data = gql(
         create_query,
         {
-            "input":
-                create_input
+            "input": create_input
         }
     )
-
 
     result = (
         ((data or {}).get("data") or {})
         .get("createSingleSaleOffer")
     )
-
 
     if not result:
 
@@ -1613,12 +1969,10 @@ def create_sale(card, price):
 
         return None
 
-
     errors = (
         result.get("errors")
         or []
     )
-
 
     if errors:
 
@@ -1633,14 +1987,16 @@ def create_sale(card, price):
 
         return None
 
-
     offer = (
-        result.get("tokenOffer")
+        result.get(
+            "tokenOffer"
+        )
         or {}
     )
 
-    offer_id = offer.get("id")
-
+    offer_id = offer.get(
+        "id"
+    )
 
     if not offer_id:
 
@@ -1651,7 +2007,6 @@ def create_sale(card, price):
         )
 
         return None
-
 
     print(
         f"✅ INSERZIONE CREATA → "
@@ -1676,11 +2031,9 @@ def process(card):
         flush=True
     )
 
-
     details = card_details(
         asset
     )
-
 
     if not details:
 
@@ -1697,7 +2050,6 @@ def process(card):
 
         return
 
-
     print(
         f"🃏 "
         f"{details.get('name') or details.get('slug')} "
@@ -1706,16 +2058,13 @@ def process(card):
         flush=True
     )
 
-
     ok, result = validate(
         details
     )
 
-
     if not ok:
 
         messages = {
-
             "KULENOVIC":
                 "KULENOVIC PROTETTO",
 
@@ -1732,13 +2081,11 @@ def process(card):
                 "FLOOR SOPRA €0.70"
         }
 
-
         print(
             f"🚫 ESCLUSA → "
             f"{messages.get(result, result)}",
             flush=True
         )
-
 
         if result in {
             "KULENOVIC",
@@ -1761,16 +2108,13 @@ def process(card):
 
         return
 
-
     price = result
-
 
     print(
         f"✅ CARTA VALIDA → "
         f"floor {eur(price)}",
         flush=True
     )
-
 
     # --------------------------------------------------------
     # LOCK
@@ -1789,16 +2133,14 @@ def process(card):
 
         return
 
-
     # --------------------------------------------------------
-    # CREATE SALE
+    # CREATE
     # --------------------------------------------------------
 
     offer_id = create_sale(
         details,
         price
     )
-
 
     if not offer_id:
 
@@ -1815,7 +2157,6 @@ def process(card):
 
         return
 
-
     # --------------------------------------------------------
     # SUCCESS
     # --------------------------------------------------------
@@ -1826,7 +2167,6 @@ def process(card):
         offer_id=offer_id,
         error=None
     )
-
 
     print(
         f"🎉 AUTOSELL COMPLETATO → "
@@ -1844,16 +2184,12 @@ def process(card):
 def recovery():
 
     selling = [
-
         card
-
         for card in get_cards()
-
         if norm(
             card.get("status")
         ) == "selling"
     ]
-
 
     if not selling:
 
@@ -1865,18 +2201,16 @@ def recovery():
 
         return
 
-
     print(
         f"🔄 Recovery: "
         f"{len(selling)} carte SELLING",
         flush=True
     )
 
-
     for card in selling:
 
         print(
-            f"   └─ "
+            "   └─ "
             f"{asset_id(card)} "
             f"| offer="
             f"{card.get('sale_offer_id')}",
@@ -1937,15 +2271,14 @@ def worker():
     )
 
     print(
-        f"💾 STORAGE: {STATE_FILE}",
+        f"💾 STORAGE: "
+        f"{STATE_FILE}",
         flush=True
     )
-
 
     try:
 
         auth_headers()
-
         ensure_state()
 
     except Exception as e:
@@ -1957,13 +2290,10 @@ def worker():
 
         return
 
-
     if not check_account():
         return
 
-
     recovery()
-
 
     while True:
 
@@ -1971,19 +2301,19 @@ def worker():
 
             cards = sellable_cards()
 
-
             print(
                 f"🗄️ Carte DA VENDERE: "
                 f"{len(cards)}",
                 flush=True
             )
 
-
             for card in cards:
 
                 try:
 
-                    process(card)
+                    process(
+                        card
+                    )
 
                 except Exception as e:
 
@@ -1997,7 +2327,6 @@ def worker():
                         flush=True
                     )
 
-
                     if asset:
 
                         update_card(
@@ -2006,11 +2335,9 @@ def worker():
                             error=str(e)
                         )
 
-
             time.sleep(
                 INTERVAL
             )
-
 
         except Exception as e:
 
@@ -2033,32 +2360,24 @@ def home():
 
     cards = get_cards()
 
-
     return jsonify({
 
-        "status":
-            "online",
+        "status": "online",
 
-        "bot":
-            "autosell",
+        "bot": "autosell",
 
-        "version":
-            VERSION,
+        "version": VERSION,
 
-        "dry_run":
-            DRY_RUN,
+        "dry_run": DRY_RUN,
 
-        "range":
-            "€0.32-€0.70",
+        "range": "€0.32-€0.70",
 
         "min_live_listings":
             MIN_LISTINGS,
 
-        "rarity":
-            "LIMITED",
+        "rarity": "LIMITED",
 
-        "age":
-            "NOT_USED",
+        "age": "NOT_USED",
 
         "kulenovic":
             "NEVER_SELL",
@@ -2091,7 +2410,8 @@ def home():
                 for c in cards
                 if norm(
                     c.get("status")
-                ) == "selling"
+                )
+                == "selling"
             ),
 
         "worker":
@@ -2103,21 +2423,11 @@ def home():
 def health():
 
     return jsonify({
-
-        "status":
-            "ok",
-
-        "bot":
-            "autosell",
-
-        "version":
-            VERSION,
-
-        "worker":
-            worker_started,
-
-        "dry_run":
-            DRY_RUN
+        "status": "ok",
+        "bot": "autosell",
+        "version": VERSION,
+        "worker": worker_started,
+        "dry_run": DRY_RUN
     })
 
 
@@ -2126,14 +2436,9 @@ def cards_endpoint():
 
     cards = get_cards()
 
-
     return jsonify({
-
-        "count":
-            len(cards),
-
-        "cards":
-            cards
+        "count": len(cards),
+        "cards": cards
     })
 
 
@@ -2145,26 +2450,18 @@ def start_worker():
 
     global worker_started
 
-
     with worker_lock:
 
         if worker_started:
             return
 
-
         worker_started = True
 
-
         threading.Thread(
-
             target=worker,
-
             daemon=True,
-
             name="autosell-worker"
-
         ).start()
-
 
         print(
             "✅ Thread AutoSell avviato.",
@@ -2176,17 +2473,13 @@ if __name__ == "__main__":
 
     start_worker()
 
-
     app.run(
-
         host="0.0.0.0",
-
         port=int(
             os.getenv(
                 "PORT",
                 "10000"
             )
         ),
-
         debug=False
     )
