@@ -1,17 +1,19 @@
-[
-  {
-    "asset_id": "0x040024ccafaba33cf3efd569374c35b9bd84cf7a85e09f7e64e6da454e2a1149",
-    "assetId": "0x040024ccafaba33cf3efd569374c35b9bd84cf7a85e09f7e64e6da454e2a1149",
-    "slug": "tevis-gabriel-alves-santos-2026-limited-74-1",
-    "name": "Tevis",
-    "source": "AUTOBUY",
-    "status": "READY",
-    "purchase_price_cents": 20,
-    "autobuy_offer_id": "directoffer:1c5f07e1-af4e-4aed-9d8b-e46c66eff801",
-    "created_at": "2026-09-09T00:00:00Z",
-    "sold_at": null,
-    "selling_at": null,
-    "sale_offer_id": null,
-    "last_error": null
-  }
-]
+{
+  "cards": [
+    {
+      "asset_id": "0x040024ccafaba33cf3efd569374c35b9bd84cf7a85e09f7e64e6da454e2a1149",
+      "assetId": "0x040024ccafaba33cf3efd569374c35b9bd84cf7a85e09f7e64e6da454e2a1149",
+      "slug": "tevis-gabriel-alves-santos-2026-limited-74-1",
+      "name": "Tevis",
+      "source": "AUTOBUY",
+      "status": "READY",
+      "purchase_price_cents": 20,
+      "autobuy_offer_id": "directoffer:1c5f07e1-af4e-4aed-9d8b-e46c66eff801",
+      "created_at": "2026-09-09T00:00:00Z",
+      "sold_at": null,
+      "selling_at": null,
+      "sale_offer_id": null,
+      "last_error": null
+    }
+  ]
+}
