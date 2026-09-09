@@ -1283,7 +1283,6 @@ def counter_offer(offer, cards):
             "currency": "EUR"
         },
         "receiverSlug": receiver,
-        "settlementCurrencies": ["EUR"],
         "clientMutationId": str(uuid.uuid4())
     }
 
