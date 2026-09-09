@@ -1,5 +1,6 @@
 {
   "processed_offers": [
+    "directoffer:02ab791f-489e-4a24-8ea5-80baf24ca325",
     "directoffer:1c5f07e1-af4e-4aed-9d8b-e46c66eff801",
     "directoffer:2d1143f0-96c7-4521-9879-c04e50142dd4",
     "directoffer:54d36f5a-0972-47a4-a18b-1497aa0d4d64",
@@ -7,5 +8,6 @@
     "directoffer:9b9ac6e8-9d73-46bd-b5b6-5b4743925fde",
     "directoffer:d2ae0de7-64d1-41eb-bf90-c1e015623aae"
   ],
-  "updated_at": 1788963318
+  "acquired_cards": [],
+  "updated_at": 1788964501
 }
