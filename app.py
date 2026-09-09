@@ -118,11 +118,21 @@ def format_eur(cents):
 
 
 # ============================================================
-# PERSISTENT STATE - GITHUB
+# PERSISTENT STATE - LOCALE + GITHUB
 # ============================================================
 
 def load_local_state():
+    """
+    Legge bot_state.json locale.
+
+    Se il file non esiste o è corrotto, restituisce set().
+    """
+
     if not os.path.exists(STATE_FILE):
+        print(
+            f"ℹ️ {STATE_FILE} locale non presente",
+            flush=True
+        )
         return set()
 
     try:
@@ -138,13 +148,26 @@ def load_local_state():
         ) or []
 
         if not isinstance(ids, list):
+            print(
+                f"⚠️ {STATE_FILE}: "
+                "processed_offers non è una lista",
+                flush=True
+            )
             return set()
 
-        return {
+        result = {
             norm(x)
             for x in ids
-            if x
+            if norm(x)
         }
+
+        print(
+            f"💾 Stato locale caricato: "
+            f"{len(result)} offerte",
+            flush=True
+        )
+
+        return result
 
     except Exception as e:
         print(
@@ -155,6 +178,13 @@ def load_local_state():
 
 
 def save_local_state():
+    """
+    Salvataggio atomico di bot_state.json.
+
+    Prima scrive un file temporaneo e poi sostituisce
+    quello principale, evitando file JSON parziali/corrotti.
+    """
+
     with state_lock:
         data = {
             "processed_offers": sorted(processed),
@@ -175,6 +205,8 @@ def save_local_state():
                 indent=2,
                 ensure_ascii=False
             )
+            f.flush()
+            os.fsync(f.fileno())
 
         os.replace(
             tmp,
@@ -188,6 +220,13 @@ def save_local_state():
             f"❌ Salvataggio {STATE_FILE}: {e}",
             flush=True
         )
+
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+
         return False
 
 
@@ -215,6 +254,12 @@ def github_state_url():
 
 
 def load_github_state():
+    """
+    Carica bot_state.json direttamente dal branch GitHub.
+
+    GitHub viene usato come persistenza remota.
+    """
+
     if not GITHUB_TOKEN:
         print(
             "⚠️ GITHUB_TOKEN non configurato → "
@@ -251,10 +296,18 @@ def load_github_state():
             return set()
 
         data = r.json()
+
         content = data.get(
             "content",
             ""
         )
+
+        if not content:
+            print(
+                "⚠️ GitHub state vuoto",
+                flush=True
+            )
+            return set()
 
         import base64
 
@@ -268,17 +321,27 @@ def load_github_state():
             "processed_offers"
         ) or []
 
+        if not isinstance(ids, list):
+            print(
+                "⚠️ GitHub state non valido: "
+                "processed_offers non è una lista",
+                flush=True
+            )
+            return set()
+
+        result = {
+            norm(x)
+            for x in ids
+            if norm(x)
+        }
+
         print(
             f"💾 Stato GitHub caricato: "
-            f"{len(ids)} offerte",
+            f"{len(result)} offerte",
             flush=True
         )
 
-        return {
-            norm(x)
-            for x in ids
-            if x
-        }
+        return result
 
     except Exception as e:
         print(
@@ -289,111 +352,260 @@ def load_github_state():
 
 
 def save_github_state():
+    """
+    Salva lo stato corrente su GitHub.
+
+    Prima legge il file remoto e unisce gli ID già presenti
+    con quelli locali, così un salvataggio non cancella
+    offerte precedentemente registrate.
+
+    Gestisce anche eventuali conflitti SHA (HTTP 409)
+    rileggendo lo stato remoto e riprovando.
+    """
+
     if not GITHUB_TOKEN:
         return False
 
     with github_lock:
-        try:
-            import base64
 
-            with state_lock:
-                state = {
-                    "processed_offers":
-                        sorted(processed),
-                    "updated_at":
-                        int(time.time())
+        for attempt in range(3):
+
+            try:
+                import base64
+
+                # ------------------------------------------------
+                # STATO LOCALE ATTUALE
+                # ------------------------------------------------
+
+                with state_lock:
+                    local_ids = set(processed)
+
+                # ------------------------------------------------
+                # LETTURA STATO REMOTO + SHA
+                # ------------------------------------------------
+
+                r = requests.get(
+                    github_state_url(),
+                    headers=github_headers(),
+                    params={
+                        "ref": GITHUB_BRANCH
+                    },
+                    timeout=TIMEOUT
+                )
+
+                remote_ids = set()
+                sha = None
+
+                if r.status_code == 200:
+                    remote_data = r.json()
+
+                    sha = remote_data.get("sha")
+
+                    content = (
+                        remote_data.get(
+                            "content",
+                            ""
+                        )
+                    )
+
+                    if content:
+                        try:
+                            decoded = base64.b64decode(
+                                content.replace("\n", "")
+                            ).decode("utf-8")
+
+                            remote_state = json.loads(
+                                decoded
+                            )
+
+                            remote_list = (
+                                remote_state.get(
+                                    "processed_offers"
+                                )
+                                or []
+                            )
+
+                            if isinstance(
+                                remote_list,
+                                list
+                            ):
+                                remote_ids = {
+                                    norm(x)
+                                    for x in remote_list
+                                    if norm(x)
+                                }
+
+                        except Exception as e:
+                            print(
+                                f"⚠️ Impossibile leggere "
+                                f"stato remoto: {e}",
+                                flush=True
+                            )
+
+                elif r.status_code == 404:
+                    print(
+                        "ℹ️ bot_state.json non esiste "
+                        "ancora su GitHub → verrà creato",
+                        flush=True
+                    )
+
+                else:
+                    print(
+                        f"⚠️ GitHub read HTTP "
+                        f"{r.status_code}: "
+                        f"{r.text[:500]}",
+                        flush=True
+                    )
+
+                # ------------------------------------------------
+                # MERGE SICURO
+                # ------------------------------------------------
+
+                merged = local_ids | remote_ids
+
+                raw = json.dumps(
+                    {
+                        "processed_offers":
+                            sorted(merged),
+                        "updated_at":
+                            int(time.time())
+                    },
+                    indent=2,
+                    ensure_ascii=False
+                )
+
+                encoded = base64.b64encode(
+                    raw.encode("utf-8")
+                ).decode("ascii")
+
+                payload = {
+                    "message": (
+                        "Update bot_state.json - "
+                        f"{int(time.time())}"
+                    ),
+                    "content": encoded,
+                    "branch": GITHUB_BRANCH
                 }
 
-            raw = json.dumps(
-                state,
-                indent=2,
-                ensure_ascii=False
-            )
+                if sha:
+                    payload["sha"] = sha
 
-            encoded = base64.b64encode(
-                raw.encode("utf-8")
-            ).decode("ascii")
+                # ------------------------------------------------
+                # WRITE GITHUB
+                # ------------------------------------------------
 
-            r = requests.get(
-                github_state_url(),
-                headers=github_headers(),
-                params={
-                    "ref": GITHUB_BRANCH
-                },
-                timeout=TIMEOUT
-            )
+                r = requests.put(
+                    github_state_url(),
+                    headers=github_headers(),
+                    json=payload,
+                    timeout=TIMEOUT
+                )
 
-            sha = None
+                if r.status_code in (
+                    200,
+                    201
+                ):
+                    # Mantiene anche lo stato locale
+                    # sincronizzato con il merge remoto.
+                    with state_lock:
+                        processed.update(merged)
 
-            if r.status_code == 200:
-                sha = r.json().get("sha")
+                    save_local_state()
 
-            payload = {
-                "message": (
-                    "Update bot_state.json - "
-                    f"{int(time.time())}"
-                ),
-                "content": encoded,
-                "branch": GITHUB_BRANCH
-            }
+                    print(
+                        f"💾 bot_state.json salvato "
+                        f"su GitHub: "
+                        f"{len(merged)} offerte",
+                        flush=True
+                    )
 
-            if sha:
-                payload["sha"] = sha
+                    return True
 
-            r = requests.put(
-                github_state_url(),
-                headers=github_headers(),
-                json=payload,
-                timeout=TIMEOUT
-            )
+                # ------------------------------------------------
+                # CONFLITTO SHA
+                # ------------------------------------------------
 
-            if r.status_code not in (
-                200,
-                201
-            ):
+                if r.status_code == 409:
+                    print(
+                        f"⚠️ Conflitto GitHub "
+                        f"(409), nuovo tentativo "
+                        f"{attempt + 1}/3",
+                        flush=True
+                    )
+
+                    time.sleep(
+                        1 + attempt
+                    )
+
+                    continue
+
                 print(
                     f"❌ GitHub save HTTP "
                     f"{r.status_code}: "
                     f"{r.text[:1000]}",
                     flush=True
                 )
+
                 return False
 
-            print(
-                "💾 bot_state.json salvato "
-                "su GitHub",
-                flush=True
-            )
+            except Exception as e:
+                print(
+                    f"❌ GitHub save state: {e}",
+                    flush=True
+                )
 
-            return True
+                if attempt < 2:
+                    time.sleep(
+                        1 + attempt
+                    )
+                    continue
 
-        except Exception as e:
-            print(
-                f"❌ GitHub save state: {e}",
-                flush=True
-            )
-            return False
+                return False
+
+        return False
 
 
 def load_state():
+    """
+    Carica lo stato sia locale sia GitHub.
+
+    Gli stati vengono uniti con OR/union:
+    un ID presente in uno dei due archivi viene considerato
+    già processato.
+
+    In questo modo un deploy/restart non perde lo storico.
+    """
+
     global processed
 
     local = load_local_state()
     remote = load_github_state()
 
-    with state_lock:
-        processed = local | remote
+    merged = local | remote
 
+    with state_lock:
+        processed = merged
+
+    # Riscrive il file locale con lo stato completo.
     save_local_state()
 
+    # Se GitHub è configurato, riallinea anche GitHub.
+    if GITHUB_TOKEN:
+        save_github_state()
+
     print(
-        f"💾 Stato iniziale: "
+        f"💾 Stato iniziale sincronizzato: "
         f"{len(processed)} offerte processate",
         flush=True
     )
 
 
 def mark_done(offer_id):
+    """
+    Marca un'offerta come processata e la persiste
+    immediatamente sia localmente sia su GitHub.
+    """
+
     offer_id = norm(offer_id)
 
     if not offer_id:
@@ -402,10 +614,26 @@ def mark_done(offer_id):
     with state_lock:
         processed.add(offer_id)
 
-    if not save_local_state():
-        return
+    # Prima persistenza locale.
+    local_ok = save_local_state()
 
-    save_github_state()
+    if not local_ok:
+        print(
+            "⚠️ Stato locale non salvato; "
+            "tento comunque il salvataggio GitHub",
+            flush=True
+        )
+
+    # Poi persistenza remota.
+    if GITHUB_TOKEN:
+        github_ok = save_github_state()
+
+        if not github_ok:
+            print(
+                "⚠️ Stato GitHub non salvato "
+                "in questo tentativo",
+                flush=True
+            )
 
 
 def should_process(offer_id):
