@@ -242,7 +242,6 @@ def save_github_state():
                 raw.encode("utf-8")
             ).decode("ascii")
 
-            # Recupera SHA attuale
             r = requests.get(
                 github_state_url(),
                 headers=github_headers(),
@@ -1275,7 +1274,12 @@ def counter_offer(offer, cards):
         )
         return True
 
-    inp = {
+    # --------------------------------------------------------
+    # PREPARE OFFER
+    # settlementCurrencies è valido per prepareOfferInput.
+    # --------------------------------------------------------
+
+    prepare_input = {
         "receiveAssetIds": ids,
         "sendAssetIds": [],
         "sendAmount": {
@@ -1283,6 +1287,7 @@ def counter_offer(offer, cards):
             "currency": "EUR"
         },
         "receiverSlug": receiver,
+        "settlementCurrencies": ["EUR"],
         "clientMutationId": str(uuid.uuid4())
     }
 
@@ -1346,7 +1351,7 @@ def counter_offer(offer, cards):
                 }
             }
         }
-    """, {"input": inp})
+    """, {"input": prepare_input})
 
     result = (
         ((data or {}).get("data") or {})
@@ -1388,9 +1393,24 @@ def counter_offer(offer, cards):
         )
         return False
 
-    create = dict(inp)
-    create["approvals"] = approvals
-    create["dealId"] = str(uuid.uuid4())
+    # --------------------------------------------------------
+    # CREATE DIRECT OFFER
+    # settlementCurrencies NON è valido per
+    # createDirectOfferInput.
+    # --------------------------------------------------------
+
+    create = {
+        "receiveAssetIds": ids,
+        "sendAssetIds": [],
+        "sendAmount": {
+            "amount": str(amount),
+            "currency": "EUR"
+        },
+        "receiverSlug": receiver,
+        "clientMutationId": str(uuid.uuid4()),
+        "approvals": approvals,
+        "dealId": str(uuid.uuid4())
+    }
 
     data = graphql("""
         mutation CreateDirectOffer(
@@ -2100,239 +2120,4 @@ def worker():
     )
 
     print(
-        f"💰 AutoBuy: "
-        f"€{PAY_PER_CARD / 100:.2f}/carta",
-        flush=True
-    )
-
-    print(
-        f"📊 AutoBuy floor: "
-        f"€{MIN_PRICE / 100:.2f} - "
-        f"€{MAX_PRICE / 100:.2f}",
-        flush=True
-    )
-
-    print(
-        f"🎂 Età: < {MAX_AGE}",
-        flush=True
-    )
-
-    print(
-        f"📊 Inserzioni minime: "
-        f"{MIN_LIVE_LISTINGS}",
-        flush=True
-    )
-
-    print(
-        "🔄 SWAP: +20% / +25%",
-        flush=True
-    )
-
-    print(
-        "💶 SWAP CASH: "
-        "solo cash già offerto",
-        flush=True
-    )
-
-    print(
-        "🚫 SWAP NON aggiunge cash",
-        flush=True
-    )
-
-    print(
-        "🔒 KULENOVIC: MAI CEDIBILE",
-        flush=True
-    )
-
-    print(
-        "🎯 KULENOVIC RICHIESTO → "
-        "SEMPRE AUTOBUY",
-        flush=True
-    )
-
-    print(
-        "💾 STATE: bot_state.json + GitHub",
-        flush=True
-    )
-
-    load_state()
-
-    coverage = load_coverage(
-        force=True
-    )
-
-    if not coverage:
-        print(
-            "❌ Coverage non disponibile → "
-            "bot fermato",
-            flush=True
-        )
-        return
-
-    print(
-        f"🏆 Competizioni Football coperte: "
-        f"{len(coverage)}",
-        flush=True
-    )
-
-    if not check_account():
-        return
-
-    while True:
-        try:
-            offers = get_offers()
-
-            print(
-                f"📨 Offerte pendenti lette da Sorare: "
-                f"{len(offers)}",
-                flush=True
-            )
-
-            for offer in offers:
-                try:
-                    process_offer(offer)
-                except Exception as e:
-                    print(
-                        f"❌ Errore offerta: {e}",
-                        flush=True
-                    )
-
-            time.sleep(INTERVAL)
-
-        except Exception as e:
-            print(
-                f"❌ Worker: {e}",
-                flush=True
-            )
-            time.sleep(INTERVAL)
-
-
-def start_worker():
-    global worker_started
-
-    with worker_lock:
-        if worker_started:
-            return
-
-        worker_started = True
-
-        threading.Thread(
-            target=worker,
-            name="sorare-worker",
-            daemon=True
-        ).start()
-
-        print(
-            "✅ Thread Sorare avviato.",
-            flush=True
-        )
-
-
-# ============================================================
-# FLASK
-# ============================================================
-
-@app.get("/")
-def home():
-    with coverage_lock:
-        covered = set(
-            coverage_cache
-        )
-
-    with state_lock:
-        processed_count = len(processed)
-
-    return jsonify({
-        "status": "online",
-        "bot": "sorare",
-        "version": BOT_VERSION,
-        "dry_run": DRY_RUN,
-        "swap_auto_accept": SWAP_AUTO_ACCEPT,
-
-        "pay_per_card_cents":
-            PAY_PER_CARD,
-
-        "min_price_cents":
-            MIN_PRICE,
-
-        "max_price_cents":
-            MAX_PRICE,
-
-        "max_age":
-            MAX_AGE,
-
-        "min_live_listings":
-            MIN_LIVE_LISTINGS,
-
-        "swap_min_multiplier":
-            SWAP_MIN,
-
-        "swap_max_multiplier":
-            SWAP_MAX,
-
-        "kulenovic":
-            "NEVER_CEDIBLE",
-
-        "kulenovic_requested":
-            "ALWAYS_AUTOBUY",
-
-        "processed_offers":
-            processed_count,
-
-        "state_file":
-            STATE_FILE,
-
-        "github_state":
-            bool(GITHUB_TOKEN),
-
-        "covered_competitions_count":
-            len(covered),
-
-        "coverage_source":
-            COVERAGE_URL
-    })
-
-
-@app.get("/health")
-def health():
-    with coverage_lock:
-        loaded = bool(
-            coverage_cache
-        )
-
-    with state_lock:
-        processed_count = len(processed)
-
-    return jsonify({
-        "status": "ok",
-        "bot": "running",
-        "version": BOT_VERSION,
-        "worker_started":
-            worker_started,
-        "coverage_loaded":
-            loaded,
-        "processed_offers":
-            processed_count,
-        "dry_run":
-            DRY_RUN,
-        "swap_auto_accept":
-            SWAP_AUTO_ACCEPT
-    })
-
-
-# ============================================================
-# START
-# ============================================================
-
-if __name__ == "__main__":
-    start_worker()
-
-    app.run(
-        host="0.0.0.0",
-        port=int(
-            os.getenv(
-                "PORT",
-                "10000"
-            )
-        )
-    )
+        f"💰
