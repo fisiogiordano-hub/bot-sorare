@@ -1,19 +1,36 @@
 {
-  "cards": [
+  "processed_offers": [],
+  "acquired_cards": [],
+  "pending_autobuys": [
     {
-      "asset_id": "0x040024ccafaba33cf3efd569374c35b9bd84cf7a85e09f7e64e6da454e2a1149",
-      "assetId": "0x040024ccafaba33cf3efd569374c35b9bd84cf7a85e09f7e64e6da454e2a1149",
-      "slug": "tevis-gabriel-alves-santos-2026-limited-74-1",
-      "name": "Tevis",
-      "source": "AUTOBUY",
-      "status": "READY",
-      "purchase_price_cents": 20,
-      "autobuy_offer_id": "directoffer:1c5f07e1-af4e-4aed-9d8b-e46c66eff801",
-      "created_at": "2026-09-09T00:00:00Z",
-      "sold_at": null,
-      "selling_at": null,
-      "sale_offer_id": null,
-      "last_error": null
+      "offer_id": "DirectOffer:0817b229-0129-42d0-a484-048e91b4b458",
+      "original_offer_id": "directoffer:afde77fb-bc24-4bad-bc17-d566029504a4",
+      "created_at": 1788973643,
+      "cards": [
+        {
+          "assetId": "0x040002eaa24047315ab81f13938cd226a33893c347a43d4f57a7feadd1a384f4",
+          "slug": "toichi-suzuki-2026-limited-63-1",
+          "name": "Toichi Suzuki 2026-27 • Limited 63/1000"
+        },
+        {
+          "assetId": "0x0400600b219e4e25b3ac9d8ce7e617abcd4407d6701889a9b1e0d5299bfd091c",
+          "slug": "michael-collodi-2025-limited-428",
+          "name": "Michael Collodi 2025-26 • Limited 428/1000"
+        },
+        {
+          "assetId": "0x0400c66871febca598ce8c2cd9df7f4fd325b33a4c754e3680c1e03a1f3bef02",
+          "slug": "michael-collodi-2025-limited-124",
+          "name": "Michael Collodi 2025-26 • Limited 124/1000"
+        },
+        {
+          "assetId": "0x0400d574e318f824e84b0d34047d8475cd1e8e4515756ef7af6edc74b7de841b",
+          "slug": "michael-collodi-2025-limited-492",
+          "name": "Michael Collodi 2025-26 • Limited 492/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
-  ]
+  ],
+  "updated_at": 1788973643
 }
