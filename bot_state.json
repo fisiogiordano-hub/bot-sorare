@@ -10,6 +10,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:0817b229-0129-42d0-a484-048e91b4b458"
+    },
+    {
+      "assetId": "0x0400600b219e4e25b3ac9d8ce7e617abcd4407d6701889a9b1e0d5299bfd091c",
+      "slug": "michael-collodi-2025-limited-428",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:0817b229-0129-42d0-a484-048e91b4b458"
     }
   ],
   "pending_autobuys": [
@@ -43,5 +51,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1788974023
+  "updated_at": 1788974025
 }
