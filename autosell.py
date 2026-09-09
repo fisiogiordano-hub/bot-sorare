@@ -31,16 +31,20 @@ MIN_LIVE_LISTINGS = 5
 COVERAGE_CACHE = 3600
 USD_CACHE = 300
 
-BOT_VERSION = "AUTOSell-2.3-COVERAGE-FIX"
+BOT_VERSION = "AUTOSell-3.0-BOT-STATE"
 
 SELL_PRICE_MODE = os.getenv(
     "SELL_PRICE_MODE",
     "FLOOR"
 ).upper()
 
-JSON_PATH = os.getenv(
-    "AUTOSSELL_JSON_PATH",
-    "autosell_cards.json"
+# ============================================================
+# UNICO STORAGE PERSISTENTE
+# ============================================================
+
+BOT_STATE_PATH = os.getenv(
+    "BOT_STATE_PATH",
+    "bot_state.json"
 ).strip()
 
 KID = os.getenv("KULENOVIC_ID", "").strip()
@@ -53,7 +57,7 @@ KASSET = (
 )
 
 
-json_lock = threading.Lock()
+json_lock = threading.RLock()
 worker_lock = threading.Lock()
 coverage_lock = threading.Lock()
 
@@ -103,68 +107,146 @@ def format_eur(cents):
 
 
 # ============================================================
-# JSON
+# BOT STATE - JSON
 # ============================================================
 
-def ensure_json_file():
+def ensure_state_file():
+    """
+    Crea bot_state.json se non esiste.
+
+    Per ora il formato principale è una lista di record carta.
+    AUTOBUY/SWAP verrà successivamente allineato a questo stesso
+    storage.
+    """
+
     folder = os.path.dirname(
-        os.path.abspath(JSON_PATH)
+        os.path.abspath(BOT_STATE_PATH)
     )
 
     os.makedirs(folder, exist_ok=True)
 
-    if not os.path.exists(JSON_PATH):
-        with open(
-            JSON_PATH,
-            "w",
-            encoding="utf-8"
-        ) as f:
-            json.dump(
-                [],
-                f,
-                ensure_ascii=False,
-                indent=2
+    if not os.path.exists(BOT_STATE_PATH):
+
+        temp = (
+            f"{BOT_STATE_PATH}.tmp."
+            f"{uuid.uuid4()}"
+        )
+
+        try:
+            with open(
+                temp,
+                "w",
+                encoding="utf-8"
+            ) as f:
+
+                json.dump(
+                    [],
+                    f,
+                    ensure_ascii=False,
+                    indent=2
+                )
+
+                f.flush()
+                os.fsync(f.fileno())
+
+            os.replace(
+                temp,
+                BOT_STATE_PATH
             )
 
+        except Exception:
 
-def load_cards():
-    ensure_json_file()
+            try:
+                if os.path.exists(temp):
+                    os.remove(temp)
+            except Exception:
+                pass
+
+            raise
+
+
+def load_state_unlocked():
+    """
+    Legge bot_state.json.
+
+    Deve essere chiamata con json_lock già acquisito.
+    """
+
+    ensure_state_file()
 
     try:
+
         with open(
-            JSON_PATH,
+            BOT_STATE_PATH,
             "r",
             encoding="utf-8"
         ) as f:
+
             data = json.load(f)
 
-        return data if isinstance(data, list) else []
+        if isinstance(data, list):
+            return data
+
+        # Supporto opzionale nel caso il file venga trasformato
+        # successivamente in un oggetto contenitore.
+        if isinstance(data, dict):
+
+            cards = data.get("cards")
+
+            if isinstance(cards, list):
+                return cards
+
+        print(
+            "❌ bot_state.json: formato non supportato",
+            flush=True
+        )
+
+        return []
 
     except json.JSONDecodeError as e:
+
         print(
-            f"❌ JSON non valido: {e}",
+            f"❌ bot_state.json non valido: {e}",
             flush=True
         )
+
+        return []
 
     except Exception as e:
+
         print(
-            f"❌ Lettura JSON: {e}",
+            f"❌ Lettura bot_state.json: {e}",
             flush=True
         )
 
-    return []
+        return []
 
 
-def save_cards(cards):
+def load_state():
+    with json_lock:
+        return load_state_unlocked()
+
+
+def save_state_unlocked(cards):
+    """
+    Scrittura atomica.
+
+    Deve essere chiamata con json_lock già acquisito.
+    """
+
     folder = os.path.dirname(
-        os.path.abspath(JSON_PATH)
+        os.path.abspath(BOT_STATE_PATH)
     )
 
     os.makedirs(folder, exist_ok=True)
 
-    temp = f"{JSON_PATH}.tmp.{uuid.uuid4()}"
+    temp = (
+        f"{BOT_STATE_PATH}.tmp."
+        f"{uuid.uuid4()}"
+    )
 
     try:
+
         with open(
             temp,
             "w",
@@ -181,51 +263,193 @@ def save_cards(cards):
             f.flush()
             os.fsync(f.fileno())
 
-        os.replace(temp, JSON_PATH)
+        os.replace(
+            temp,
+            BOT_STATE_PATH
+        )
+
+        # Prova a sincronizzare anche la directory.
+        # Non è supportato da tutti i sistemi/filesystem,
+        # quindi l'eventuale errore viene ignorato.
+        try:
+
+            dir_fd = os.open(
+                folder,
+                os.O_DIRECTORY
+            )
+
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+
+        except Exception:
+            pass
 
         return True
 
     except Exception as e:
+
         print(
-            f"❌ Scrittura JSON: {e}",
+            f"❌ Scrittura bot_state.json: {e}",
             flush=True
         )
 
         try:
+
             if os.path.exists(temp):
                 os.remove(temp)
+
         except Exception:
             pass
 
         return False
 
 
-def get_ready_cards():
+def save_state(cards):
     with json_lock:
+        return save_state_unlocked(cards)
+
+
+def get_ready_cards():
+    """
+    Restituisce esclusivamente le carte READY.
+
+    SOLD, SELLING, ERROR e BLOCKED non vengono riprocessate.
+    """
+
+    with json_lock:
+
+        cards = load_state_unlocked()
+
         return [
-            c
-            for c in load_cards()
+            dict(c)
+            for c in cards
             if (
                 isinstance(c, dict)
                 and norm(c.get("status")) == "ready"
-                and str(c.get("asset_id") or "").strip()
+                and str(
+                    c.get("asset_id") or ""
+                ).strip()
             )
         ]
 
 
-def update_json_card(
+def find_state_card_unlocked(asset_id):
+    asset_id = str(
+        asset_id or ""
+    ).strip()
+
+    if not asset_id:
+        return None, None
+
+    cards = load_state_unlocked()
+
+    for index, c in enumerate(cards):
+
+        if not isinstance(c, dict):
+            continue
+
+        current_id = str(
+            c.get("asset_id") or
+            c.get("assetId") or
+            ""
+        ).strip()
+
+        if (
+            current_id.lower()
+            == asset_id.lower()
+        ):
+            return cards, index
+
+    return cards, None
+
+
+def update_state_card(
     asset_id,
     status=None,
     sale_offer_id=None,
     last_error=None
 ):
-    asset_id = str(asset_id or "").strip()
+    """
+    Aggiorna una carta dentro bot_state.json.
+
+    Tutta l'operazione read -> modify -> atomic write
+    avviene sotto lo stesso lock.
+    """
+
+    asset_id = str(
+        asset_id or ""
+    ).strip()
 
     if not asset_id:
         return False
 
     with json_lock:
-        cards = load_cards()
+
+        cards, index = find_state_card_unlocked(
+            asset_id
+        )
+
+        if index is None:
+
+            print(
+                "⚠️ bot_state.json: "
+                f"asset_id non trovato: {asset_id}",
+                flush=True
+            )
+
+            return False
+
+        c = cards[index]
+
+        if status is not None:
+            c["status"] = status
+
+        if sale_offer_id is not None:
+            c["sale_offer_id"] = sale_offer_id
+
+        if last_error is not None:
+            c["last_error"] = last_error
+
+        elif status in (
+            "SELLING",
+            "SOLD"
+        ):
+            c["last_error"] = None
+
+        if status == "SELLING":
+
+            c["selling_at"] = now_iso()
+
+        elif status == "SOLD":
+
+            c["sold_at"] = now_iso()
+
+        return save_state_unlocked(cards)
+
+
+def add_card_to_state(
+    asset_id,
+    source="AUTOBUY"
+):
+    """
+    Inserisce una carta nello stato persistente.
+
+    Questa funzione verrà utilizzata/armonizzata con AUTOBUY
+    nella seconda fase.
+    """
+
+    asset_id = str(
+        asset_id or ""
+    ).strip()
+
+    if not asset_id:
+        return False
+
+    with json_lock:
+
+        cards = load_state_unlocked()
 
         for c in cards:
 
@@ -233,74 +457,44 @@ def update_json_card(
                 continue
 
             current_id = str(
-                c.get("asset_id") or ""
+                c.get("asset_id") or
+                c.get("assetId") or
+                ""
             ).strip()
 
-            if current_id.lower() != asset_id.lower():
-                continue
-
-            if status is not None:
-                c["status"] = status
-
-            if sale_offer_id is not None:
-                c["sale_offer_id"] = sale_offer_id
-
-            if last_error is not None:
-                c["last_error"] = last_error
-
-            elif status in ("SELLING", "SOLD"):
-                c["last_error"] = None
-
-            if status == "SELLING":
-                c["selling_at"] = now_iso()
-
-            elif status == "SOLD":
-                c["sold_at"] = now_iso()
-
-            return save_cards(cards)
-
-        print(
-            f"⚠️ JSON: asset_id non trovato: {asset_id}",
-            flush=True
-        )
-
-        return False
-
-
-def add_card_to_json(
-    asset_id,
-    source="AUTOBUY"
-):
-    asset_id = str(asset_id or "").strip()
-
-    if not asset_id:
-        return False
-
-    with json_lock:
-        cards = load_cards()
-
-        for c in cards:
-
             if (
-                isinstance(c, dict)
-                and str(c.get("asset_id") or "")
-                .strip()
-                .lower()
+                current_id.lower()
                 == asset_id.lower()
             ):
-                return c.get("status") != "SOLD"
+
+                return (
+                    norm(
+                        c.get("status")
+                    )
+                    != "sold"
+                )
 
         cards.append({
+
             "asset_id": asset_id,
+
             "source": source,
+
             "status": "READY",
+
             "created_at": now_iso(),
+
             "sold_at": None,
+
+            "selling_at": None,
+
             "sale_offer_id": None,
+
             "last_error": None
+
         })
 
-        return save_cards(cards)
+        return save_state_unlocked(cards)
 
 
 # ============================================================
@@ -343,6 +537,7 @@ def graphql(
     for attempt in range(3):
 
         try:
+
             r = requests.post(
                 URL,
                 json=payload,
@@ -381,11 +576,14 @@ def graphql(
                     flush=True
                 )
 
-                time.sleep(attempt + 1)
+                time.sleep(
+                    attempt + 1
+                )
 
                 continue
 
             try:
+
                 data = r.json()
 
             except Exception as e:
@@ -395,7 +593,9 @@ def graphql(
                     flush=True
                 )
 
-                time.sleep(attempt + 1)
+                time.sleep(
+                    attempt + 1
+                )
 
                 continue
 
@@ -419,7 +619,9 @@ def graphql(
                 flush=True
             )
 
-            time.sleep(attempt + 1)
+            time.sleep(
+                attempt + 1
+            )
 
     return None
 
@@ -429,12 +631,17 @@ def graphql(
 # ============================================================
 
 def load_coverage(force=False):
+
     global coverage_cache, coverage_time
 
     now = time.time()
 
     with coverage_lock:
-        cached = set(coverage_cache)
+
+        cached = set(
+            coverage_cache
+        )
+
         cached_time = coverage_time
 
     if (
@@ -445,11 +652,13 @@ def load_coverage(force=False):
         return cached
 
     try:
+
         r = requests.get(
             COVERAGE_URL,
             timeout=TIMEOUT,
             headers={
-                "User-Agent": f"Sorare-Bot/{BOT_VERSION}"
+                "User-Agent":
+                    f"Sorare-Bot/{BOT_VERSION}"
             }
         )
 
@@ -477,11 +686,12 @@ def load_coverage(force=False):
             return cached
 
         with coverage_lock:
+
             coverage_cache = result
             coverage_time = time.time()
 
         print(
-            f"🌐 Sorare Coverage aggiornata: "
+            "🌐 Sorare Coverage aggiornata: "
             f"{len(result)} competizioni",
             flush=True
         )
@@ -709,6 +919,7 @@ def live_floor(card):
     )
 
     try:
+
         season = int(
             card.get("seasonYear")
         )
@@ -785,6 +996,7 @@ def live_floor(card):
         for c in cards:
 
             try:
+
                 season_ok = (
                     int(c.get("seasonYear"))
                     == season
@@ -831,7 +1043,8 @@ def live_floor(card):
 
         print(
             f"⚠️ Floor {player_slug}: "
-            f"{len(prices)}/{MIN_LIVE_LISTINGS} listing",
+            f"{len(prices)}/"
+            f"{MIN_LIVE_LISTINGS} listing",
             flush=True
         )
 
@@ -888,6 +1101,7 @@ def coverage_info(card):
     coverage = load_coverage()
 
     if not coverage:
+
         return (
             False,
             active,
@@ -938,7 +1152,8 @@ def validate_for_autosell(card):
 
         return False, {
             "code": "PRICE_UNKNOWN",
-            "min_live_listings": MIN_LIVE_LISTINGS
+            "min_live_listings":
+                MIN_LIVE_LISTINGS
         }
 
     if floor < MIN_PRICE:
@@ -977,18 +1192,16 @@ def validate_for_autosell(card):
         return False, {
             "code": "COVERAGE",
             "active_competitions": active,
-            "covered_competitions": (
+            "covered_competitions":
                 covered_competitions
-            )
         }
 
     return True, {
         "floor": floor,
         "rarity": rarity,
         "active_competitions": active,
-        "covered_competitions": (
+        "covered_competitions":
             covered_competitions
-        )
     }
 
 
@@ -1158,6 +1371,7 @@ def sign_authorizations(authorizations):
 
     script = r'''
 const fs = require("fs");
+
 const {
     signAuthorizationRequest
 } = require("@sorare/crypto");
@@ -1195,6 +1409,7 @@ function sign(a) {
         r.__typename ===
         "StarkexTransferAuthorizationRequest"
     ) {
+
         return {
             fingerprint: a.fingerprint,
             starkexTransferApproval: {
@@ -1210,6 +1425,7 @@ function sign(a) {
         r.__typename ===
         "StarkexLimitOrderAuthorizationRequest"
     ) {
+
         return {
             fingerprint: a.fingerprint,
             starkexLimitOrderApproval: {
@@ -1225,6 +1441,7 @@ function sign(a) {
         r.__typename ===
         "MangopayWalletTransferAuthorizationRequest"
     ) {
+
         return {
             fingerprint: a.fingerprint,
             mangopayWalletTransferApproval: {
@@ -1324,7 +1541,8 @@ def create_sale(
 
     prepare_input = {
 
-        "type": "SINGLE_SALE_OFFER",
+        "type":
+            "SINGLE_SALE_OFFER",
 
         "sendAssetIds": [
             asset_id
@@ -1577,7 +1795,9 @@ def create_sale(
 def process_card(row):
 
     asset_id = str(
-        row.get("asset_id") or ""
+        row.get("asset_id")
+        or row.get("assetId")
+        or ""
     ).strip()
 
     source = (
@@ -1621,10 +1841,11 @@ def process_card(row):
             flush=True
         )
 
-        update_json_card(
+        update_state_card(
             asset_id,
             status="ERROR",
-            last_error="CARD_DETAILS_UNAVAILABLE"
+            last_error=
+                "CARD_DETAILS_UNAVAILABLE"
         )
 
         return
@@ -1643,10 +1864,11 @@ def process_card(row):
             flush=True
         )
 
-        update_json_card(
+        update_state_card(
             asset_id,
             status="ERROR",
-            last_error="ASSET_ID_MISMATCH"
+            last_error=
+                "ASSET_ID_MISMATCH"
         )
 
         return
@@ -1669,7 +1891,7 @@ def process_card(row):
             "INVALID"
         )
 
-        update_json_card(
+        update_state_card(
             asset_id,
             status=(
                 "READY"
@@ -1722,10 +1944,11 @@ def process_card(row):
             flush=True
         )
 
-        update_json_card(
+        update_state_card(
             asset_id,
             status="ERROR",
-            last_error="INVALID_SELL_PRICE_MODE"
+            last_error=
+                "INVALID_SELL_PRICE_MODE"
         )
 
         return
@@ -1748,15 +1971,20 @@ def process_card(row):
             flush=True
         )
 
-        update_json_card(
+        update_state_card(
             asset_id,
             status="BLOCKED",
-            last_error="FINAL_PRICE_OUT_OF_RANGE"
+            last_error=
+                "FINAL_PRICE_OUT_OF_RANGE"
         )
 
         return
 
-    if not update_json_card(
+    # --------------------------------------------------------
+    # LOCK PERSISTENTE DELLA CARTA
+    # --------------------------------------------------------
+
+    if not update_state_card(
         asset_id,
         status="SELLING",
         last_error=None
@@ -1764,7 +1992,7 @@ def process_card(row):
 
         print(
             "❌ AutoSell: "
-            "impossibile aggiornare il JSON "
+            "impossibile impostare SELLING "
             "→ NON VENDERE",
             flush=True
         )
@@ -1778,15 +2006,24 @@ def process_card(row):
 
     if not offer_id:
 
-        update_json_card(
+        # Se create_sale fallisce non esiste una vendita
+        # confermata dal nostro codice.
+        #
+        # Torniamo a READY per consentire un retry.
+        update_state_card(
             asset_id,
             status="READY",
-            last_error="CREATE_SALE_FAILED"
+            last_error=
+                "CREATE_SALE_FAILED"
         )
 
         return
 
-    if not update_json_card(
+    # --------------------------------------------------------
+    # VENDITA CREATA
+    # --------------------------------------------------------
+
+    if not update_state_card(
         asset_id,
         status="SOLD",
         sale_offer_id=offer_id,
@@ -1795,8 +2032,14 @@ def process_card(row):
 
         print(
             "⚠️ ATTENZIONE: "
-            "vendita creata ma JSON "
+            "vendita creata ma bot_state.json "
             "non aggiornato",
+            flush=True
+        )
+
+        print(
+            "⚠️ NON verrà tentata una seconda "
+            "vendita automaticamente.",
             flush=True
         )
 
@@ -1823,6 +2066,72 @@ def process_card(row):
         f"   └─ Offer ID: {offer_id}",
         flush=True
     )
+
+
+# ============================================================
+# RECOVERY
+# ============================================================
+
+def recover_interrupted_sales():
+    """
+    NON ritenta automaticamente le carte SELLING.
+
+    Una carta SELLING indica che il processo potrebbe essere
+    terminato dopo la preparazione/creazione della vendita.
+
+    Per sicurezza la lasciamo SELLING invece di rischiare
+    una seconda vendita.
+
+    In una seconda fase possiamo aggiungere una verifica
+    dell'offer_id/stato direttamente tramite Sorare.
+    """
+
+    with json_lock:
+
+        cards = load_state_unlocked()
+
+        selling = [
+            c
+            for c in cards
+            if (
+                isinstance(c, dict)
+                and norm(c.get("status"))
+                == "selling"
+            )
+        ]
+
+    if not selling:
+
+        print(
+            "🔄 Recovery: nessuna carta SELLING.",
+            flush=True
+        )
+
+        return
+
+    print(
+        "🛡️ Recovery: trovate "
+        f"{len(selling)} carte SELLING.",
+        flush=True
+    )
+
+    print(
+        "🛡️ Nessun retry automatico "
+        "per evitare doppie vendite.",
+        flush=True
+    )
+
+    for c in selling:
+
+        print(
+            "   └─ SELLING: "
+            + str(
+                c.get("asset_id")
+                or c.get("assetId")
+                or "N/D"
+            ),
+            flush=True
+        )
 
 
 # ============================================================
@@ -1875,14 +2184,15 @@ def worker():
     )
 
     print(
-        f"💾 JSON: {JSON_PATH}",
+        f"💾 STORAGE UNICO: "
+        f"{BOT_STATE_PATH}",
         flush=True
     )
 
     try:
 
         headers()
-        ensure_json_file()
+        ensure_state_file()
 
     except Exception as e:
 
@@ -1921,6 +2231,12 @@ def worker():
     if not check_account():
         return
 
+    # --------------------------------------------------------
+    # RECOVERY POST-RESTART
+    # --------------------------------------------------------
+
+    recover_interrupted_sales()
+
     while True:
 
         try:
@@ -1930,8 +2246,8 @@ def worker():
             rows = get_ready_cards()
 
             print(
-                f"🗄️ Carte READY nel JSON: "
-                f"{len(rows)}",
+                f"🗄️ Carte READY in "
+                f"bot_state.json: {len(rows)}",
                 flush=True
             )
 
@@ -1945,6 +2261,7 @@ def worker():
 
                     asset_id = str(
                         row.get("asset_id")
+                        or row.get("assetId")
                         or ""
                     )
 
@@ -1956,7 +2273,7 @@ def worker():
 
                     if asset_id:
 
-                        update_json_card(
+                        update_state_card(
                             asset_id,
                             status="ERROR",
                             last_error=str(e)
@@ -2047,10 +2364,10 @@ def home():
             "AUTOBUY_OR_SWAP_ONLY",
 
         "storage":
-            "PERSISTENT_JSON",
+            "BOT_STATE_JSON",
 
-        "json_path":
-            JSON_PATH,
+        "bot_state_path":
+            BOT_STATE_PATH,
 
         "ready_cards":
             len(get_ready_cards()),
@@ -2073,6 +2390,7 @@ def home():
 def health():
 
     with coverage_lock:
+
         loaded = bool(
             coverage_cache
         )
@@ -2092,7 +2410,13 @@ def health():
             loaded,
 
         "dry_run":
-            DRY_RUN
+            DRY_RUN,
+
+        "storage":
+            "BOT_STATE_JSON",
+
+        "bot_state_path":
+            BOT_STATE_PATH
     })
 
 
@@ -2100,12 +2424,16 @@ def health():
 def cards_endpoint():
 
     with json_lock:
-        cards = load_cards()
+
+        cards = load_state_unlocked()
 
     return jsonify({
 
         "count":
             len(cards),
+
+        "storage":
+            "bot_state.json",
 
         "cards":
             cards
