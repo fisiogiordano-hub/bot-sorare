@@ -59,7 +59,7 @@ SWAP_MAX = 1.25
 USD_CACHE = 300
 COVERAGE_CACHE = 3600
 
-BOT_VERSION = "22.6-PERSISTENT-STATE"
+BOT_VERSION = "22.7-PERSISTENT-CARDS"
 
 KSLUG = "sandro-kulenovic-2025-limited-385"
 KASSET = (
@@ -72,6 +72,11 @@ KASSET = (
 # ============================================================
 
 processed = set()
+
+# Solo carte ottenute dal BOT tramite AutoBuy / Swap.
+# NON contiene carte acquistate manualmente dall'utente.
+acquired_cards = {}
+
 state_lock = threading.Lock()
 
 worker_lock = threading.Lock()
@@ -118,22 +123,191 @@ def format_eur(cents):
 
 
 # ============================================================
-# PERSISTENT STATE - LOCALE + GITHUB
+# ACQUIRED CARDS
+# ============================================================
+
+def normalize_acquired_card(item):
+    """
+    Normalizza una carta acquisita dal bot.
+
+    Le carte presenti qui devono provenire esclusivamente da:
+    - AutoBuy
+    - Swap
+
+    NON vengono inserite carte acquistate manualmente.
+    """
+
+    if not isinstance(item, dict):
+        return None
+
+    asset_id = str(
+        item.get("assetId") or ""
+    ).strip()
+
+    if not asset_id:
+        return None
+
+    result = {
+        "assetId": asset_id,
+        "slug": (
+            str(item.get("slug")).strip()
+            if item.get("slug")
+            else None
+        ),
+        "purchase_price_cents": (
+            item.get("purchase_price_cents")
+        ),
+        "status": (
+            str(
+                item.get("status")
+                or "da_vendere"
+            ).strip()
+        ),
+        "source": (
+            str(
+                item.get("source")
+                or "unknown"
+            ).strip()
+        ),
+        "offer_id": (
+            str(item.get("offer_id")).strip()
+            if item.get("offer_id")
+            else None
+        )
+    }
+
+    return result
+
+
+def acquired_cards_as_list():
+    with state_lock:
+        return list(
+            acquired_cards.values()
+        )
+
+
+def add_acquired_card(
+    card,
+    purchase_price_cents=None,
+    source="autobuy",
+    offer_id=None
+):
+    """
+    Registra una carta ottenuta dal bot.
+
+    IMPORTANTE:
+    questa funzione viene chiamata solo quando la carta
+    entra realmente nel bot tramite AutoBuy o Swap.
+    """
+
+    asset_id = str(
+        card.get("assetId") or ""
+    ).strip()
+
+    if not asset_id:
+        return False
+
+    key = norm(asset_id)
+
+    item = {
+        "assetId": asset_id,
+        "slug": (
+            str(card.get("slug")).strip()
+            if card.get("slug")
+            else None
+        ),
+        "purchase_price_cents":
+            purchase_price_cents,
+        "status": "da_vendere",
+        "source": source,
+        "offer_id": (
+            str(offer_id).strip()
+            if offer_id
+            else None
+        )
+    }
+
+    with state_lock:
+        existing = acquired_cards.get(key)
+
+        if existing:
+            # Non sovrascriviamo dati già presenti.
+            # Completiamo soltanto eventuali campi mancanti.
+            if not existing.get("slug") and item.get("slug"):
+                existing["slug"] = item["slug"]
+
+            if (
+                existing.get("purchase_price_cents")
+                is None
+                and item.get("purchase_price_cents")
+                is not None
+            ):
+                existing[
+                    "purchase_price_cents"
+                ] = item[
+                    "purchase_price_cents"
+                ]
+
+            if (
+                not existing.get("source")
+                or existing.get("source") == "unknown"
+            ):
+                existing["source"] = source
+
+            if not existing.get("offer_id") and offer_id:
+                existing["offer_id"] = str(offer_id).strip()
+
+            if not existing.get("status"):
+                existing["status"] = "da_vendere"
+
+            return False
+
+        acquired_cards[key] = item
+
+    print(
+        f"💾 Carta acquisita registrata: "
+        f"{asset_id} | "
+        f"source={source} | "
+        f"status=da_vendere",
+        flush=True
+    )
+
+    return True
+
+
+def update_acquired_card_status(
+    asset_id,
+    status
+):
+    """
+    Funzione disponibile anche per AutoSell:
+    permette di aggiornare lo stato della carta senza
+    creare nuove carte nel registro.
+    """
+
+    key = norm(asset_id)
+
+    if not key:
+        return False
+
+    with state_lock:
+        card = acquired_cards.get(key)
+
+        if not card:
+            return False
+
+        card["status"] = status
+
+    return True
+
+
+# ============================================================
+# PERSISTENT STATE - LOCAL
 # ============================================================
 
 def load_local_state():
-    """
-    Legge bot_state.json locale.
-
-    Se il file non esiste o è corrotto, restituisce set().
-    """
-
     if not os.path.exists(STATE_FILE):
-        print(
-            f"ℹ️ {STATE_FILE} locale non presente",
-            flush=True
-        )
-        return set()
+        return set(), {}
 
     try:
         with open(
@@ -143,53 +317,90 @@ def load_local_state():
         ) as f:
             data = json.load(f)
 
+        # Compatibilità con vecchio bot_state.json
         ids = data.get(
             "processed_offers"
         ) or []
 
         if not isinstance(ids, list):
-            print(
-                f"⚠️ {STATE_FILE}: "
-                "processed_offers non è una lista",
-                flush=True
-            )
-            return set()
+            ids = []
 
-        result = {
+        processed_ids = {
             norm(x)
             for x in ids
-            if norm(x)
+            if x
         }
 
-        print(
-            f"💾 Stato locale caricato: "
-            f"{len(result)} offerte",
-            flush=True
-        )
+        cards_data = data.get(
+            "acquired_cards"
+        ) or []
 
-        return result
+        cards = {}
+
+        # Nuovo formato: lista
+        if isinstance(cards_data, list):
+            for item in cards_data:
+                normalized = normalize_acquired_card(
+                    item
+                )
+
+                if normalized:
+                    cards[
+                        norm(
+                            normalized["assetId"]
+                        )
+                    ] = normalized
+
+        # Compatibilità anche con eventuale formato dict
+        elif isinstance(cards_data, dict):
+            for key, item in cards_data.items():
+                if not isinstance(item, dict):
+                    continue
+
+                item = dict(item)
+
+                if not item.get("assetId"):
+                    item["assetId"] = key
+
+                normalized = normalize_acquired_card(
+                    item
+                )
+
+                if normalized:
+                    cards[
+                        norm(
+                            normalized["assetId"]
+                        )
+                    ] = normalized
+
+        return processed_ids, cards
 
     except Exception as e:
         print(
             f"⚠️ Lettura {STATE_FILE}: {e}",
             flush=True
         )
-        return set()
+        return set(), {}
+
+
+def build_state_data():
+    with state_lock:
+        return {
+            "processed_offers":
+                sorted(processed),
+
+            "acquired_cards":
+                list(
+                    acquired_cards.values()
+                ),
+
+            "updated_at":
+                int(time.time())
+        }
 
 
 def save_local_state():
-    """
-    Salvataggio atomico di bot_state.json.
-
-    Prima scrive un file temporaneo e poi sostituisce
-    quello principale, evitando file JSON parziali/corrotti.
-    """
-
-    with state_lock:
-        data = {
-            "processed_offers": sorted(processed),
-            "updated_at": int(time.time())
-        }
+    data = build_state_data()
 
     tmp = STATE_FILE + ".tmp"
 
@@ -205,8 +416,6 @@ def save_local_state():
                 indent=2,
                 ensure_ascii=False
             )
-            f.flush()
-            os.fsync(f.fileno())
 
         os.replace(
             tmp,
@@ -220,15 +429,12 @@ def save_local_state():
             f"❌ Salvataggio {STATE_FILE}: {e}",
             flush=True
         )
-
-        try:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        except Exception:
-            pass
-
         return False
 
+
+# ============================================================
+# PERSISTENT STATE - GITHUB
+# ============================================================
 
 def github_headers():
     if not GITHUB_TOKEN:
@@ -254,19 +460,13 @@ def github_state_url():
 
 
 def load_github_state():
-    """
-    Carica bot_state.json direttamente dal branch GitHub.
-
-    GitHub viene usato come persistenza remota.
-    """
-
     if not GITHUB_TOKEN:
         print(
             "⚠️ GITHUB_TOKEN non configurato → "
             "uso solo stato locale",
             flush=True
         )
-        return set()
+        return set(), {}
 
     try:
         r = requests.get(
@@ -284,7 +484,7 @@ def load_github_state():
                 "su GitHub",
                 flush=True
             )
-            return set()
+            return set(), {}
 
         if r.status_code != 200:
             print(
@@ -293,7 +493,7 @@ def load_github_state():
                 f"{r.text[:500]}",
                 flush=True
             )
-            return set()
+            return set(), {}
 
         data = r.json()
 
@@ -301,13 +501,6 @@ def load_github_state():
             "content",
             ""
         )
-
-        if not content:
-            print(
-                "⚠️ GitHub state vuoto",
-                flush=True
-            )
-            return set()
 
         import base64
 
@@ -321,291 +514,241 @@ def load_github_state():
             "processed_offers"
         ) or []
 
-        if not isinstance(ids, list):
-            print(
-                "⚠️ GitHub state non valido: "
-                "processed_offers non è una lista",
-                flush=True
-            )
-            return set()
-
-        result = {
+        processed_ids = {
             norm(x)
             for x in ids
-            if norm(x)
+            if x
         }
+
+        cards_data = state.get(
+            "acquired_cards"
+        ) or []
+
+        cards = {}
+
+        if isinstance(cards_data, list):
+            for item in cards_data:
+                normalized = normalize_acquired_card(
+                    item
+                )
+
+                if normalized:
+                    cards[
+                        norm(
+                            normalized["assetId"]
+                        )
+                    ] = normalized
+
+        elif isinstance(cards_data, dict):
+            for key, item in cards_data.items():
+                if not isinstance(item, dict):
+                    continue
+
+                item = dict(item)
+
+                if not item.get("assetId"):
+                    item["assetId"] = key
+
+                normalized = normalize_acquired_card(
+                    item
+                )
+
+                if normalized:
+                    cards[
+                        norm(
+                            normalized["assetId"]
+                        )
+                    ] = normalized
 
         print(
             f"💾 Stato GitHub caricato: "
-            f"{len(result)} offerte",
+            f"{len(processed_ids)} offerte | "
+            f"{len(cards)} carte acquisite",
             flush=True
         )
 
-        return result
+        return processed_ids, cards
 
     except Exception as e:
         print(
             f"⚠️ GitHub load state: {e}",
             flush=True
         )
-        return set()
+        return set(), {}
 
 
 def save_github_state():
-    """
-    Salva lo stato corrente su GitHub.
-
-    Prima legge il file remoto e unisce gli ID già presenti
-    con quelli locali, così un salvataggio non cancella
-    offerte precedentemente registrate.
-
-    Gestisce anche eventuali conflitti SHA (HTTP 409)
-    rileggendo lo stato remoto e riprovando.
-    """
-
     if not GITHUB_TOKEN:
         return False
 
     with github_lock:
+        try:
+            import base64
 
-        for attempt in range(3):
+            state = build_state_data()
 
-            try:
-                import base64
+            raw = json.dumps(
+                state,
+                indent=2,
+                ensure_ascii=False
+            )
 
-                # ------------------------------------------------
-                # STATO LOCALE ATTUALE
-                # ------------------------------------------------
+            encoded = base64.b64encode(
+                raw.encode("utf-8")
+            ).decode("ascii")
 
-                with state_lock:
-                    local_ids = set(processed)
+            r = requests.get(
+                github_state_url(),
+                headers=github_headers(),
+                params={
+                    "ref": GITHUB_BRANCH
+                },
+                timeout=TIMEOUT
+            )
 
-                # ------------------------------------------------
-                # LETTURA STATO REMOTO + SHA
-                # ------------------------------------------------
+            sha = None
 
-                r = requests.get(
-                    github_state_url(),
-                    headers=github_headers(),
-                    params={
-                        "ref": GITHUB_BRANCH
-                    },
-                    timeout=TIMEOUT
-                )
+            if r.status_code == 200:
+                sha = r.json().get("sha")
 
-                remote_ids = set()
-                sha = None
+            payload = {
+                "message": (
+                    "Update bot_state.json - "
+                    f"{int(time.time())}"
+                ),
+                "content": encoded,
+                "branch": GITHUB_BRANCH
+            }
 
-                if r.status_code == 200:
-                    remote_data = r.json()
+            if sha:
+                payload["sha"] = sha
 
-                    sha = remote_data.get("sha")
+            r = requests.put(
+                github_state_url(),
+                headers=github_headers(),
+                json=payload,
+                timeout=TIMEOUT
+            )
 
-                    content = (
-                        remote_data.get(
-                            "content",
-                            ""
-                        )
-                    )
-
-                    if content:
-                        try:
-                            decoded = base64.b64decode(
-                                content.replace("\n", "")
-                            ).decode("utf-8")
-
-                            remote_state = json.loads(
-                                decoded
-                            )
-
-                            remote_list = (
-                                remote_state.get(
-                                    "processed_offers"
-                                )
-                                or []
-                            )
-
-                            if isinstance(
-                                remote_list,
-                                list
-                            ):
-                                remote_ids = {
-                                    norm(x)
-                                    for x in remote_list
-                                    if norm(x)
-                                }
-
-                        except Exception as e:
-                            print(
-                                f"⚠️ Impossibile leggere "
-                                f"stato remoto: {e}",
-                                flush=True
-                            )
-
-                elif r.status_code == 404:
-                    print(
-                        "ℹ️ bot_state.json non esiste "
-                        "ancora su GitHub → verrà creato",
-                        flush=True
-                    )
-
-                else:
-                    print(
-                        f"⚠️ GitHub read HTTP "
-                        f"{r.status_code}: "
-                        f"{r.text[:500]}",
-                        flush=True
-                    )
-
-                # ------------------------------------------------
-                # MERGE SICURO
-                # ------------------------------------------------
-
-                merged = local_ids | remote_ids
-
-                raw = json.dumps(
-                    {
-                        "processed_offers":
-                            sorted(merged),
-                        "updated_at":
-                            int(time.time())
-                    },
-                    indent=2,
-                    ensure_ascii=False
-                )
-
-                encoded = base64.b64encode(
-                    raw.encode("utf-8")
-                ).decode("ascii")
-
-                payload = {
-                    "message": (
-                        "Update bot_state.json - "
-                        f"{int(time.time())}"
-                    ),
-                    "content": encoded,
-                    "branch": GITHUB_BRANCH
-                }
-
-                if sha:
-                    payload["sha"] = sha
-
-                # ------------------------------------------------
-                # WRITE GITHUB
-                # ------------------------------------------------
-
-                r = requests.put(
-                    github_state_url(),
-                    headers=github_headers(),
-                    json=payload,
-                    timeout=TIMEOUT
-                )
-
-                if r.status_code in (
-                    200,
-                    201
-                ):
-                    # Mantiene anche lo stato locale
-                    # sincronizzato con il merge remoto.
-                    with state_lock:
-                        processed.update(merged)
-
-                    save_local_state()
-
-                    print(
-                        f"💾 bot_state.json salvato "
-                        f"su GitHub: "
-                        f"{len(merged)} offerte",
-                        flush=True
-                    )
-
-                    return True
-
-                # ------------------------------------------------
-                # CONFLITTO SHA
-                # ------------------------------------------------
-
-                if r.status_code == 409:
-                    print(
-                        f"⚠️ Conflitto GitHub "
-                        f"(409), nuovo tentativo "
-                        f"{attempt + 1}/3",
-                        flush=True
-                    )
-
-                    time.sleep(
-                        1 + attempt
-                    )
-
-                    continue
-
+            if r.status_code not in (
+                200,
+                201
+            ):
                 print(
                     f"❌ GitHub save HTTP "
                     f"{r.status_code}: "
                     f"{r.text[:1000]}",
                     flush=True
                 )
-
                 return False
 
-            except Exception as e:
-                print(
-                    f"❌ GitHub save state: {e}",
-                    flush=True
-                )
+            print(
+                "💾 bot_state.json salvato "
+                "su GitHub",
+                flush=True
+            )
 
-                if attempt < 2:
-                    time.sleep(
-                        1 + attempt
-                    )
-                    continue
+            return True
 
-                return False
-
-        return False
+        except Exception as e:
+            print(
+                f"❌ GitHub save state: {e}",
+                flush=True
+            )
+            return False
 
 
 def load_state():
-    """
-    Carica lo stato sia locale sia GitHub.
-
-    Gli stati vengono uniti con OR/union:
-    un ID presente in uno dei due archivi viene considerato
-    già processato.
-
-    In questo modo un deploy/restart non perde lo storico.
-    """
-
     global processed
+    global acquired_cards
 
-    local = load_local_state()
-    remote = load_github_state()
+    local_processed, local_cards = (
+        load_local_state()
+    )
 
-    merged = local | remote
+    remote_processed, remote_cards = (
+        load_github_state()
+    )
 
     with state_lock:
-        processed = merged
+        processed = (
+            local_processed
+            | remote_processed
+        )
 
-    # Riscrive il file locale con lo stato completo.
+        acquired_cards = {}
+
+        # GitHub e locale vengono uniti.
+        # In caso di stessa assetId, i dati più completi
+        # vengono mantenuti.
+        for source_cards in (
+            local_cards,
+            remote_cards
+        ):
+            for key, item in source_cards.items():
+                if key not in acquired_cards:
+                    acquired_cards[key] = dict(item)
+                    continue
+
+                current = acquired_cards[key]
+
+                if (
+                    not current.get("slug")
+                    and item.get("slug")
+                ):
+                    current["slug"] = item["slug"]
+
+                if (
+                    current.get(
+                        "purchase_price_cents"
+                    ) is None
+                    and item.get(
+                        "purchase_price_cents"
+                    ) is not None
+                ):
+                    current[
+                        "purchase_price_cents"
+                    ] = item[
+                        "purchase_price_cents"
+                    ]
+
+                if (
+                    not current.get("offer_id")
+                    and item.get("offer_id")
+                ):
+                    current["offer_id"] = item[
+                        "offer_id"
+                    ]
+
+                if (
+                    not current.get("source")
+                    or current.get("source") == "unknown"
+                ):
+                    if item.get("source"):
+                        current["source"] = item[
+                            "source"
+                        ]
+
+                if (
+                    not current.get("status")
+                    and item.get("status")
+                ):
+                    current["status"] = item[
+                        "status"
+                    ]
+
     save_local_state()
 
-    # Se GitHub è configurato, riallinea anche GitHub.
-    if GITHUB_TOKEN:
-        save_github_state()
-
     print(
-        f"💾 Stato iniziale sincronizzato: "
-        f"{len(processed)} offerte processate",
+        f"💾 Stato iniziale: "
+        f"{len(processed)} offerte processate | "
+        f"{len(acquired_cards)} carte acquisite "
+        f"da AutoBuy/Swap",
         flush=True
     )
 
 
 def mark_done(offer_id):
-    """
-    Marca un'offerta come processata e la persiste
-    immediatamente sia localmente sia su GitHub.
-    """
-
     offer_id = norm(offer_id)
 
     if not offer_id:
@@ -614,26 +757,10 @@ def mark_done(offer_id):
     with state_lock:
         processed.add(offer_id)
 
-    # Prima persistenza locale.
-    local_ok = save_local_state()
+    if not save_local_state():
+        return
 
-    if not local_ok:
-        print(
-            "⚠️ Stato locale non salvato; "
-            "tento comunque il salvataggio GitHub",
-            flush=True
-        )
-
-    # Poi persistenza remota.
-    if GITHUB_TOKEN:
-        github_ok = save_github_state()
-
-        if not github_ok:
-            print(
-                "⚠️ Stato GitHub non salvato "
-                "in questo tentativo",
-                flush=True
-            )
+    save_github_state()
 
 
 def should_process(offer_id):
@@ -642,6 +769,39 @@ def should_process(offer_id):
             norm(offer_id)
             not in processed
         )
+
+
+def persist_acquired_card(
+    card,
+    purchase_price_cents=None,
+    source="autobuy",
+    offer_id=None
+):
+    """
+    Registra la carta e salva immediatamente
+    il bot_state.json locale + GitHub.
+
+    Questa funzione viene usata esclusivamente per
+    carte realmente ottenute dal bot.
+    """
+
+    added = add_acquired_card(
+        card=card,
+        purchase_price_cents=
+            purchase_price_cents,
+        source=source,
+        offer_id=offer_id
+    )
+
+    # Anche se la carta era già presente, salviamo lo stato
+    # per garantire che eventuali informazioni mancanti
+    # vengano persistite.
+    save_local_state()
+
+    if GITHUB_TOKEN:
+        save_github_state()
+
+    return added
 
 
 # ============================================================
@@ -1713,12 +1873,6 @@ def counter_offer(
         )
         return True
 
-    # --------------------------------------------------------
-    # PREPARE OFFER
-    # settlementCurrencies è valido
-    # per prepareOfferInput.
-    # --------------------------------------------------------
-
     prepare_input = {
         "receiveAssetIds": ids,
         "sendAssetIds": [],
@@ -1843,13 +1997,6 @@ def counter_offer(
             flush=True
         )
         return False
-
-    # --------------------------------------------------------
-    # CREATE DIRECT OFFER
-    # settlementCurrencies NON viene
-    # passato perché non appartiene
-    # a createDirectOfferInput.
-    # --------------------------------------------------------
 
     create = {
         "receiveAssetIds": ids,
@@ -2038,6 +2185,21 @@ def process_autobuy(offer):
     ):
         if reject_offer(offer):
             mark_done(offer_id)
+
+        # La controproposta è stata creata dal bot.
+        # Registriamo le carte che il bot ha richiesto
+        # come carte AutoBuy da monitorare.
+        #
+        # Il prezzo di acquisizione è PAY_PER_CARD
+        # per ogni carta valida.
+        for card in valid:
+            persist_acquired_card(
+                card=card,
+                purchase_price_cents=
+                    PAY_PER_CARD,
+                source="autobuy",
+                offer_id=offer_id
+            )
 
 
 # ============================================================
@@ -2565,6 +2727,18 @@ def process_swap(offer):
         return
 
     if accept_offer(offer):
+        # Solo dopo l'accettazione effettiva dello swap
+        # registriamo le carte ricevute dal bot.
+        for card in receive:
+            floor = live_floor(card)
+
+            persist_acquired_card(
+                card=card,
+                purchase_price_cents=floor,
+                source="swap",
+                offer_id=offer_id
+            )
+
         mark_done(offer_id)
 
 
@@ -2680,6 +2854,12 @@ def worker():
         flush=True
     )
 
+    print(
+        "📦 ACQUIRED CARDS: "
+        "solo carte ottenute da AutoBuy/Swap",
+        flush=True
+    )
+
     load_state()
 
     coverage = load_coverage(
@@ -2774,6 +2954,9 @@ def home():
         processed_count = len(
             processed
         )
+        acquired_count = len(
+            acquired_cards
+        )
 
     return jsonify({
         "status": "online",
@@ -2815,6 +2998,9 @@ def home():
         "processed_offers":
             processed_count,
 
+        "acquired_cards":
+            acquired_count,
+
         "state_file":
             STATE_FILE,
 
@@ -2840,6 +3026,9 @@ def health():
         processed_count = len(
             processed
         )
+        acquired_count = len(
+            acquired_cards
+        )
 
     return jsonify({
         "status": "ok",
@@ -2852,6 +3041,8 @@ def health():
             loaded,
         "processed_offers":
             processed_count,
+        "acquired_cards":
+            acquired_count,
         "dry_run":
             DRY_RUN,
         "swap_auto_accept":
