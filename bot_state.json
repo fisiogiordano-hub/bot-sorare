@@ -45,6 +45,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:c9b71618-c4c5-45bd-a81c-7cd3104c07ed"
+    },
+    {
+      "assetId": "0x04005e1204461fcea79e58296025b9f5e7ddbf202e2b4320a83217eb73452022",
+      "slug": "yuya-oki-2025-limited-578",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:c9b71618-c4c5-45bd-a81c-7cd3104c07ed"
     }
   ],
   "pending_autobuys": [
@@ -68,5 +76,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789023751
+  "updated_at": 1789023753
 }
