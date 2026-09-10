@@ -38,6 +38,26 @@
       "offer_id": "DirectOffer:0817b229-0129-42d0-a484-048e91b4b458"
     }
   ],
-  "pending_autobuys": [],
-  "updated_at": 1788980083
+  "pending_autobuys": [
+    {
+      "offer_id": "DirectOffer:c9b71618-c4c5-45bd-a81c-7cd3104c07ed",
+      "original_offer_id": "directoffer:8b28cb45-e7ed-44e6-8aa9-caf4748ea490",
+      "created_at": 1789023726,
+      "cards": [
+        {
+          "assetId": "0x040051ef657308cf7da9c970e168fbe5d6065f0b98d5ec789395a3d926dffb8c",
+          "slug": "albert-mboyo-sambi-lokonga-2025-limited-697",
+          "name": "Albert Sambi Lokonga 2025-26 • Limited 697/1000"
+        },
+        {
+          "assetId": "0x04005e1204461fcea79e58296025b9f5e7ddbf202e2b4320a83217eb73452022",
+          "slug": "yuya-oki-2025-limited-578",
+          "name": "Yuya Oki 2025-26 • Limited 578/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
+    }
+  ],
+  "updated_at": 1789023726
 }
