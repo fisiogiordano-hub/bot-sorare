@@ -37,6 +37,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:0817b229-0129-42d0-a484-048e91b4b458"
+    },
+    {
+      "assetId": "0x040051ef657308cf7da9c970e168fbe5d6065f0b98d5ec789395a3d926dffb8c",
+      "slug": "albert-mboyo-sambi-lokonga-2025-limited-697",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:c9b71618-c4c5-45bd-a81c-7cd3104c07ed"
     }
   ],
   "pending_autobuys": [
@@ -60,5 +68,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789023728
+  "updated_at": 1789023751
 }
