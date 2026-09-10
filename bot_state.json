@@ -64,6 +64,21 @@
       "offer_id": "SingleBuyOffer:561809c0-e1c2-4a25-b99c-a01d89948e96"
     }
   ],
-  "pending_autobuys": [],
-  "updated_at": 1789023894
+  "pending_autobuys": [
+    {
+      "offer_id": "SingleBuyOffer:561809c0-e1c2-4a25-b99c-a01d89948e96",
+      "original_offer_id": "directoffer:c90efcaf-5240-413f-a06a-05591a6a0a43",
+      "created_at": 1789023878,
+      "cards": [
+        {
+          "assetId": "0x0400009c35c7d2ed3e5affaeea1d07acb65b00f374b555211bb45310ab7892fb",
+          "slug": "shun-matsuda-2026-limited-186",
+          "name": "Shun Matsuda 2026-27 • Limited 186/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
+    }
+  ],
+  "updated_at": 1789023895
 }
