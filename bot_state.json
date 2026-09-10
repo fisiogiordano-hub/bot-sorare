@@ -2,6 +2,7 @@
   "processed_offers": [
     "directoffer:256f389b-46ef-4a73-98f9-3127256abdc2",
     "directoffer:325dce87-e795-4dc0-aa46-0314b0dc8864",
+    "directoffer:8b28cb45-e7ed-44e6-8aa9-caf4748ea490",
     "directoffer:afde77fb-bc24-4bad-bc17-d566029504a4"
   ],
   "acquired_cards": [
@@ -59,5 +60,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789023726
+  "updated_at": 1789023728
 }
