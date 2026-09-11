@@ -68,21 +68,6 @@
       "offer_id": "SingleBuyOffer:561809c0-e1c2-4a25-b99c-a01d89948e96"
     }
   ],
-  "pending_autobuys": [
-    {
-      "offer_id": "SingleBuyOffer:5bc2521c-65db-435f-b367-30c57bbbaeed",
-      "original_offer_id": "directoffer:cfccc1ed-5c35-4e59-a0cb-ac1d402313fe",
-      "created_at": 1789117638,
-      "cards": [
-        {
-          "assetId": "0x04004d922f1d8009955218c2f3624044c395fabcbb258f51f2b849bda83b4e15",
-          "slug": "leon-belcar-2025-limited-147",
-          "name": "Leon Belcar 2025-26 • Limited 147/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    }
-  ],
-  "updated_at": 1789120471
+  "pending_autobuys": [],
+  "updated_at": 1789121592
 }
