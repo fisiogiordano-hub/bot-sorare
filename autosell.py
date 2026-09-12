@@ -24,7 +24,6 @@ DRY_RUN = os.getenv("DRY_RUN", "false").strip().lower() == "true"
 INTERVAL = int(os.getenv("INTERVAL", "30"))
 TIMEOUT = int(os.getenv("TIMEOUT", "25"))
 
-MIN_PRICE = 32
 MAX_PRICE = 70
 MIN_LISTINGS = 5
 
@@ -537,9 +536,6 @@ def validate(card):
 
     if floor is None:
         return False, "FLOOR_UNKNOWN"
-
-    if floor < MIN_PRICE:
-        return False, "FLOOR_LOW"
 
     if floor > MAX_PRICE:
         return False, "FLOOR_HIGH"
