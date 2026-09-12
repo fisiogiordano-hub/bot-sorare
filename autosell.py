@@ -6,11 +6,8 @@ import shutil
 import subprocess
 import threading
 import requests
+import math
 from flask import Flask, jsonify
-
-# ============================================================
-# CONFIG
-# ============================================================
 
 app = Flask(__name__)
 SORARE_URL = "https://api.sorare.com/graphql"
@@ -24,12 +21,14 @@ DRY_RUN = os.getenv("DRY_RUN", "false").strip().lower() == "true"
 INTERVAL = int(os.getenv("INTERVAL", "30"))
 TIMEOUT = int(os.getenv("TIMEOUT", "25"))
 
-MIN_PRICE = 32
 MAX_PRICE = 70
 MIN_LISTINGS = 5
 
+TECHNICAL_ETH_START = 0.0002
+TECHNICAL_ETH_STEP = 0.0001
+
 STATE_FILE = os.getenv("BOT_STATE_PATH", "bot_state.json").strip()
-VERSION = "AUTOSell-13.0-SOLANA-EUR-PRECHECK"
+VERSION = "AUTOSell-13.1-SOLANA-EUR-PRECHECK"
 
 KULENOVIC_SLUG = "sandro-kulenovic-2025-limited-385"
 KULENOVIC_ASSET = (
@@ -43,10 +42,6 @@ worker_started = False
 
 SOLANA_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
-
-# ============================================================
-# UTILS
-# ============================================================
 
 def norm(v):
     return str(v or "").strip().lower()
@@ -71,10 +66,6 @@ def label(card):
 def eur(cents):
     return "N/D" if cents is None else f"€{cents / 100:.2f}"
 
-
-# ============================================================
-# STATE
-# ============================================================
 
 def default_state():
     return {
@@ -196,10 +187,6 @@ def sellable_cards():
     return result
 
 
-# ============================================================
-# SORARE GRAPHQL
-# ============================================================
-
 def auth_headers():
     if not TOKEN:
         raise RuntimeError("SORARE_JWT_TOKEN mancante")
@@ -260,10 +247,6 @@ def gql(query, variables=None):
     return None
 
 
-# ============================================================
-# ACCOUNT / CARD
-# ============================================================
-
 def check_account():
     data = gql("""
         query {
@@ -285,11 +268,13 @@ def check_account():
         "✅ Sorare: " + str(user.get("nickname") or user.get("slug")),
         flush=True
     )
+
     print(
         "🔐 Stark key account: "
         + ("PRESENTE" if user.get("starkKey") else "NON DISPONIBILE"),
         flush=True
     )
+
     print(
         "🔑 Solana private key: "
         + ("PRESENTE" if SOLANA else "NON DISPONIBILE"),
@@ -328,10 +313,6 @@ def card_details(asset):
 
     return cards[0] if cards else None
 
-
-# ============================================================
-# ACTIVE PUBLIC OFFER PRE-CHECK
-# ============================================================
 
 def find_active_public_offer(asset):
     wanted = norm(asset)
@@ -387,12 +368,9 @@ def find_active_public_offer(asset):
         "🔵 PRE-CHECK → nessuna offerta pubblica attiva",
         flush=True
     )
+
     return None
 
-
-# ============================================================
-# EUR / FLOOR
-# ============================================================
 
 def usd_to_eur(usd_cents):
     try:
@@ -401,9 +379,35 @@ def usd_to_eur(usd_cents):
             params={"from": "USD", "to": "EUR"},
             timeout=10
         )
+
         rate = float(response.json()["rates"]["EUR"])
         return round(usd_cents * rate)
+
     except Exception:
+        return None
+
+
+def eth_to_eur_cents(eth):
+    try:
+        response = requests.get(
+            "https://api.coinbase.com/v2/prices/ETH-EUR/spot",
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+        eth_eur = float(data["data"]["amount"])
+
+        cents = math.ceil(eth * eth_eur * 100)
+
+        return max(1, cents)
+
+    except Exception as e:
+        print(
+            f"❌ Conversione ETH/EUR fallita: {e}",
+            flush=True
+        )
         return None
 
 
@@ -413,15 +417,19 @@ def amount_to_eur(amounts):
 
     try:
         value = int(amounts.get("eurCents") or 0)
+
         if value > 0:
             return value
+
     except Exception:
         pass
 
     try:
         value = int(amounts.get("usdCents") or 0)
+
         if value > 0:
             return usd_to_eur(value)
+
     except Exception:
         pass
 
@@ -515,10 +523,6 @@ def get_floor(card):
     return min(prices) if len(prices) >= MIN_LISTINGS else None
 
 
-# ============================================================
-# VALIDATION
-# ============================================================
-
 def is_kulenovic(card):
     return (
         norm(card.get("slug")) == norm(KULENOVIC_SLUG)
@@ -538,18 +542,11 @@ def validate(card):
     if floor is None:
         return False, "FLOOR_UNKNOWN"
 
-    if floor < MIN_PRICE:
-        return False, "FLOOR_LOW"
-
     if floor > MAX_PRICE:
         return False, "FLOOR_HIGH"
 
     return True, floor
 
-
-# ============================================================
-# BASE58
-# ============================================================
 
 def base58_decode(value):
     value = str(value).strip()
@@ -581,14 +578,11 @@ def base58_decode(value):
     for char in value:
         if char != "1":
             break
+
         zeros += 1
 
     return b"\x00" * zeros + raw
 
-
-# ============================================================
-# SOLANA KEY CHECK
-# ============================================================
 
 def solana_key_info():
     if not SOLANA:
@@ -601,6 +595,7 @@ def solana_key_info():
 
         if len(decoded) in {32, 64}:
             return {"format": "base58", "bytes": decoded}
+
     except Exception:
         pass
 
@@ -621,10 +616,6 @@ def solana_key_info():
     )
 
 
-# ============================================================
-# SIGN AUTHORIZATIONS
-# ============================================================
-
 def sign_authorizations(authorizations):
     node = shutil.which("node") or shutil.which("nodejs")
 
@@ -640,6 +631,7 @@ def sign_authorizations(authorizations):
         t not in {"SolanaTokenTransferAuthorizationRequest"}
         for t in types
     )
+
     requires_solana = any(
         t == "SolanaTokenTransferAuthorizationRequest"
         for t in types
@@ -679,7 +671,11 @@ function b58decode(value) {
 
     for (const char of String(value).trim()) {
         const i = ALPHABET.indexOf(char);
-        if (i < 0) throw new Error("Base58 non valido");
+
+        if (i < 0) {
+            throw new Error("Base58 non valido");
+        }
+
         num = num * 58n + BigInt(i);
     }
 
@@ -689,7 +685,11 @@ function b58decode(value) {
         bytes = Buffer.alloc(0);
     } else {
         let hex = num.toString(16);
-        if (hex.length % 2) hex = "0" + hex;
+
+        if (hex.length % 2) {
+            hex = "0" + hex;
+        }
+
         bytes = Buffer.from(hex, "hex");
     }
 
@@ -787,6 +787,7 @@ async function createSolanaSigner(privateKey) {
 
 async function signSolana(auth) {
     const req = auth.request;
+
     const signer = await createSolanaSigner(
         input.solanaPrivateKey
     );
@@ -844,6 +845,7 @@ async function signSolana(auth) {
 
 function signStark(auth) {
     const req = auth.request;
+
     const signature = signAuthorizationRequest(
         input.starkPrivateKey,
         req
@@ -957,10 +959,6 @@ main().catch(error => {
         )
 
 
-# ============================================================
-# PREPARE OFFER
-# ============================================================
-
 PREPARE_QUERY = """
 mutation PrepareOffer($input: prepareOfferInput!) {
     prepareOffer(input: $input) {
@@ -1043,7 +1041,7 @@ def prepare_sale(asset, price):
     }
 
     print(
-        "📦 prepareOffer → settlementCurrencies=EUR",
+        f"📦 prepareOffer → EUR {eur(price)}",
         flush=True
     )
 
@@ -1056,17 +1054,24 @@ def prepare_sale(asset, price):
 
     if not result:
         print("❌ prepareOffer: nessun risultato", flush=True)
-        return None
+        return None, "NESSUN_RISULTATO"
 
     errors = result.get("errors") or []
 
     if errors:
+        error_text = " ".join(
+            str(e.get("message", ""))
+            for e in errors
+            if isinstance(e, dict)
+        )
+
         print(
             "❌ prepareOffer:",
             json.dumps(errors, ensure_ascii=False),
             flush=True
         )
-        return None
+
+        return None, error_text
 
     authorizations = result.get("authorizations") or []
 
@@ -1075,50 +1080,71 @@ def prepare_sale(asset, price):
             "❌ prepareOffer: nessuna authorization",
             flush=True
         )
-        return None
+        return None, "NESSUNA_AUTHORIZATION"
 
     print(
         f"✅ Authorization ricevute: {len(authorizations)}",
         flush=True
     )
 
-    return authorizations
+    return authorizations, None
 
 
-# ============================================================
-# CREATE SALE
-# ============================================================
+def is_min_price_error(error_text):
+    text = norm(error_text)
 
-def create_sale(card, price):
+    if not text:
+        return False
+
+    patterns = [
+        "minimum price",
+        "minimum",
+        "min price",
+        "price is too low",
+        "price too low",
+        "too low",
+        "below minimum",
+        "below the minimum",
+        "less than the minimum",
+        "must be at least",
+        "amount is too low",
+        "amount too low",
+        "amount must be greater",
+        "price must be greater",
+        "invalid price"
+    ]
+
+    return any(pattern in text for pattern in patterns)
+
+
+def create_sale_once(card, price):
     asset = asset_id(card)
 
     if not asset:
-        return None
+        return None, None, "ASSET_MISSING"
 
     if DRY_RUN:
         print(
             f"🟡 DRY RUN → {label(card)} → {eur(price)}",
             flush=True
         )
-        return "DRY-RUN"
 
-    existing_offer = find_active_public_offer(asset)
+        return "DRY-RUN", price, None
 
-    if existing_offer:
-        print("🟢 CARTA GIÀ IN VENDITA SU SORARE", flush=True)
-        print(f"🟢 OFFER ID → {existing_offer}", flush=True)
-        return existing_offer
-
-    authorizations = prepare_sale(asset, price)
+    authorizations, prepare_error = prepare_sale(
+        asset,
+        price
+    )
 
     if not authorizations:
-        return None
+        return None, None, prepare_error
 
     try:
         approvals = sign_authorizations(authorizations)
+
     except Exception as e:
         print(f"❌ Firma: {e}", flush=True)
-        return None
+        return None, None, str(e)
 
     create_query = """
     mutation CreateSale($input: createSingleSaleOfferInput!) {
@@ -1148,7 +1174,7 @@ def create_sale(card, price):
     }
 
     print(
-        "📤 createSingleSaleOffer → settlementCurrencies=EUR",
+        f"📤 createSingleSaleOffer → EUR {eur(price)}",
         flush=True
     )
 
@@ -1164,7 +1190,8 @@ def create_sale(card, price):
             "❌ createSingleSaleOffer: nessun risultato",
             flush=True
         )
-        return None
+
+        return None, None, "NESSUN_RISULTATO"
 
     errors = result.get("errors") or []
 
@@ -1188,16 +1215,18 @@ def create_sale(card, price):
                     f"🟢 OFFER ID → {existing_offer}",
                     flush=True
                 )
-                return existing_offer
 
-            return "ALREADY-LISTED"
+                return existing_offer, price, None
+
+            return "ALREADY-LISTED", price, None
 
         print(
             "❌ createSingleSaleOffer:",
             json.dumps(errors, ensure_ascii=False),
             flush=True
         )
-        return None
+
+        return None, None, error_text
 
     offer_id = (
         (result.get("tokenOffer") or {})
@@ -1209,19 +1238,98 @@ def create_sale(card, price):
             "❌ Vendita non creata: offer ID assente",
             flush=True
         )
-        return None
+
+        return None, None, "OFFER_ID_ASSENTE"
 
     print(
         f"✅ INSERZIONE CREATA → {offer_id}",
         flush=True
     )
 
-    return offer_id
+    return offer_id, price, None
 
 
-# ============================================================
-# PROCESS CARD
-# ============================================================
+def create_sale(card, floor_price):
+    if floor_price <= 0:
+        return None, None
+
+    offer_id, used_price, error = create_sale_once(
+        card,
+        floor_price
+    )
+
+    if offer_id:
+        return offer_id, used_price
+
+    if not is_min_price_error(error):
+        print(
+            "❌ Errore non riconducibile al prezzo minimo → STOP",
+            flush=True
+        )
+
+        return None, None
+
+    print(
+        "⚠️ FLOOR SOTTO IL MINIMO TECNICO SORARE",
+        flush=True
+    )
+
+    eth_price = TECHNICAL_ETH_START
+
+    while True:
+        eur_price = eth_to_eur_cents(eth_price)
+
+        if eur_price is None:
+            print(
+                "❌ Impossibile convertire ETH → EUR",
+                flush=True
+            )
+
+            return None, None
+
+        if eur_price > MAX_PRICE:
+            print(
+                f"❌ Minimo tecnico oltre €{MAX_PRICE:.2f} → STOP",
+                flush=True
+            )
+
+            return None, None
+
+        print(
+            f"🔁 TENTATIVO MINIMO TECNICO → "
+            f"{eth_price:.4f} ETH ≈ {eur(eur_price)}",
+            flush=True
+        )
+
+        offer_id, used_price, error = create_sale_once(
+            card,
+            eur_price
+        )
+
+        if offer_id:
+            print(
+                f"✅ MINIMO TECNICO TROVATO → "
+                f"{eth_price:.4f} ETH ≈ {eur(used_price)}",
+                flush=True
+            )
+
+            return offer_id, used_price
+
+        if not is_min_price_error(error):
+            print(
+                "❌ Errore diverso dal minimo tecnico → STOP",
+                flush=True
+            )
+
+            return None, None
+
+        eth_price = round(
+            eth_price + TECHNICAL_ETH_STEP,
+            4
+        )
+
+        time.sleep(0.5)
+
 
 def process(card):
     asset = asset_id(card)
@@ -1248,6 +1356,7 @@ def process(card):
             "🟢 STATO → SELLING (offerta già presente)",
             flush=True
         )
+
         return
 
     details = card_details(asset)
@@ -1260,6 +1369,7 @@ def process(card):
             status="da_vendere",
             error="CARD_DETAILS"
         )
+
         return
 
     print(
@@ -1276,7 +1386,6 @@ def process(card):
             "KULENOVIC": "KULENOVIC PROTETTO",
             "RARITY": "RARITÀ NON LIMITED",
             "FLOOR_UNKNOWN": "FLOOR NON DISPONIBILE",
-            "FLOOR_LOW": "FLOOR SOTTO €0.32",
             "FLOOR_HIGH": "FLOOR SOPRA €0.70"
         }
 
@@ -1294,12 +1403,13 @@ def process(card):
             ),
             error=result
         )
+
         return
 
-    price = result
+    floor_price = result
 
     print(
-        f"✅ CARTA VALIDA → floor {eur(price)}",
+        f"✅ CARTA VALIDA → floor {eur(floor_price)}",
         flush=True
     )
 
@@ -1312,9 +1422,13 @@ def process(card):
             "❌ Impossibile impostare SELLING",
             flush=True
         )
+
         return
 
-    offer_id = create_sale(details, price)
+    offer_id, used_price = create_sale(
+        details,
+        floor_price
+    )
 
     if not offer_id:
         update_card(
@@ -1327,6 +1441,7 @@ def process(card):
             "🔁 Carta rimessa in DA_VENDERE",
             flush=True
         )
+
         return
 
     update_card(
@@ -1337,20 +1452,20 @@ def process(card):
     )
 
     if offer_id == "ALREADY-LISTED":
-        print("🟢 CARTA GIÀ IN VENDITA", flush=True)
+        print(
+            "🟢 CARTA GIÀ IN VENDITA",
+            flush=True
+        )
+
     else:
         print(
             f"🎉 AUTOSELL COMPLETATO → "
-            f"{label(details)} | {eur(price)} | {offer_id}",
+            f"{label(details)} | {eur(used_price)} | {offer_id}",
             flush=True
         )
 
     print("🟢 STATO → SELLING", flush=True)
 
-
-# ============================================================
-# RECOVERY
-# ============================================================
 
 def recovery():
     selling = [
@@ -1363,6 +1478,7 @@ def recovery():
             "🔄 Recovery: nessuna carta SELLING.",
             flush=True
         )
+
         return
 
     print(
@@ -1378,15 +1494,16 @@ def recovery():
         )
 
 
-# ============================================================
-# WORKER
-# ============================================================
-
 def worker():
     print("🤖 AUTOSELL AVVIATO", flush=True)
     print(f"📦 VERSIONE: {VERSION}", flush=True)
     print(f"🧪 DRY_RUN={DRY_RUN}", flush=True)
-    print("💰 RANGE: €0.32 - €0.70", flush=True)
+    print("💰 FLOOR MAX: €0.70", flush=True)
+    print("💰 MINIMO EUR: NESSUNO", flush=True)
+    print(
+        "🔁 MINIMO TECNICO: da 0.0002 ETH, +0.0001 ETH",
+        flush=True
+    )
     print(f"📊 LISTING MINIME: {MIN_LISTINGS}", flush=True)
     print("🎂 ETÀ: NON UTILIZZATA", flush=True)
     print("🔒 KULENOVIC: MAI VENDUTO", flush=True)
@@ -1406,8 +1523,13 @@ def worker():
     try:
         auth_headers()
         ensure_state()
+
     except Exception as e:
-        print(f"❌ Configurazione: {e}", flush=True)
+        print(
+            f"❌ Configurazione: {e}",
+            flush=True
+        )
+
         return
 
     if not check_account():
@@ -1427,6 +1549,7 @@ def worker():
             for card in cards:
                 try:
                     process(card)
+
                 except Exception as e:
                     asset = asset_id(card)
 
@@ -1445,13 +1568,13 @@ def worker():
             time.sleep(INTERVAL)
 
         except Exception as e:
-            print(f"❌ Worker: {e}", flush=True)
+            print(
+                f"❌ Worker: {e}",
+                flush=True
+            )
+
             time.sleep(INTERVAL)
 
-
-# ============================================================
-# FLASK
-# ============================================================
 
 @app.get("/")
 def home():
@@ -1462,7 +1585,10 @@ def home():
         "bot": "autosell",
         "version": VERSION,
         "dry_run": DRY_RUN,
-        "range": "€0.32-€0.70",
+        "max_floor": "€0.70",
+        "min_price": "NONE",
+        "technical_min_eth": "0.0002+",
+        "technical_step_eth": "0.0001",
         "min_live_listings": MIN_LISTINGS,
         "rarity": "LIMITED",
         "age": "NOT_USED",
@@ -1505,10 +1631,6 @@ def cards_endpoint():
         "cards": cards
     })
 
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def start_worker():
     global worker_started
