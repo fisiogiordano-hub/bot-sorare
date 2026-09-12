@@ -71,6 +71,41 @@
       "offer_id": "SingleBuyOffer:561809c0-e1c2-4a25-b99c-a01d89948e96"
     }
   ],
-  "pending_autobuys": [],
-  "updated_at": 1789209564
+  "pending_autobuys": [
+    {
+      "offer_id": "DirectOffer:15348464-45ad-4a89-a519-aca3528c2216",
+      "original_offer_id": "directoffer:4318640c-ac3b-43b6-80b5-0a736b332c4e",
+      "created_at": 1789220078,
+      "cards": [
+        {
+          "assetId": "0x0400162b8d400644d97aaa7b59a0332a43bd6bfdc5adc805d91ca9052c672d65",
+          "slug": "esmir-bajraktarevic-2025-limited-368",
+          "name": "Esmir Bajraktarevic 2025-26 • Limited 368/1000"
+        },
+        {
+          "assetId": "0x040051f6dcb3e6a9fbb8eed591b9936693f757ef35aee8deea1e47c9ee8d5bd9",
+          "slug": "max-bruns-2025-limited-351",
+          "name": "Max Bruns 2025-26 • Limited 351/1000"
+        },
+        {
+          "assetId": "0x0400aa6a789a6eda43915d177f5d7e3305dd024fe343ee53668ac0f0961e1baf",
+          "slug": "paul-nebel-2024-limited-394",
+          "name": "Paul Nebel 2024-25 • Limited 394/1000"
+        },
+        {
+          "assetId": "0x0400d5bcb57a2c6d290d5a7cb8b0a30a5ce6db47422516629707b2bcdc69ae30",
+          "slug": "oussama-targhalline-2025-limited-336",
+          "name": "Oussama Targhalline 2025-26 • Limited 336/1000"
+        },
+        {
+          "assetId": "0x0400e5cc4e6a719630c3188b2d6859ebf346a56ca8f0711fd7db532316c14e89",
+          "slug": "yarek-gasiorowski-hernandis-2025-limited-651",
+          "name": "Yarek Gąsiorowski 2025-26 • Limited 651/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
+    }
+  ],
+  "updated_at": 1789220078
 }
