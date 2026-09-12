@@ -70,6 +70,46 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:561809c0-e1c2-4a25-b99c-a01d89948e96"
+    },
+    {
+      "assetId": "0x0400162b8d400644d97aaa7b59a0332a43bd6bfdc5adc805d91ca9052c672d65",
+      "slug": "esmir-bajraktarevic-2025-limited-368",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:15348464-45ad-4a89-a519-aca3528c2216"
+    },
+    {
+      "assetId": "0x040051f6dcb3e6a9fbb8eed591b9936693f757ef35aee8deea1e47c9ee8d5bd9",
+      "slug": "max-bruns-2025-limited-351",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:15348464-45ad-4a89-a519-aca3528c2216"
+    },
+    {
+      "assetId": "0x0400aa6a789a6eda43915d177f5d7e3305dd024fe343ee53668ac0f0961e1baf",
+      "slug": "paul-nebel-2024-limited-394",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:15348464-45ad-4a89-a519-aca3528c2216"
+    },
+    {
+      "assetId": "0x0400d5bcb57a2c6d290d5a7cb8b0a30a5ce6db47422516629707b2bcdc69ae30",
+      "slug": "oussama-targhalline-2025-limited-336",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:15348464-45ad-4a89-a519-aca3528c2216"
+    },
+    {
+      "assetId": "0x0400e5cc4e6a719630c3188b2d6859ebf346a56ca8f0711fd7db532316c14e89",
+      "slug": "yarek-gasiorowski-hernandis-2025-limited-651",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:15348464-45ad-4a89-a519-aca3528c2216"
     }
   ],
   "pending_autobuys": [
@@ -108,5 +148,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789220080
+  "updated_at": 1789221349
 }
