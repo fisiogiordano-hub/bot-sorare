@@ -5,6 +5,8 @@ import uuid
 import shutil
 import subprocess
 import threading
+from decimal import Decimal, ROUND_FLOOR
+
 import requests
 from flask import Flask, jsonify
 
@@ -27,6 +29,14 @@ TIMEOUT = int(os.getenv("TIMEOUT", "25"))
 MAX_PRICE = 70
 MIN_LISTINGS = 5
 
+# Soglia tecnica rilevata da Sorare:
+# il prezzo deve essere > 0.0002 ETH.
+SORARE_MIN_ETH = Decimal("0.0002")
+
+# Se il primo tentativo viene ancora rifiutato da Sorare
+# per il minimo tecnico, aumentiamo di 1 centesimo.
+SORARE_MIN_RETRIES = 5
+
 STATE_FILE = os.getenv("BOT_STATE_PATH", "bot_state.json").strip()
 VERSION = "AUTOSell-13.0-SOLANA-EUR-PRECHECK"
 
@@ -41,6 +51,13 @@ worker_lock = threading.Lock()
 worker_started = False
 
 SOLANA_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+# Cache ETH/EUR per evitare richieste continue.
+eth_eur_lock = threading.Lock()
+eth_eur_cache = {
+    "rate": None,
+    "updated_at": 0
+}
 
 
 # ============================================================
@@ -515,6 +532,127 @@ def get_floor(card):
 
 
 # ============================================================
+# SORARE MINIMUM SALE PRICE
+# ============================================================
+
+def get_eth_eur_rate():
+    """
+    Recupera il cambio ETH/EUR corrente.
+
+    Viene usato solamente per trasformare la soglia tecnica
+    Sorare di 0.0002 ETH nel minimo prezzo EUR necessario.
+    Il risultato viene messo in cache per 60 secondi.
+    """
+
+    with eth_eur_lock:
+        cached_rate = eth_eur_cache.get("rate")
+        cached_time = eth_eur_cache.get("updated_at", 0)
+
+        if (
+            cached_rate is not None
+            and time.time() - cached_time < 60
+        ):
+            return cached_rate
+
+        response = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={
+                "ids": "ethereum",
+                "vs_currencies": "eur"
+            },
+            headers={
+                "Accept": "application/json",
+                "User-Agent": f"Sorare-AutoSell/{VERSION}"
+            },
+            timeout=10
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"ETH/EUR HTTP {response.status_code}"
+            )
+
+        data = response.json()
+
+        rate = (
+            ((data or {}).get("ethereum") or {})
+            .get("eur")
+        )
+
+        if rate is None:
+            raise RuntimeError("ETH/EUR non disponibile")
+
+        rate = Decimal(str(rate))
+
+        if rate <= 0:
+            raise RuntimeError("ETH/EUR non valido")
+
+        eth_eur_cache["rate"] = rate
+        eth_eur_cache["updated_at"] = time.time()
+
+        return rate
+
+
+def sorare_min_eur_cents():
+    """
+    Sorare ha rifiutato prezzi sotto 0.0002 ETH.
+
+    Poiché la vendita viene fatta in EUR, convertiamo
+    0.0002 ETH nel controvalore EUR corrente.
+
+    Il +1 centesimo serve perché Sorare richiede un valore
+    GREATER THAN 0.0002 ETH, non uguale.
+    """
+
+    eth_eur = get_eth_eur_rate()
+
+    minimum_eur = (
+        SORARE_MIN_ETH * eth_eur
+    )
+
+    minimum_cents = (
+        minimum_eur * Decimal("100")
+    ).to_integral_value(
+        rounding=ROUND_FLOOR
+    )
+
+    minimum_cents = int(minimum_cents) + 1
+
+    if minimum_cents < 1:
+        minimum_cents = 1
+
+    print(
+        f"💶 ETH/EUR={eth_eur:.2f} → "
+        f"MIN SORARE ≈ {eur(minimum_cents)}",
+        flush=True
+    )
+
+    return minimum_cents
+
+
+def adjust_sale_price(price):
+    """
+    Se il floor è sotto il minimo tecnico Sorare,
+    usa il minimo Sorare.
+
+    Se il floor è già sopra il minimo,
+    mantiene esattamente il floor.
+    """
+
+    minimum = sorare_min_eur_cents()
+
+    if price < minimum:
+        print(
+            f"⬆️ FLOOR {eur(price)} < MIN SORARE {eur(minimum)} "
+            f"→ VENDITA A {eur(minimum)}",
+            flush=True
+        )
+        return minimum
+
+    return price
+
+
+# ============================================================
 # VALIDATION
 # ============================================================
 
@@ -537,6 +675,8 @@ def validate(card):
     if floor is None:
         return False, "FLOOR_UNKNOWN"
 
+    # NESSUN LIMITE MINIMO.
+    # L'unico limite del floor è quello massimo.
     if floor > MAX_PRICE:
         return False, "FLOOR_HIGH"
 
@@ -1039,7 +1179,7 @@ def prepare_sale(asset, price):
     }
 
     print(
-        "📦 prepareOffer → settlementCurrencies=EUR",
+        f"📦 prepareOffer → EUR {eur(price)}",
         flush=True
     )
 
@@ -1085,18 +1225,29 @@ def prepare_sale(asset, price):
 # CREATE SALE
 # ============================================================
 
+def is_min_price_error(errors):
+    if not isinstance(errors, list):
+        return False
+
+    text = " ".join(
+        str(e.get("message", ""))
+        for e in errors
+        if isinstance(e, dict)
+    )
+
+    text = norm(text)
+
+    return (
+        "price must be greater than 0.0002 eth"
+        in text
+    )
+
+
 def create_sale(card, price):
     asset = asset_id(card)
 
     if not asset:
         return None
-
-    if DRY_RUN:
-        print(
-            f"🟡 DRY RUN → {label(card)} → {eur(price)}",
-            flush=True
-        )
-        return "DRY-RUN"
 
     existing_offer = find_active_public_offer(asset)
 
@@ -1105,71 +1256,154 @@ def create_sale(card, price):
         print(f"🟢 OFFER ID → {existing_offer}", flush=True)
         return existing_offer
 
-    authorizations = prepare_sale(asset, price)
+    # ========================================================
+    # PREZZO DI VENDITA
+    # ========================================================
 
-    if not authorizations:
-        return None
+    sale_price = price
 
     try:
-        approvals = sign_authorizations(authorizations)
+        sale_price = adjust_sale_price(price)
     except Exception as e:
-        print(f"❌ Firma: {e}", flush=True)
-        return None
-
-    create_query = """
-    mutation CreateSale($input: createSingleSaleOfferInput!) {
-        createSingleSaleOffer(input: $input) {
-            tokenOffer {
-                id
-                startDate
-                endDate
-            }
-            errors {
-                message
-            }
-        }
-    }
-    """
-
-    create_input = {
-        "approvals": approvals,
-        "dealId": new_id(),
-        "assetId": asset,
-        "settlementCurrencies": "EUR",
-        "receiveAmount": {
-            "amount": str(price),
-            "currency": "EUR"
-        },
-        "clientMutationId": new_id()
-    }
-
-    print(
-        "📤 createSingleSaleOffer → settlementCurrencies=EUR",
-        flush=True
-    )
-
-    data = gql(create_query, {"input": create_input})
-
-    result = (
-        ((data or {}).get("data") or {})
-        .get("createSingleSaleOffer")
-    )
-
-    if not result:
         print(
-            "❌ createSingleSaleOffer: nessun risultato",
+            f"⚠️ Impossibile calcolare il minimo Sorare: {e}",
             flush=True
         )
-        return None
 
-    errors = result.get("errors") or []
+        # Se il floor è già abbastanza alto, non serve
+        # conoscere il minimo Sorare.
+        if price <= 0:
+            print(
+                "❌ Prezzo floor non valido",
+                flush=True
+            )
+            return None
 
-    if errors:
+    if sale_price != price:
+        print(
+            f"💰 FLOOR REALE → {eur(price)}",
+            flush=True
+        )
+        print(
+            f"💰 PREZZO INSERZIONE → {eur(sale_price)}",
+            flush=True
+        )
+
+    if DRY_RUN:
+        print(
+            f"🟡 DRY RUN → {label(card)} → {eur(sale_price)}",
+            flush=True
+        )
+        return "DRY-RUN"
+
+    # ========================================================
+    # CREAZIONE OFFERTA
+    # ========================================================
+
+    for attempt in range(SORARE_MIN_RETRIES + 1):
+
+        authorizations = prepare_sale(
+            asset,
+            sale_price
+        )
+
+        if not authorizations:
+            return None
+
+        try:
+            approvals = sign_authorizations(
+                authorizations
+            )
+        except Exception as e:
+            print(f"❌ Firma: {e}", flush=True)
+            return None
+
+        create_query = """
+        mutation CreateSale($input: createSingleSaleOfferInput!) {
+            createSingleSaleOffer(input: $input) {
+                tokenOffer {
+                    id
+                    startDate
+                    endDate
+                }
+                errors {
+                    message
+                }
+            }
+        }
+        """
+
+        create_input = {
+            "approvals": approvals,
+            "dealId": new_id(),
+            "assetId": asset,
+            "settlementCurrencies": "EUR",
+            "receiveAmount": {
+                "amount": str(sale_price),
+                "currency": "EUR"
+            },
+            "clientMutationId": new_id()
+        }
+
+        print(
+            f"📤 createSingleSaleOffer → "
+            f"EUR {eur(sale_price)}",
+            flush=True
+        )
+
+        data = gql(
+            create_query,
+            {"input": create_input}
+        )
+
+        result = (
+            ((data or {}).get("data") or {})
+            .get("createSingleSaleOffer")
+        )
+
+        if not result:
+            print(
+                "❌ createSingleSaleOffer: nessun risultato",
+                flush=True
+            )
+            return None
+
+        errors = result.get("errors") or []
+
+        if not errors:
+            offer_id = (
+                (result.get("tokenOffer") or {})
+                .get("id")
+            )
+
+            if not offer_id:
+                print(
+                    "❌ Vendita non creata: offer ID assente",
+                    flush=True
+                )
+                return None
+
+            print(
+                f"✅ INSERZIONE CREATA → {offer_id}",
+                flush=True
+            )
+
+            print(
+                f"💶 PREZZO INSERZIONE → {eur(sale_price)}",
+                flush=True
+            )
+
+            return offer_id
+
         error_text = " ".join(
             str(e.get("message", ""))
             for e in errors
             if isinstance(e, dict)
         )
+
+        # ====================================================
+        # CARTA GIÀ IN VENDITA
+        # ====================================================
 
         if "active public offer already exists" in norm(error_text):
             print(
@@ -1188,31 +1422,60 @@ def create_sale(card, price):
 
             return "ALREADY-LISTED"
 
+        # ====================================================
+        # MINIMO SORARE NON SUFFICIENTE
+        # ====================================================
+
+        if is_min_price_error(errors):
+
+            if attempt >= SORARE_MIN_RETRIES:
+                print(
+                    "❌ Minimo Sorare ancora rifiutato "
+                    f"dopo {SORARE_MIN_RETRIES} aumenti",
+                    flush=True
+                )
+
+                print(
+                    json.dumps(
+                        errors,
+                        ensure_ascii=False
+                    ),
+                    flush=True
+                )
+
+                return None
+
+            sale_price += 1
+
+            print(
+                "⬆️ Sorare richiede un prezzo maggiore "
+                "del minimo tecnico",
+                flush=True
+            )
+
+            print(
+                f"🔁 NUOVO TENTATIVO → {eur(sale_price)}",
+                flush=True
+            )
+
+            continue
+
+        # ====================================================
+        # ALTRO ERRORE
+        # ====================================================
+
         print(
             "❌ createSingleSaleOffer:",
-            json.dumps(errors, ensure_ascii=False),
+            json.dumps(
+                errors,
+                ensure_ascii=False
+            ),
             flush=True
         )
+
         return None
 
-    offer_id = (
-        (result.get("tokenOffer") or {})
-        .get("id")
-    )
-
-    if not offer_id:
-        print(
-            "❌ Vendita non creata: offer ID assente",
-            flush=True
-        )
-        return None
-
-    print(
-        f"✅ INSERZIONE CREATA → {offer_id}",
-        flush=True
-    )
-
-    return offer_id
+    return None
 
 
 # ============================================================
@@ -1272,7 +1535,6 @@ def process(card):
             "KULENOVIC": "KULENOVIC PROTETTO",
             "RARITY": "RARITÀ NON LIMITED",
             "FLOOR_UNKNOWN": "FLOOR NON DISPONIBILE",
-            "FLOOR_LOW": "FLOOR SOTTO €0.32",
             "FLOOR_HIGH": "FLOOR SOPRA €0.70"
         }
 
@@ -1310,7 +1572,10 @@ def process(card):
         )
         return
 
-    offer_id = create_sale(details, price)
+    offer_id = create_sale(
+        details,
+        price
+    )
 
     if not offer_id:
         update_card(
@@ -1337,7 +1602,9 @@ def process(card):
     else:
         print(
             f"🎉 AUTOSELL COMPLETATO → "
-            f"{label(details)} | {eur(price)} | {offer_id}",
+            f"{label(details)} | "
+            f"{eur(price)} | "
+            f"{offer_id}",
             flush=True
         )
 
@@ -1382,13 +1649,19 @@ def worker():
     print("🤖 AUTOSELL AVVIATO", flush=True)
     print(f"📦 VERSIONE: {VERSION}", flush=True)
     print(f"🧪 DRY_RUN={DRY_RUN}", flush=True)
-    print("💰 RANGE: €0.32 - €0.70", flush=True)
+    print("💰 RANGE FLOOR: €0.00 - €0.70", flush=True)
+    print("📊 NESSUN FLOOR MINIMO", flush=True)
     print(f"📊 LISTING MINIME: {MIN_LISTINGS}", flush=True)
     print("🎂 ETÀ: NON UTILIZZATA", flush=True)
     print("🔒 KULENOVIC: MAI VENDUTO", flush=True)
     print("🛡️ COVERAGE: DISABILITATA", flush=True)
     print("🛡️ SOURCE: AUTOBUY / SWAP", flush=True)
     print("💶 SETTLEMENT: EUR", flush=True)
+    print(
+        "💶 FLOOR SOTTO MINIMO SORARE → "
+        "USA MINIMO SORARE",
+        flush=True
+    )
     print(
         "🟢 PRE-CHECK: GIÀ IN VENDITA → NON RIPROVARE",
         flush=True
@@ -1458,13 +1731,16 @@ def home():
         "bot": "autosell",
         "version": VERSION,
         "dry_run": DRY_RUN,
-        "range": "€0.32-€0.70",
+        "range": "€0.00-€0.70",
+        "min_floor": None,
+        "max_floor": "€0.70",
         "min_live_listings": MIN_LISTINGS,
         "rarity": "LIMITED",
         "age": "NOT_USED",
         "kulenovic": "NEVER_SELL",
         "coverage": "DISABLED",
         "settlement": "EUR",
+        "sorare_min_price": "AUTO",
         "already_listed": "SKIP",
         "duplicate_offer": "SELLING",
         "storage": STATE_FILE,
