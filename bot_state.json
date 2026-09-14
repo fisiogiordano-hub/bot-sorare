@@ -2,6 +2,7 @@
   "processed_offers": [
     "directoffer:06a089ae-e715-4aaa-9161-505dca91df73",
     "directoffer:081284ce-5e03-44e8-9f6f-38b4864c641f",
+    "directoffer:1fe7a336-6c77-444f-843e-a93d0c3bba9c",
     "directoffer:256f389b-46ef-4a73-98f9-3127256abdc2",
     "directoffer:325dce87-e795-4dc0-aa46-0314b0dc8864",
     "directoffer:4318640c-ac3b-43b6-80b5-0a736b332c4e",
@@ -152,5 +153,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789393048
+  "updated_at": 1789411184
 }
