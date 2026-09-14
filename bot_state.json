@@ -135,7 +135,21 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "SingleBuyOffer:4fa9adab-9024-42a6-aed0-958f854e09b1",
+      "original_offer_id": "directoffer:52af2ac6-191d-40fb-8e22-4b648815081f",
+      "created_at": 1789393046,
+      "cards": [
+        {
+          "assetId": "0x040023133bcd2bcb9bcfee596e4f6a79da977df9e258fb1c10a3c6a89ca27448",
+          "slug": "haruto-fujii-2026-limited-100-1",
+          "name": "Haruto Fujii 2026-27 • Limited 100/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1789391656
+  "updated_at": 1789393046
 }
