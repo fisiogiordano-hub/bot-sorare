@@ -585,67 +585,60 @@ def get_received_offers():
     )
 
 
+# ============================================================
+# FIX INDISPENSABILE:
+# CERCA DIRETTAMENTE L'OFFERTA TRAMITE tokens.offer(id)
+# ============================================================
+
 def get_pending_sent_offer(offer_id):
     d=graphql("""
-    query{
-      currentUser{
-        pendingTokenOffersSent(first:50){
-          nodes{
-            id
-            blockchainId
-            status
-            type
-            createdAt
-            acceptedAt
-            cancelledAt
-            transactionDate
-            sender{
-              ... on User{
-                slug
-              }
+    query($offerId:String!){
+      tokens{
+        offer(id:$offerId){
+          id
+          blockchainId
+          status
+          type
+          createdAt
+          acceptedAt
+          cancelledAt
+          transactionDate
+          sender{
+            ... on User{
+              slug
             }
-            receiver{
-              ... on User{
-                slug
-              }
+          }
+          receiver{
+            ... on User{
+              slug
             }
-            senderSide{
-              anyCards{
-                assetId
-                slug
-                name
-              }
+          }
+          senderSide{
+            anyCards{
+              assetId
+              slug
+              name
             }
-            receiverSide{
-              anyCards{
-                assetId
-                slug
-                name
-              }
+          }
+          receiverSide{
+            anyCards{
+              assetId
+              slug
+              name
             }
           }
         }
       }
     }
-    """)
+    """,{
+        "offerId":offer_id
+    })
 
-    offers=(
+    return (
         (((d or {}).get("data") or {})
-        .get("currentUser") or {})
-        .get(
-            "pendingTokenOffersSent",
-            {}
-        )
-        .get("nodes",[])
+        .get("tokens") or {})
+        .get("offer")
     )
-
-    wanted=norm(offer_id)
-
-    for o in offers:
-        if norm(o.get("id"))==wanted:
-            return o
-
-    return None
 
 
 # ============================================================
@@ -886,8 +879,7 @@ def live_floor(card):
 
 
 # ============================================================
-# NUOVO CONTROLLO:
-# LA CARTA È ATTUALMENTE IN VENDITA?
+# CARTA ATTUALMENTE IN VENDITA
 # ============================================================
 
 def card_is_listed_for_sale(asset_id):
@@ -1539,9 +1531,6 @@ def process_autobuy(o):
         if validate_card(c)
     ]
 
-    # Se alcune carte non sono idonee,
-    # vengono semplicemente escluse.
-    # Se nessuna è idonea, rifiuta.
     if not valid:
         print(
             "🚫 AUTOBUY: nessuna carta idonea",
@@ -1634,8 +1623,7 @@ def check_pending_autobuys():
             if not offer:
                 print(
                     f"⚠️ AutoBuy {oid}: "
-                    f"non presente tra "
-                    f"pending inviati",
+                    f"offerta non trovata",
                     flush=True
                 )
                 continue
@@ -1917,19 +1905,11 @@ def process_swap(o):
     if not sender or not receiver:
         return
 
-    # ========================================================
-    # CARTE CHE TU DAI
-    # ========================================================
-
     give_ids=[
         c.get("assetId")
         for c in receiver
         if c.get("assetId")
     ]
-
-    # ========================================================
-    # CARTE CHE TU RICEVI
-    # ========================================================
 
     receive_ids=[
         c.get("assetId")
@@ -1971,10 +1951,6 @@ def process_swap(o):
         )
         return
 
-    # ========================================================
-    # KULENOVIC MAI CEDIBILE
-    # ========================================================
-
     if any(
         is_kulenovic(c)
         for c in give
@@ -1989,12 +1965,6 @@ def process_swap(o):
             mark_done(oid)
 
         return
-
-    # ========================================================
-    # NUOVA REGOLA:
-    # TRA LE MIE CARTE PRESENTI NELL'OFFERTA
-    # RESTANO SOLO QUELLE ATTUALMENTE IN VENDITA
-    # ========================================================
 
     listed=listed_cards(
         give_ids
@@ -2025,10 +1995,6 @@ def process_swap(o):
                 flush=True
             )
 
-    # ========================================================
-    # NESSUNA CARTA RIMASTA
-    # ========================================================
-
     if not eligible_give:
         print(
             "🚫 SWAP RIFIUTATO: "
@@ -2042,10 +2008,6 @@ def process_swap(o):
             mark_done(oid)
 
         return
-
-    # ========================================================
-    # VALORE DELLE MIE SOLE CARTE RIMASTE
-    # ========================================================
 
     total_given=0
 
@@ -2069,10 +2031,6 @@ def process_swap(o):
             f"{format_eur(floor)}",
             flush=True
         )
-
-    # ========================================================
-    # VALORE CARTE RICEVUTE
-    # ========================================================
 
     total_received=0
 
@@ -2110,24 +2068,12 @@ def process_swap(o):
             flush=True
         )
 
-    # ========================================================
-    # CASH PRESENTE NELL'OFFERTA
-    # ========================================================
-
     cash=price_eur(
         (o.get("senderSide") or {})
         .get("amounts") or {}
     ) or 0
 
     total_received+=cash
-
-    # ========================================================
-    # +20% / +25%
-    #
-    # IMPORTANTISSIMO:
-    # total_given = SOLO le mie carte rimaste
-    # nell'offerta perché risultano in vendita.
-    # ========================================================
 
     minimum=int(
         round(
@@ -2166,11 +2112,6 @@ def process_swap(o):
         flush=True
     )
 
-    # ========================================================
-    # SOTTO +20%
-    # CONTROPROPOSTA
-    # ========================================================
-
     if total_received<minimum:
 
         missing=minimum-total_received
@@ -2187,22 +2128,12 @@ def process_swap(o):
             .get("slug")
         )
 
-        # ====================================================
-        # IMPORTANTISSIMO:
-        # send_ids contiene SOLO le mie carte
-        # rimaste nell'offerta e IN VENDITA.
-        #
-        # Le mie carte non in vendita vengono escluse.
-        # ====================================================
-
         send_ids=[
             c.get("assetId")
             for c in eligible_give
             if c.get("assetId")
         ]
 
-        # Le carte che l'altro ci aveva offerto
-        # restano tutte quelle originali.
         receive_ids=[
             c.get("assetId")
             for c in receive
@@ -2234,10 +2165,6 @@ def process_swap(o):
 
         return
 
-    # ========================================================
-    # SOPRA +25%
-    # ========================================================
-
     if total_received>maximum:
 
         print(
@@ -2249,11 +2176,6 @@ def process_swap(o):
             mark_done(oid)
 
         return
-
-    # ========================================================
-    # +20% / +25%
-    # ACCETTA
-    # ========================================================
 
     if (
         SWAP_AUTO_ACCEPT
