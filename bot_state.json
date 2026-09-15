@@ -128,6 +128,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:15348464-45ad-4a89-a519-aca3528c2216"
+    },
+    {
+      "assetId": "0x04003ce0d4cf686ce864de4fe5f8f97df6321bbe64e050604aacdb0b9731eeb9",
+      "slug": "ismael-landry-doukoure-2025-limited-803",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:1e02609b-c301-4aae-86c5-2a52208414d7"
     }
   ],
   "pending_autobuys": [
@@ -207,5 +215,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789478059
+  "updated_at": 1789478109
 }
