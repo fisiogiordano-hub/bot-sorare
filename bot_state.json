@@ -195,6 +195,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:ce2129d1-0d4b-47a7-aeef-1abbfe687e6b"
+    },
+    {
+      "assetId": "0x0400583d810e196d43e798ef747fb0fbdd904ae6abe42edad7ce051a5cd0e258",
+      "slug": "daniel-ballard-2025-limited-446",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:b77efce7-4c71-433d-807a-2908c8582cb6"
     }
   ],
   "pending_autobuys": [
@@ -274,5 +282,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789491925
+  "updated_at": 1789491939
 }
