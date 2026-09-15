@@ -163,6 +163,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:6e59aa47-67df-4429-97f8-8bd6d7de1abb"
+    },
+    {
+      "assetId": "0x04001c82e742697529dc65ce05297ca0dce6bf8345d654d4011d9eaf4cbffffa",
+      "slug": "filip-ugrinic-2025-limited-331",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:93a32b13-ca79-4623-b40f-2905b5759e48"
     }
   ],
   "pending_autobuys": [
@@ -256,5 +264,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789478630
+  "updated_at": 1789478632
 }
