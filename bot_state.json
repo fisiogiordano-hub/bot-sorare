@@ -248,7 +248,21 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "SingleBuyOffer:ce2129d1-0d4b-47a7-aeef-1abbfe687e6b",
+      "original_offer_id": "directoffer:0fdc91fc-52f9-4e1d-acee-f4631651d89d",
+      "created_at": 1789480460,
+      "cards": [
+        {
+          "assetId": "0x0400f60a398f328d4cf795fd4501b84bacdb1282c32734d4657bdd7610141f40",
+          "slug": "woo-yeong-jeong-2025-limited-353",
+          "name": "Wooyeong Jeong 2025-26 • Limited 353/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1789480443
+  "updated_at": 1789480460
 }
