@@ -199,7 +199,21 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "SingleBuyOffer:8790f705-80c8-4d5f-868b-f9fc03dfdcf0",
+      "original_offer_id": "directoffer:c3807c47-acc0-4ff9-ac58-bbcb30cec23a",
+      "created_at": 1789478279,
+      "cards": [
+        {
+          "assetId": "0x04006577afd81b5eb7ab8c3c0ff0cefaf2b9a3b1da9d045476446849dbeabbad",
+          "slug": "marius-louar-2025-limited-225",
+          "name": "Marius Louãr 2025-26 • Limited 225/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1789478122
+  "updated_at": 1789478279
 }
