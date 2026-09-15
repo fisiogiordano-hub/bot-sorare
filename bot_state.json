@@ -153,7 +153,21 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "SingleBuyOffer:227e30fc-ee8c-4d85-8e12-ff76c05b49b3",
+      "original_offer_id": "directoffer:d228f8af-14a3-4d58-a509-9c8d79bb423d",
+      "created_at": 1789464012,
+      "cards": [
+        {
+          "assetId": "0x04008314e9e3206d96f6126422c3d0104aadfded84da014d241e541eadde9081",
+          "slug": "mattes-hansen-2025-limited-233",
+          "name": "Mattes Hansen 2025-26 • Limited 233/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1789416268
+  "updated_at": 1789464012
 }
