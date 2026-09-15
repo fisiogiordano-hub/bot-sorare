@@ -266,21 +266,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "SingleBuyOffer:b77efce7-4c71-433d-807a-2908c8582cb6",
-      "original_offer_id": "directoffer:b68083ae-b25a-4569-bd29-536eb585e679",
-      "created_at": 1789491923,
-      "cards": [
-        {
-          "assetId": "0x0400583d810e196d43e798ef747fb0fbdd904ae6abe42edad7ce051a5cd0e258",
-          "slug": "daniel-ballard-2025-limited-446",
-          "name": "Daniel Ballard 2025-26 • Limited 446/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789491939
+  "updated_at": 1789491940
 }
