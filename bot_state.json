@@ -323,21 +323,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "SingleBuyOffer:f862cc4f-08cb-45bf-a4b1-d3a0954692d3",
-      "original_offer_id": "directoffer:d6339452-2c9b-4d8f-9a99-81b63069026e",
-      "created_at": 1789510178,
-      "cards": [
-        {
-          "assetId": "0x040072bb97cdabe758f07b494fddcd2f8225bc8b543431607fba11ed8c039953",
-          "slug": "nikolas-sattlberger-2025-limited-439",
-          "name": "Nikolas Sattlberger 2025-26 • Limited 439/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789510194
+  "updated_at": 1789510196
 }
