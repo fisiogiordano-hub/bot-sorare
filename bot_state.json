@@ -314,21 +314,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "SingleBuyOffer:a3f516db-a0c7-4026-8008-6369751476a9",
-      "original_offer_id": "directoffer:0ad72f53-5818-4b70-ace0-755dc2bcb58b",
-      "created_at": 1789509853,
-      "cards": [
-        {
-          "assetId": "0x0400586b5b1d46a6a06ceffaa4dd10ea04a4ad7b52cb609366c9b8c62e0ee82c",
-          "slug": "wagner-fabricio-cardoso-pina-2025-limited-513",
-          "name": "Wagner Pina 2025-26 • Limited 513/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789510013
+  "updated_at": 1789510015
 }
