@@ -248,21 +248,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "SingleBuyOffer:93a32b13-ca79-4623-b40f-2905b5759e48",
-      "original_offer_id": "directoffer:3780b0c3-1922-42e8-a92b-663ab4ca6eb3",
-      "created_at": 1789478545,
-      "cards": [
-        {
-          "assetId": "0x04001c82e742697529dc65ce05297ca0dce6bf8345d654d4011d9eaf4cbffffa",
-          "slug": "filip-ugrinic-2025-limited-331",
-          "name": "Filip Ugrinic 2025-26 • Limited 331/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789478632
+  "updated_at": 1789478634
 }
