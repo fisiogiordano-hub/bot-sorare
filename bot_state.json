@@ -26,6 +26,7 @@
     "directoffer:a7343a90-587a-4bea-afbe-c19bdb3d8ef8",
     "directoffer:afde77fb-bc24-4bad-bc17-d566029504a4",
     "directoffer:bd3ea2d8-4372-4e27-b055-c0b9244307bc",
+    "directoffer:c0c69c79-e513-45d2-8a50-c16d0bcfb82a",
     "directoffer:c3807c47-acc0-4ff9-ac58-bbcb30cec23a",
     "directoffer:c90efcaf-5240-413f-a06a-05591a6a0a43",
     "directoffer:ce17b75e-82cd-494a-9746-a0e3c3f57d74",
@@ -214,5 +215,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789478437
+  "updated_at": 1789478451
 }
