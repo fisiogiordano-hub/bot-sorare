@@ -186,6 +186,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:1d6afcb9-4ff7-4a3c-b264-a44ca4592e37"
+    },
+    {
+      "assetId": "0x0400f60a398f328d4cf795fd4501b84bacdb1282c32734d4657bdd7610141f40",
+      "slug": "woo-yeong-jeong-2025-limited-353",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:ce2129d1-0d4b-47a7-aeef-1abbfe687e6b"
     }
   ],
   "pending_autobuys": [
@@ -265,5 +273,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789480462
+  "updated_at": 1789488787
 }
