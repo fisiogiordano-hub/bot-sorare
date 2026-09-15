@@ -199,21 +199,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "SingleBuyOffer:1e02609b-c301-4aae-86c5-2a52208414d7",
-      "original_offer_id": "directoffer:09a9d4ed-02b8-4ea9-9536-dcbb12c8a1f0",
-      "created_at": 1789478057,
-      "cards": [
-        {
-          "assetId": "0x04003ce0d4cf686ce864de4fe5f8f97df6321bbe64e050604aacdb0b9731eeb9",
-          "slug": "ismael-landry-doukoure-2025-limited-803",
-          "name": "Ismaël Doukouré 2025-26 • Limited 803/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789478109
+  "updated_at": 1789478122
 }
