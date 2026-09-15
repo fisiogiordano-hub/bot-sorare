@@ -228,6 +228,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:a3f516db-a0c7-4026-8008-6369751476a9"
+    },
+    {
+      "assetId": "0x040072bb97cdabe758f07b494fddcd2f8225bc8b543431607fba11ed8c039953",
+      "slug": "nikolas-sattlberger-2025-limited-439",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:f862cc4f-08cb-45bf-a4b1-d3a0954692d3"
     }
   ],
   "pending_autobuys": [
@@ -331,5 +339,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789510180
+  "updated_at": 1789510194
 }
