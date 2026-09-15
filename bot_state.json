@@ -219,6 +219,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:710aa5cd-16c1-4cba-8dfd-94a0b59d6922"
+    },
+    {
+      "assetId": "0x0400586b5b1d46a6a06ceffaa4dd10ea04a4ad7b52cb609366c9b8c62e0ee82c",
+      "slug": "wagner-fabricio-cardoso-pina-2025-limited-513",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:a3f516db-a0c7-4026-8008-6369751476a9"
     }
   ],
   "pending_autobuys": [
@@ -322,5 +330,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789509988
+  "updated_at": 1789510013
 }
