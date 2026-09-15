@@ -242,20 +242,6 @@
       "status": "PENDING"
     },
     {
-      "offer_id": "SingleBuyOffer:6e59aa47-67df-4429-97f8-8bd6d7de1abb",
-      "original_offer_id": "directoffer:eb238a4e-5419-4cb2-b71a-c42be1052446",
-      "created_at": 1789478509,
-      "cards": [
-        {
-          "assetId": "0x0400b53a2536f8448875d10f34e8edad41498c4da826ea915d1289ee557e2aa7",
-          "slug": "hugo-rincon-lumbreras-2025-limited-34",
-          "name": "Hugo Rincón 2025-26 • Limited 34/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    },
-    {
       "offer_id": "SingleBuyOffer:93a32b13-ca79-4623-b40f-2905b5759e48",
       "original_offer_id": "directoffer:3780b0c3-1922-42e8-a92b-663ab4ca6eb3",
       "created_at": 1789478545,
@@ -270,5 +256,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789478628
+  "updated_at": 1789478630
 }
