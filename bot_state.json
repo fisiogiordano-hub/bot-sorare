@@ -340,26 +340,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:d86de7ec-21a7-4222-97b8-b17243b5bc79",
-      "original_offer_id": "directoffer:bcfc85e2-c30e-4de8-91e3-67a2b03d0a31",
-      "created_at": 1789510325,
-      "cards": [
-        {
-          "assetId": "0x04006ab22ab1d97578e511d483f7cf675456e105e2c2be884888938b7ac679ff",
-          "slug": "yaimar-abel-medina-ortiz-2025-limited-521",
-          "name": "Yaimar Medina 2025-26 • Limited 521/1000"
-        },
-        {
-          "assetId": "0x0400ebf23b89b29e3549cb4fb051450930cd05a2ea116221681a96e581474dc9",
-          "slug": "anouar-ait-el-hadj-2023-limited-322",
-          "name": "Anouar El Hadj 2023-24 • Limited 322/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789510403
+  "updated_at": 1789510404
 }
