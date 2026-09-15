@@ -242,21 +242,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "SingleBuyOffer:1d6afcb9-4ff7-4a3c-b264-a44ca4592e37",
-      "original_offer_id": "directoffer:ffc2acde-f9fa-4130-9ef2-86795bb7e730",
-      "created_at": 1789478491,
-      "cards": [
-        {
-          "assetId": "0x040015c354f359ac8e7d77bca0e5e6305e22b7d5fadd0ddb65ce5589eab42272",
-          "slug": "dehmaine-tabibou-assoumani-2025-limited-29",
-          "name": "Dehmaine Assoumani 2025-26 • Limited 29/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789478648
+  "updated_at": 1789478649
 }
