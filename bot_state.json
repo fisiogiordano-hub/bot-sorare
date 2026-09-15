@@ -138,6 +138,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:1e02609b-c301-4aae-86c5-2a52208414d7"
+    },
+    {
+      "assetId": "0x04006577afd81b5eb7ab8c3c0ff0cefaf2b9a3b1da9d045476446849dbeabbad",
+      "slug": "marius-louar-2025-limited-225",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:8790f705-80c8-4d5f-868b-f9fc03dfdcf0"
     }
   ],
   "pending_autobuys": [
@@ -217,5 +225,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789478296
+  "updated_at": 1789478369
 }
