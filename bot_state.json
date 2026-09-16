@@ -313,6 +313,30 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:360dce85-5d53-401f-bb7a-3262f0daaa0d"
+    },
+    {
+      "assetId": "0x04004a492ca04bb8f5b8df3876b5abead362c0fe7b8fb931969bd3136ad848c3",
+      "slug": "ariath-deng-piol-2026-limited-111",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:215c5de6-4c43-4576-84e3-fefd4823993f"
+    },
+    {
+      "assetId": "0x0400cf32f9533fda65ee91e76651e8a12caebe7ae303188b48bc0ffc072002c3",
+      "slug": "amine-boukamir-2025-limited-303",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:215c5de6-4c43-4576-84e3-fefd4823993f"
+    },
+    {
+      "assetId": "0x0400f7c790a0158a9260d85f3947f5c4c62864bb3f85ea3b3125d75a3324fedb",
+      "slug": "thelo-aasgaard-2025-limited-513",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:215c5de6-4c43-4576-84e3-fefd4823993f"
     }
   ],
   "pending_autobuys": [
@@ -426,5 +450,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789549261
+  "updated_at": 1789549325
 }
