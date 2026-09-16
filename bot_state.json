@@ -424,7 +424,36 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "DirectOffer:82c6d60c-09f3-42be-8eab-f892a9baa29b",
+      "original_offer_id": "directoffer:ee5b6854-6745-457a-ab78-05a41f76c173",
+      "created_at": 1789549478,
+      "cards": [
+        {
+          "assetId": "0x0400200511e1f290a3ff52c1830561a0c73102b801524f9086474a5f66c202e3",
+          "slug": "keisuke-goto-2025-limited-129",
+          "name": "Keisuke Goto 2025-26 • Limited 129/1000"
+        },
+        {
+          "assetId": "0x04003e352c04b47cb7d6d9cc454765dfcd73aabe169ff530126d2e5d28dc21a7",
+          "slug": "michal-skoras-2025-limited-88",
+          "name": "Michał Skóraś 2025-26 • Limited 88/1000"
+        },
+        {
+          "assetId": "0x04005146cba78921bcb18285ef2d13dca2f22d2b738b3c4c0682863ed61eadb9",
+          "slug": "ivan-pavlic-2025-limited-85",
+          "name": "Ivan Pavlić 2025-26 • Limited 85/1000"
+        },
+        {
+          "assetId": "0x0400d4f268b9f6eba0488f081c88bf5cf20e2afd17729cf13bfd23953ff3baa8",
+          "slug": "gyan-de-regt-2025-limited-336",
+          "name": "Gyan de Regt 2025-26 • Limited 336/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1789549326
+  "updated_at": 1789549478
 }
