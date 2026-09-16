@@ -258,6 +258,22 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:d86de7ec-21a7-4222-97b8-b17243b5bc79"
+    },
+    {
+      "assetId": "0x0400579c0d54f27131f0bc298bbe13df76deb4506b40f8a9fe7671fc12b61018",
+      "slug": "denso-kasius-2025-limited-173",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:8c56255a-b94d-4b21-9000-a130986eff0b"
+    },
+    {
+      "assetId": "0x0400a6d1f2afdb59e832b0bc5602be7a1018d78cec9d314872086cdc4d6b09c8",
+      "slug": "jacob-peter-hodl-2025-limited-434",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:8c56255a-b94d-4b21-9000-a130986eff0b"
     }
   ],
   "pending_autobuys": [
@@ -366,5 +382,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789547210
+  "updated_at": 1789547236
 }
