@@ -387,6 +387,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:5e2a2a87-42a6-4c0f-bde0-c1cc71b7d78e"
+    },
+    {
+      "assetId": "0x040051261a8d327cb0be9b6e55207b6e11732c52d561ce3261bde775ab6349db",
+      "slug": "soo-bin-lee-2021-limited-178",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:b11621c6-cfd8-424c-a9e6-4f46334040f2"
     }
   ],
   "pending_autobuys": [
@@ -471,5 +479,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789558340
+  "updated_at": 1789562063
 }
