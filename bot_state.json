@@ -361,26 +361,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:8c56255a-b94d-4b21-9000-a130986eff0b",
-      "original_offer_id": "directoffer:8b03275b-d967-4172-87e6-73ab177290c3",
-      "created_at": 1789546969,
-      "cards": [
-        {
-          "assetId": "0x0400579c0d54f27131f0bc298bbe13df76deb4506b40f8a9fe7671fc12b61018",
-          "slug": "denso-kasius-2025-limited-173",
-          "name": "Denso Kasius 2025-26 • Limited 173/1000"
-        },
-        {
-          "assetId": "0x0400a6d1f2afdb59e832b0bc5602be7a1018d78cec9d314872086cdc4d6b09c8",
-          "slug": "jacob-peter-hodl-2025-limited-434",
-          "name": "Jacob Hödl 2025-26 • Limited 434/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789547236
+  "updated_at": 1789547238
 }
