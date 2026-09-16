@@ -370,6 +370,22 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:82c6d60c-09f3-42be-8eab-f892a9baa29b"
+    },
+    {
+      "assetId": "0x04003bb71d0f62108fae315b5804de75b0e6c99652211e89f740b343323438d5",
+      "slug": "ginjiro-ikegaya-2026-limited-97-1",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:5e2a2a87-42a6-4c0f-bde0-c1cc71b7d78e"
+    },
+    {
+      "assetId": "0x0400ea8b126af90be9ec08922d094db934ac6205c5c2fc7f3faa5f8440d3f836",
+      "slug": "takumi-tsukui-2026-limited-53-1",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:5e2a2a87-42a6-4c0f-bde0-c1cc71b7d78e"
     }
   ],
   "pending_autobuys": [
@@ -459,5 +475,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789549545
+  "updated_at": 1789554385
 }
