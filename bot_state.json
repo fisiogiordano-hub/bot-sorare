@@ -399,36 +399,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:360dce85-5d53-401f-bb7a-3262f0daaa0d",
-      "original_offer_id": "directoffer:e1e3981b-3dbe-469d-a6ef-aa4097d65dbd",
-      "created_at": 1789549052,
-      "cards": [
-        {
-          "assetId": "0x040038ee33c9caeb90551b19609a5774a4b972bca3dae30fcc5f14ca39c386da",
-          "slug": "isak-jensen-2025-limited-430",
-          "name": "Isak Jensen 2025-26 • Limited 430/1000"
-        },
-        {
-          "assetId": "0x0400460061672dc819403b384bd637ebccbc351830a0ee0239f5e4ce71b787cd",
-          "slug": "kenneth-taylor-2025-limited-326",
-          "name": "Kenneth Taylor 2025-26 • Limited 326/1000"
-        },
-        {
-          "assetId": "0x0400a2fa83c7dd2de67822822b034feaccfd7843765a98c63555301865b47725",
-          "slug": "archie-brown-2025-limited-97",
-          "name": "Archibald Brown 2025-26 • Limited 97/1000"
-        },
-        {
-          "assetId": "0x0400bf48476744c7a826fff072893cae3014627c8616e34e1052c3b0a1590f92",
-          "slug": "maxim-dekker-2025-limited-166",
-          "name": "Maxim Dekker 2025-26 • Limited 166/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789549105
+  "updated_at": 1789549107
 }
