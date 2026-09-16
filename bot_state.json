@@ -432,25 +432,6 @@
       "status": "PENDING"
     },
     {
-      "offer_id": "DirectOffer:5e2a2a87-42a6-4c0f-bde0-c1cc71b7d78e",
-      "original_offer_id": "directoffer:cfb1c9dd-09e5-4036-847e-67ca0eb8d495",
-      "created_at": 1789464745,
-      "cards": [
-        {
-          "assetId": "0x04003bb71d0f62108fae315b5804de75b0e6c99652211e89f740b343323438d5",
-          "slug": "ginjiro-ikegaya-2026-limited-97-1",
-          "name": "Ginjiro Ikegaya 2026-27 • Limited 97/1000"
-        },
-        {
-          "assetId": "0x0400ea8b126af90be9ec08922d094db934ac6205c5c2fc7f3faa5f8440d3f836",
-          "slug": "takumi-tsukui-2026-limited-53-1",
-          "name": "Takumi Tsukui 2026-27 • Limited 53/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    },
-    {
       "offer_id": "DirectOffer:11bb9545-9b65-46d2-ac7a-d5cf61731e6d",
       "original_offer_id": "directoffer:c120b349-4f1f-4a5f-97b0-9bbc66d5ffde",
       "created_at": 1789492477,
@@ -475,5 +456,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789554385
+  "updated_at": 1789554386
 }
