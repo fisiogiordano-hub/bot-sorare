@@ -399,6 +399,38 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:b11621c6-cfd8-424c-a9e6-4f46334040f2"
+    },
+    {
+      "assetId": "0x04004b0003c83fc5bd77df38d5fffe673fcec0afcdcbbf75265614363b880907",
+      "slug": "nicolas-melamed-ribaudo-2021-limited-477",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:092e2d53-a754-4783-a3f6-2434265be341"
+    },
+    {
+      "assetId": "0x04008c3441a2a034f32e4decc5dea4f2e3cb410e7f33cfbe5eaddb9f041410c2",
+      "slug": "mohamed-nasraoui-2025-limited-138",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:092e2d53-a754-4783-a3f6-2434265be341"
+    },
+    {
+      "assetId": "0x0400cfe1250bf75a10a45747842f0311a94187e1e815b1bcb70b2cc7b3eab078",
+      "slug": "sota-nakamura-2025-limited-682",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:092e2d53-a754-4783-a3f6-2434265be341"
+    },
+    {
+      "assetId": "0x0400d279bc1558f7fe1aea550e0fb51de5b502847c9cde72c8cff435b4f2ea97",
+      "slug": "danilo-dos-santos-de-oliveira-2024-limited-599",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:092e2d53-a754-4783-a3f6-2434265be341"
     }
   ],
   "pending_autobuys": [
@@ -512,5 +544,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789596086
+  "updated_at": 1789596112
 }
