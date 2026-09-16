@@ -463,21 +463,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "SingleBuyOffer:b11621c6-cfd8-424c-a9e6-4f46334040f2",
-      "original_offer_id": "directoffer:1e35a801-1c86-41a2-ab6e-5cb777765027",
-      "created_at": 1789558338,
-      "cards": [
-        {
-          "assetId": "0x040051261a8d327cb0be9b6e55207b6e11732c52d561ce3261bde775ab6349db",
-          "slug": "soo-bin-lee-2021-limited-178",
-          "name": "Lee Soo-Bin 2021-22 • Limited 178/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789562063
+  "updated_at": 1789562065
 }
