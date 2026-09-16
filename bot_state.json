@@ -424,31 +424,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:215c5de6-4c43-4576-84e3-fefd4823993f",
-      "original_offer_id": "directoffer:6302358d-8908-4cb2-b8a9-513d6065540e",
-      "created_at": 1789549259,
-      "cards": [
-        {
-          "assetId": "0x04004a492ca04bb8f5b8df3876b5abead362c0fe7b8fb931969bd3136ad848c3",
-          "slug": "ariath-deng-piol-2026-limited-111",
-          "name": "Ariath Piol 2026-27 • Limited 111/1000"
-        },
-        {
-          "assetId": "0x0400cf32f9533fda65ee91e76651e8a12caebe7ae303188b48bc0ffc072002c3",
-          "slug": "amine-boukamir-2025-limited-303",
-          "name": "Amine Boukamir 2025-26 • Limited 303/1000"
-        },
-        {
-          "assetId": "0x0400f7c790a0158a9260d85f3947f5c4c62864bb3f85ea3b3125d75a3324fedb",
-          "slug": "thelo-aasgaard-2025-limited-513",
-          "name": "Thelonious Aasgaard 2025-26 • Limited 513/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789549325
+  "updated_at": 1789549326
 }
