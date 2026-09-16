@@ -513,36 +513,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:092e2d53-a754-4783-a3f6-2434265be341",
-      "original_offer_id": "directoffer:c5bc61cb-2d84-4842-9440-707e01ac6fdf",
-      "created_at": 1789596084,
-      "cards": [
-        {
-          "assetId": "0x04004b0003c83fc5bd77df38d5fffe673fcec0afcdcbbf75265614363b880907",
-          "slug": "nicolas-melamed-ribaudo-2021-limited-477",
-          "name": "Nico Melamed 2021-22 • Limited 477/1000"
-        },
-        {
-          "assetId": "0x04008c3441a2a034f32e4decc5dea4f2e3cb410e7f33cfbe5eaddb9f041410c2",
-          "slug": "mohamed-nasraoui-2025-limited-138",
-          "name": "Mohamed Nasraoui 2025-26 • Limited 138/1000"
-        },
-        {
-          "assetId": "0x0400cfe1250bf75a10a45747842f0311a94187e1e815b1bcb70b2cc7b3eab078",
-          "slug": "sota-nakamura-2025-limited-682",
-          "name": "Sota Nakamura 2025-26 • Limited 682/1000"
-        },
-        {
-          "assetId": "0x0400d279bc1558f7fe1aea550e0fb51de5b502847c9cde72c8cff435b4f2ea97",
-          "slug": "danilo-dos-santos-de-oliveira-2024-limited-599",
-          "name": "Danilo 2024-25 • Limited 599/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789596112
+  "updated_at": 1789596113
 }
