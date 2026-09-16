@@ -464,7 +464,21 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "SingleBuyOffer:dc848e15-fa51-4556-b879-38eb2a31acbf",
+      "original_offer_id": "directoffer:fabf3ed2-2f6e-4f9a-b0dc-89687ea4b918",
+      "created_at": 1789576979,
+      "cards": [
+        {
+          "assetId": "0x04008d03a41cb84833029884f1b83315b3e26753f17390d0de97e53083906424",
+          "slug": "danilo-pereira-da-silva-2024-limited-481",
+          "name": "Danilo 2024-25 • Limited 481/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1789570443
+  "updated_at": 1789576979
 }
