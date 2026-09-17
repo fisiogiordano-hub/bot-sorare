@@ -562,31 +562,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:faf1bc28-5dd6-4fa0-9911-bccee6651d22",
-      "original_offer_id": "directoffer:746408ae-7b97-4cac-9355-2e8fd7bc83f6",
-      "created_at": 1789644280,
-      "cards": [
-        {
-          "assetId": "0x04000705c147b4a9a4bd63ac03cf2a428fbadb8bc1891304f3e47022e83c57ec",
-          "slug": "shion-homma-2026-limited-195",
-          "name": "Shion Homma 2026-27 • Limited 195/1000"
-        },
-        {
-          "assetId": "0x0400203c82950f68bbffb216e58ea6903e610dd5c2522916d276a31a28d530d2",
-          "slug": "ryotaro-tsunoda-2026-limited-150",
-          "name": "Ryotaro Tsunoda 2026-27 • Limited 150/1000"
-        },
-        {
-          "assetId": "0x0400f576f2d4103f3cf9fe72f774b6870e5e8a74a6ef3fc8bb58d28b56f87f6e",
-          "slug": "hayato-watanabe-2026-limited-125",
-          "name": "Hayato Watanabe 2026-27 • Limited 125/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789644309
+  "updated_at": 1789644310
 }
