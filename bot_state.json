@@ -516,6 +516,30 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:9a438a89-0830-4d00-b9f0-cf86979d0f58"
+    },
+    {
+      "assetId": "0x040023dc7831cc41f176fea2f021cf0f25d93a810ea3ade8f7af5f763416a600",
+      "slug": "kim-ji-hoon-2026-limited-58",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:0863919c-6403-46ab-9801-2c34bef96c8d"
+    },
+    {
+      "assetId": "0x0400b49f4cf28021bfa81f1b5ed70a4c348ff3d91c7c0026e92ec8b1a20b664e",
+      "slug": "seong-woo-moon-2026-limited-52",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:0863919c-6403-46ab-9801-2c34bef96c8d"
+    },
+    {
+      "assetId": "0x0400dd95299633617c46e098bedfb965cfb55d88ca7cd87f7814d2f7fe9c8d93",
+      "slug": "jin-yong-lee-2026-limited-91",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:0863919c-6403-46ab-9801-2c34bef96c8d"
     }
   ],
   "pending_autobuys": [
@@ -624,5 +648,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789665573
+  "updated_at": 1789665649
 }
