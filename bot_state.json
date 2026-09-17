@@ -595,36 +595,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:9a438a89-0830-4d00-b9f0-cf86979d0f58",
-      "original_offer_id": "directoffer:5791a93e-6e7d-4792-baea-a00567c11942",
-      "created_at": 1789644460,
-      "cards": [
-        {
-          "assetId": "0x04001993e9980bea88699eb9dee71f612363980bb6bf12233ba905b61374397c",
-          "slug": "hiroto-asada-2026-limited-143",
-          "name": "Hiroto Asada 2026-27 • Limited 143/1000"
-        },
-        {
-          "assetId": "0x0400688c7e056c28ad15219117bf2590d0acc94f8f2856a5f89a52964cf535b9",
-          "slug": "homare-tokuda-2026-limited-186",
-          "name": "Homare Tokuda 2026-27 • Limited 186/1000"
-        },
-        {
-          "assetId": "0x040072a76b5eee3e225079786afe53555bdb4c6036d8257a5be0c3aa6b9cf84d",
-          "slug": "gaku-nawata-2026-limited-198",
-          "name": "Gaku Nawata 2026-27 • Limited 198/1000"
-        },
-        {
-          "assetId": "0x040097c48e7db0571d5f2f779e7159997c5248ab09f60920064d2a0a7d8c03a0",
-          "slug": "minato-yoshida-2026-limited-187",
-          "name": "Minato Yoshida 2026-27 • Limited 187/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789644489
+  "updated_at": 1789644490
 }
