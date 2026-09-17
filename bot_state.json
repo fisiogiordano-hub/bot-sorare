@@ -481,6 +481,38 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:faf1bc28-5dd6-4fa0-9911-bccee6651d22"
+    },
+    {
+      "assetId": "0x04001993e9980bea88699eb9dee71f612363980bb6bf12233ba905b61374397c",
+      "slug": "hiroto-asada-2026-limited-143",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:9a438a89-0830-4d00-b9f0-cf86979d0f58"
+    },
+    {
+      "assetId": "0x0400688c7e056c28ad15219117bf2590d0acc94f8f2856a5f89a52964cf535b9",
+      "slug": "homare-tokuda-2026-limited-186",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:9a438a89-0830-4d00-b9f0-cf86979d0f58"
+    },
+    {
+      "assetId": "0x040072a76b5eee3e225079786afe53555bdb4c6036d8257a5be0c3aa6b9cf84d",
+      "slug": "gaku-nawata-2026-limited-198",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:9a438a89-0830-4d00-b9f0-cf86979d0f58"
+    },
+    {
+      "assetId": "0x040097c48e7db0571d5f2f779e7159997c5248ab09f60920064d2a0a7d8c03a0",
+      "slug": "minato-yoshida-2026-limited-187",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:9a438a89-0830-4d00-b9f0-cf86979d0f58"
     }
   ],
   "pending_autobuys": [
@@ -594,5 +626,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789644462
+  "updated_at": 1789644489
 }
