@@ -437,6 +437,22 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:092e2d53-a754-4783-a3f6-2434265be341"
+    },
+    {
+      "assetId": "0x040010ea661c96b7b661430fb5a37fb0f877a2b69f7f7c659e4ce743cb13256b",
+      "slug": "quilindschy-hartman-2025-limited-87",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:8bf30847-fe64-4624-b8ae-10e6ffe13b20"
+    },
+    {
+      "assetId": "0x0400dc60f1bd9e432f663e1308083f978369f83ac44a218e6ff0a08d2169c651",
+      "slug": "rudi-allan-molotnikov-2025-limited-204",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:8bf30847-fe64-4624-b8ae-10e6ffe13b20"
     }
   ],
   "pending_autobuys": [
@@ -540,5 +556,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1789635775
+  "updated_at": 1789635801
 }
