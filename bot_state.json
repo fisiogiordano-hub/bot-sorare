@@ -518,7 +518,26 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "DirectOffer:8bf30847-fe64-4624-b8ae-10e6ffe13b20",
+      "original_offer_id": "directoffer:1e8c012a-3ea0-4dfd-b5e4-7bf3f914bd39",
+      "created_at": 1789635772,
+      "cards": [
+        {
+          "assetId": "0x040010ea661c96b7b661430fb5a37fb0f877a2b69f7f7c659e4ce743cb13256b",
+          "slug": "quilindschy-hartman-2025-limited-87",
+          "name": "Quilindschy Hartman 2025-26 • Limited 87/1000"
+        },
+        {
+          "assetId": "0x0400dc60f1bd9e432f663e1308083f978369f83ac44a218e6ff0a08d2169c651",
+          "slug": "rudi-allan-molotnikov-2025-limited-204",
+          "name": "Rudi Molotnikov 2025-26 • Limited 204/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1789633781
+  "updated_at": 1789635772
 }
