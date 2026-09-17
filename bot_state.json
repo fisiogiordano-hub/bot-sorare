@@ -622,31 +622,7 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
-    },
-    {
-      "offer_id": "DirectOffer:0863919c-6403-46ab-9801-2c34bef96c8d",
-      "original_offer_id": "directoffer:aaebfd23-9e09-4d11-97c9-812752ce1401",
-      "created_at": 1789665571,
-      "cards": [
-        {
-          "assetId": "0x040023dc7831cc41f176fea2f021cf0f25d93a810ea3ade8f7af5f763416a600",
-          "slug": "kim-ji-hoon-2026-limited-58",
-          "name": "Kim Ji-Hoon 2026-27 • Limited 58/1000"
-        },
-        {
-          "assetId": "0x0400b49f4cf28021bfa81f1b5ed70a4c348ff3d91c7c0026e92ec8b1a20b664e",
-          "slug": "seong-woo-moon-2026-limited-52",
-          "name": "Moon Seong-Woo 2026-27 • Limited 52/1000"
-        },
-        {
-          "assetId": "0x0400dd95299633617c46e098bedfb965cfb55d88ca7cd87f7814d2f7fe9c8d93",
-          "slug": "jin-yong-lee-2026-limited-91",
-          "name": "Lee Jin-Yong 2026-27 • Limited 91/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
     }
   ],
-  "updated_at": 1789665649
+  "updated_at": 1789665650
 }
