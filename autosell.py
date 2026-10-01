@@ -91,16 +91,15 @@ def update(asset,status=None,offer=None,error=None,price=None):
 
             if status is not None:
                 c["status"]=status
-
             if offer:
                 c["sale_offer_id"]=offer
-
             if price is not None:
                 c["sale_price_eur_cents"]=price
 
             c["last_error"]=error
             c["updated_at"]=now()
             d["updated_at"]=int(time.time())
+
             return save(d)
 
     return False
@@ -123,8 +122,9 @@ def headers():
         raise RuntimeError("SORARE_JWT_TOKEN mancante")
 
     h={
-        "Authorization":TOKEN if TOKEN.lower().startswith("bearer ")
-        else "Bearer "+TOKEN,
+        "Authorization":
+            TOKEN if TOKEN.lower().startswith("bearer ")
+            else "Bearer "+TOKEN,
         "Content-Type":"application/json",
         "Accept":"application/json",
         "User-Agent":"Sorare-AutoSell-15"
@@ -210,7 +210,10 @@ def details(asset):
       }
     }""",{"ids":[asset]})
 
-    x=(((d or {}).get("data") or {}).get("anyCards") or [])
+    x=(
+        ((d or {}).get("data") or {})
+        .get("anyCards") or []
+    )
 
     return x[0] if x else None
 
@@ -228,7 +231,10 @@ def active_offer(asset):
       }
     }""",{"id":asset})
 
-    x=(((d or {}).get("data") or {}).get("anyCards") or [])
+    x=(
+        ((d or {}).get("data") or {})
+        .get("anyCards") or []
+    )
 
     for c in x:
         if norm(c.get("assetId"))==norm(asset):
@@ -277,6 +283,7 @@ def amount(a):
 
 def floor(c):
     p=c.get("anyPlayer") or {}
+
     slug=norm(p.get("slug"))
     rarity=norm(c.get("rarityTyped"))
 
@@ -299,21 +306,27 @@ def floor(c):
                 anyPlayer{slug}
               }
             }
-            receiverSide{amounts{eurCents usdCents}}
+            receiverSide{
+              amounts{eurCents usdCents}
+            }
           }
         }
       }
     }""",{"slug":slug,"first":50})
 
     nodes=(
-        (((d or {}).get("data") or {}).get("tokens") or {})
+        (((d or {}).get("data") or {})
+        .get("tokens") or {})
         .get("liveSingleSaleOffers") or {}
     ).get("nodes") or []
 
     prices=[]
 
     for o in nodes:
-        for x in ((o.get("senderSide") or {}).get("anyCards") or []):
+        for x in (
+            (o.get("senderSide") or {})
+            .get("anyCards") or []
+        ):
             p2=x.get("anyPlayer") or {}
 
             try:
@@ -327,7 +340,8 @@ def floor(c):
                 and norm(x.get("rarityTyped"))==rarity
             ):
                 v=amount(
-                    (o.get("receiverSide") or {}).get("amounts") or {}
+                    (o.get("receiverSide") or {})
+                    .get("amounts") or {}
                 )
 
                 if v is not None:
@@ -340,7 +354,11 @@ def floor(c):
         flush=True
     )
 
-    return min(prices) if len(prices)>=MIN_LISTINGS else None
+    return (
+        min(prices)
+        if len(prices)>=MIN_LISTINGS
+        else None
+    )
 
 
 # ============================================================
@@ -403,19 +421,27 @@ mutation($input:prepareOfferInput!){
    fingerprint
    request{
     __typename
+
     ... on StarkexTransferAuthorizationRequest{
      amount condition expirationTimestamp nonce
      receiverPublicKey receiverVaultId senderVaultId token
-     feeInfoUser{feeLimit sourceVaultId tokenId}
+     feeInfoUser{
+      feeLimit sourceVaultId tokenId
+     }
     }
+
     ... on StarkexLimitOrderAuthorizationRequest{
-     vaultIdSell vaultIdBuy amountSell amountBuy tokenSell tokenBuy
-     nonce expirationTimestamp
-     feeInfo{feeLimit tokenId sourceVaultId}
+     vaultIdSell vaultIdBuy amountSell amountBuy
+     tokenSell tokenBuy nonce expirationTimestamp
+     feeInfo{
+      feeLimit tokenId sourceVaultId
+     }
     }
+
     ... on MangopayWalletTransferAuthorizationRequest{
      nonce amount currency operationHash mangopayWalletId
     }
+
     ... on SolanaTokenTransferAuthorizationRequest{
      assetId leafIndex merkleTreeAddress originator
      receiverAddress senderAddress expirationTimestamp nonce
@@ -445,17 +471,32 @@ def prepare(asset,price):
         }
     )
 
-    r=(((d or {}).get("data") or {}).get("prepareOffer"))
+    r=(
+        ((d or {}).get("data") or {})
+        .get("prepareOffer")
+    )
 
     if not r or r.get("errors"):
-        print("❌ prepareOffer",r,flush=True)
+        print(
+            "❌ prepareOffer",
+            r,
+            flush=True
+        )
         return None
 
     return r.get("authorizations") or []
 
 
 # ============================================================
-# FIRMA
+# SIGN
+#
+# IMPORTANT:
+# Sorare's Solana key is derived from the Sorare/Ethereum
+# private key (STARK) using SLIP-0010:
+#
+# m/44'/501'/0'/0'
+#
+# SORARE_SOLANA_PRIVATE_KEY is intentionally NOT used here.
 # ============================================================
 
 def sign(auths):
@@ -463,206 +504,120 @@ def sign(auths):
 
     js=r'''
 const fs=require("fs");
-const crypto=require("crypto");
-
-const {signAuthorizationRequest}=require("@sorare/crypto");
 
 const {
-  createKeyPairSignerFromBytes,
-  createSignableMessage
+  createKeyPairFromPrivateKeyBytes,
+  createSignerFromKeyPair,
+  createSignableMessage,
+  getBase58Decoder
 }=require("@solana/kit");
+
+const {HDKey}=require("micro-key-producer/slip10.js");
+
+const {
+  signAuthorizationRequest
+}=require("@sorare/crypto");
 
 const input=JSON.parse(
   fs.readFileSync(0,"utf8")
 );
 
-const A="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const PATH="m/44'/501'/0'/0'";
 
-function b58d(s){
-  let n=0n;
+function deriveSolanaSigner(privateKey){
+  const hex=String(privateKey||"")
+    .trim()
+    .replace(/^0x/,"");
 
-  for(const c of String(s).trim()){
-    const i=A.indexOf(c);
-
-    if(i<0)
-      throw Error("Base58 non valido");
-
-    n=n*58n+BigInt(i);
-  }
-
-  let h=n.toString(16);
-
-  if(h.length%2)
-    h="0"+h;
-
-  let b=n===0n
-    ? Buffer.alloc(0)
-    : Buffer.from(h,"hex");
-
-  let z=0;
-
-  for(const c of String(s).trim()){
-    if(c!=="1")
-      break;
-
-    z++;
-  }
-
-  return new Uint8Array(
-    Buffer.concat([
-      Buffer.alloc(z),
-      b
-    ])
-  );
-}
-
-function b58e(data){
-  const b=Buffer.from(data);
-
-  let n=0n;
-
-  for(const x of b)
-    n=n*256n+BigInt(x);
-
-  let r="";
-
-  while(n>0n){
-    r=A[Number(n%58n)]+r;
-    n/=58n;
-  }
-
-  let z=0;
-
-  for(const x of b){
-    if(x!==0)
-      break;
-
-    z++;
-  }
-
-  return "1".repeat(z)+r;
-}
-
-function keyBytes(v){
-  v=String(v||"").trim();
-
-  if(!v)
-    throw Error("SORARE_SOLANA_PRIVATE_KEY vuota");
-
-  /*
-   * Sorare può fornire la chiave in Base58.
-   */
-  try{
-    const b=b58d(v);
-
-    if(b.length===64)
-      return b;
-
-    if(b.length===32)
-      return b;
-  }catch(e){}
-
-  /*
-   * Supporto anche per hex.
-   */
-  let h=v.startsWith("0x")
-    ? v.slice(2)
-    : v;
-
-  if(/^[0-9a-f]+$/i.test(h) && h.length%2===0){
-    const b=new Uint8Array(
-      Buffer.from(h,"hex")
+  if(!/^[0-9a-fA-F]{64}$/.test(hex)){
+    throw new Error(
+      "SORARE_STARK_PRIVATE_KEY non valida: "
+      +"attesi 32 byte esadecimali"
     );
-
-    if(b.length===64 || b.length===32)
-      return b;
   }
 
-  throw Error(
-    "SORARE_SOLANA_PRIVATE_KEY non valida"
-  );
+  const seed=Buffer.from(hex,"hex");
+
+  const {privateKey:derived}=HDKey
+    .fromMasterSeed(seed)
+    .derive(PATH);
+
+  return createKeyPairFromPrivateKeyBytes(
+    derived
+  ).then(createSignerFromKeyPair);
 }
 
 async function solana(a){
   const r=a.request;
 
-  const raw=keyBytes(
-    input.solanaPrivateKey
+  const signer=await deriveSolanaSigner(
+    input.starkPrivateKey
   );
 
-  /*
-   * @solana/kit:
-   * crea direttamente il signer dalla secret key.
-   */
-  const signer=
-    await createKeyPairSignerFromBytes(raw);
-
-  console.log(
-    "🔑 SOLANA SIGNER →",
+  console.error(
+    "🔑 DERIVED SOLANA →",
     signer.address
   );
 
-  console.log(
+  console.error(
     "📨 SORARE SENDER →",
     r.senderAddress
   );
 
-  if(!signer.address)
-    throw Error(
-      "Solana signer senza address"
-    );
-
-  if(String(signer.address)!==
-     String(r.senderAddress))
-  {
-    throw Error(
-      "Solana key != senderAddress"
+  if(signer.address!==r.senderAddress){
+    throw new Error(
+      "Derived Solana address != Sorare senderAddress"
     );
   }
 
-  const msg=[
+  const message=[
     "TRANSFER",
     r.transferProxyProgramAddress,
     r.merkleTreeAddress,
     String(r.leafIndex),
-    r.nonce,
+    String(r.nonce),
     String(r.expirationTimestamp),
     r.receiverAddress,
     "0x",
     r.originator
   ].join(":");
 
-  const hash=crypto
-    .createHash("sha256")
-    .update(Buffer.from(msg))
-    .digest();
+  const messageBytes=
+    new TextEncoder().encode(message);
 
-  const signable=
-    createSignableMessage(
-      new Uint8Array(hash)
+  const messageHash=
+    await crypto.subtle.digest(
+      "SHA-256",
+      messageBytes
     );
 
-  const sigs=
+  const signableMessage=
+    createSignableMessage(
+      new Uint8Array(messageHash)
+    );
+
+  /*
+   * IMPORTANT:
+   * signMessages() returns an array.
+   * The first element contains the signatures map.
+   */
+  const [signatures]=
     await signer.signMessages([
-      signable
+      signableMessage
     ]);
 
-  const sig=
-    sigs[0][signer.address];
-
-  if(!sig)
-    throw Error(
-      "Firma Solana non restituita"
+  const signature=
+    getBase58Decoder().decode(
+      signatures[signer.address]
     );
 
   return {
     fingerprint:a.fingerprint,
 
     solanaTokenTransferApproval:{
-      signature:b58e(sig),
+      signature,
       nonce:r.nonce,
-      expirationTimestamp:
-        r.expirationTimestamp
+      expirationTimestamp:r.expirationTimestamp
     }
   };
 }
@@ -686,7 +641,6 @@ function stark(a){
   ){
     return {
       ...base,
-
       starkexTransferApproval:{
         nonce:r.nonce,
         expirationTimestamp:
@@ -702,7 +656,6 @@ function stark(a){
   ){
     return {
       ...base,
-
       starkexLimitOrderApproval:{
         nonce:r.nonce,
         expirationTimestamp:
@@ -718,7 +671,6 @@ function stark(a){
   ){
     return {
       ...base,
-
       mangopayWalletTransferApproval:{
         nonce:r.nonce,
         signature
@@ -726,8 +678,9 @@ function stark(a){
     };
   }
 
-  throw Error(
-    "Authorization non supportata"
+  throw new Error(
+    "Authorization non supportata: "+
+    r.__typename
   );
 }
 
@@ -735,19 +688,16 @@ function stark(a){
   const out=[];
 
   for(const a of input.authorizations){
-    const t=(a.request||{}).__typename;
+    const type=
+      (a.request||{}).__typename;
 
     if(
-      t===
+      type===
       "SolanaTokenTransferAuthorizationRequest"
     ){
-      out.push(
-        await solana(a)
-      );
+      out.push(await solana(a));
     }else{
-      out.push(
-        stark(a)
-      );
+      out.push(stark(a));
     }
   }
 
@@ -768,8 +718,7 @@ function stark(a){
         [node,"-e",js],
         input=json.dumps({
             "authorizations":auths,
-            "starkPrivateKey":STARK,
-            "solanaPrivateKey":SOLANA
+            "starkPrivateKey":STARK
         }),
         text=True,
         capture_output=True,
@@ -788,7 +737,18 @@ function stark(a){
             or "Firma fallita"
         )
 
-    return json.loads(p.stdout)
+    if not p.stdout.strip():
+        raise RuntimeError(
+            "Node non ha restituito una firma"
+        )
+
+    try:
+        return json.loads(p.stdout)
+    except Exception as e:
+        raise RuntimeError(
+            "Output firma non JSON: "+
+            p.stdout[:1000]
+        ) from e
 
 
 # ============================================================
@@ -801,7 +761,6 @@ def create_sale(asset,price):
             f"🟡 DRY RUN → {eur(price)}",
             flush=True
         )
-
         return "DRY-RUN"
 
     auth=prepare(asset,price)
@@ -818,7 +777,6 @@ def create_sale(asset,price):
             e,
             flush=True
         )
-
         return None
 
     q="""
@@ -863,10 +821,7 @@ def create_sale(asset,price):
             if isinstance(x,dict)
         )
 
-        if (
-            "active public offer already exists"
-            in norm(text)
-        ):
+        if "active public offer already exists" in norm(text):
             o=active_offer(asset)
 
             return (
@@ -975,7 +930,6 @@ def process(original):
             "da_vendere",
             error="CARD_DETAILS"
         )
-
         return
 
     print(
@@ -1034,7 +988,6 @@ def process(original):
             "da_vendere",
             error="CREATE_SALE_FAILED"
         )
-
         return
 
     update(
@@ -1076,7 +1029,6 @@ def recovery():
                 "da_vendere",
                 error="EXPIRED_NO_PRICE"
             )
-
             continue
 
         print(
@@ -1155,7 +1107,6 @@ def worker():
             e,
             flush=True
         )
-
         return
 
     while True:
@@ -1224,7 +1175,6 @@ def home():
         "worker":started
     })
 
-
 @app.get("/health")
 def health():
     return jsonify({
@@ -1232,7 +1182,6 @@ def health():
         "worker":started,
         "dry_run":DRY
     })
-
 
 @app.get("/cards")
 def card_endpoint():
