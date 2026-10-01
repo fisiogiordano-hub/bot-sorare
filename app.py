@@ -2,18 +2,51 @@ import os,time,uuid,json,base64,shutil,subprocess,threading,requests
 from flask import Flask,jsonify
 
 app=Flask(__name__)
-SORARE_URL="https://api.sorare.com/graphql";STATE_FILE="bot_state.json"
-TOKEN=os.getenv("SORARE_JWT_TOKEN","").strip();AUD=os.getenv("SORARE_JWT_AUD","").strip();STARK=os.getenv("SORARE_STARK_PRIVATE_KEY","").strip()
-GITHUB_TOKEN=os.getenv("GITHUB_TOKEN","").strip();GITHUB_REPO=os.getenv("GITHUB_REPO","fisiogiordano-hub/bot-sorare").strip();GITHUB_BRANCH=os.getenv("GITHUB_BRANCH","main").strip()
-DRY_RUN=os.getenv("DRY_RUN","false").lower()=="true"
-MIN_PRICE=32;MAX_PRICE=70;PAY_PER_CARD=20;MAX_AGE=28;MIN_LIVE_LISTINGS=5
-SWAP_AUTO_ACCEPT=True;SWAP_MIN=1.20;SWAP_MAX=1.25
-INTERVAL=10;TIMEOUT=25;USD_CACHE=300;BOT_VERSION="23.7-LIGHT-SWAP-LISTED-REASONS"
-KSLUG="sandro-kulenovic-2025-limited-385";KASSET="0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c7136796b6c0ed10ba0a6"
 
-processed=set();acquired_cards={};pending_autobuys={}
-state_lock=threading.Lock();github_lock=threading.Lock();worker_lock=threading.Lock()
-worker_started=False;usd_rate=None;usd_time=0;current_user_slug=None
+SORARE_URL="https://api.sorare.com/graphql"
+STATE_FILE="bot_state.json"
+
+TOKEN=os.getenv("SORARE_JWT_TOKEN","").strip()
+AUD=os.getenv("SORARE_JWT_AUD","").strip()
+STARK=os.getenv("SORARE_STARK_PRIVATE_KEY","").strip()
+
+GITHUB_TOKEN=os.getenv("GITHUB_TOKEN","").strip()
+GITHUB_REPO=os.getenv("GITHUB_REPO","fisiogiordano-hub/bot-sorare").strip()
+GITHUB_BRANCH=os.getenv("GITHUB_BRANCH","main").strip()
+
+DRY_RUN=os.getenv("DRY_RUN","false").lower()=="true"
+
+MIN_PRICE=32
+MAX_PRICE=70
+PAY_PER_CARD=20
+MAX_AGE=28
+MIN_LIVE_LISTINGS=5
+
+SWAP_AUTO_ACCEPT=True
+SWAP_MIN=1.20
+SWAP_MAX=1.25
+
+INTERVAL=10
+TIMEOUT=25
+USD_CACHE=300
+
+BOT_VERSION="23.8-LIGHT-SWAP-LISTED-COVERAGE"
+
+KSLUG="sandro-kulenovic-2025-limited-385"
+KASSET="0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c7136796b6c0ed10ba0a6"
+
+processed=set()
+acquired_cards={}
+pending_autobuys={}
+
+state_lock=threading.Lock()
+github_lock=threading.Lock()
+worker_lock=threading.Lock()
+
+worker_started=False
+usd_rate=None
+usd_time=0
+current_user_slug=None
 
 
 def norm(v):
@@ -25,7 +58,8 @@ def card_name(c):
 
 
 def card_label(c):
-    n=card_name(c);s=c.get("slug")
+    n=card_name(c)
+    s=c.get("slug")
     return f"{n} [{s}]" if s and s!=n else n
 
 
@@ -55,7 +89,10 @@ def graphql(query,variables=None):
         try:
             r=requests.post(
                 SORARE_URL,
-                json={"query":query,"variables":variables or {}},
+                json={
+                    "query":query,
+                    "variables":variables or {}
+                },
                 headers=headers(),
                 timeout=TIMEOUT
             )
@@ -67,7 +104,10 @@ def graphql(query,variables=None):
                 continue
 
             if r.status_code!=200:
-                print(f"❌ Sorare HTTP {r.status_code}: {r.text[:500]}",flush=True)
+                print(
+                    f"❌ Sorare HTTP {r.status_code}: {r.text[:1000]}",
+                    flush=True
+                )
                 time.sleep(attempt+1)
                 continue
 
@@ -76,7 +116,7 @@ def graphql(query,variables=None):
             if d.get("errors"):
                 print(
                     "❌ GraphQL:",
-                    json.dumps(d["errors"],ensure_ascii=False)[:3000],
+                    json.dumps(d["errors"],ensure_ascii=False)[:5000],
                     flush=True
                 )
 
@@ -93,7 +133,11 @@ def normalize_card(x):
     if not isinstance(x,dict):
         return None
 
-    aid=str(x.get("assetId") or x.get("asset_id") or "").strip()
+    aid=str(
+        x.get("assetId")
+        or x.get("asset_id")
+        or ""
+    ).strip()
 
     if not aid:
         return None
@@ -190,7 +234,10 @@ def save_local_state():
         return True
 
     except Exception as e:
-        print(f"❌ Salvataggio {STATE_FILE}: {e}",flush=True)
+        print(
+            f"❌ Salvataggio {STATE_FILE}: {e}",
+            flush=True
+        )
         return False
 
 
@@ -290,7 +337,10 @@ def save_github_state():
             return r.status_code in (200,201)
 
         except Exception as e:
-            print(f"❌ GitHub save: {e}",flush=True)
+            print(
+                f"❌ GitHub save: {e}",
+                flush=True
+            )
             return False
 
 
@@ -379,7 +429,14 @@ query{
         id
         blockchainId
         status
-        sender{... on User{slug nickname}}
+
+        sender{
+          ... on User{
+            slug
+            nickname
+          }
+        }
+
         senderSide{
           amounts{
             eurCents
@@ -387,12 +444,14 @@ query{
             referenceCurrency
             wei
           }
+
           anyCards{
             assetId
             slug
             collection
           }
         }
+
         receiverSide{
           amounts{
             eurCents
@@ -400,6 +459,7 @@ query{
             referenceCurrency
             wei
           }
+
           anyCards{
             assetId
             slug
@@ -433,8 +493,19 @@ query{
         acceptedAt
         cancelledAt
         transactionDate
-        sender{... on User{slug}}
-        receiver{... on User{slug}}
+
+        sender{
+          ... on User{
+            slug
+          }
+        }
+
+        receiver{
+          ... on User{
+            slug
+          }
+        }
+
         senderSide{
           anyCards{
             assetId
@@ -442,6 +513,7 @@ query{
             name
           }
         }
+
         receiverSide{
           anyCards{
             assetId
@@ -481,8 +553,14 @@ def card_details(ids):
         return []
 
     # IMPORTANTE:
-    # activeCompetitions è stato rimosso da questa query.
-    # Era la causa del GraphQL HTTP 422.
+    # activeCompetitions appartiene a Club.
+    # La struttura corretta è:
+    #
+    # anyPlayer -> activeClub -> activeCompetitions
+    #
+    # Non:
+    # Query -> activeCompetitions
+
     d=graphql("""
 query($assetIds:[String!]!){
   anyCards(assetIds:$assetIds){
@@ -491,15 +569,31 @@ query($assetIds:[String!]!){
     name
     rarityTyped
     seasonYear
-    user{slug}
-    tokenOwner{user{slug}}
+
+    user{
+      slug
+    }
+
+    tokenOwner{
+      user{
+        slug
+      }
+    }
+
     anyPlayer{
       slug
       displayName
       age
+
       activeClub{
         slug
         name
+
+        activeCompetitions{
+          slug
+          name
+          displayName
+        }
       }
     }
   }
@@ -519,8 +613,7 @@ def card_owned(c):
         norm((c.get("user") or {}).get("slug"))==me
         or
         norm(
-            ((c.get("tokenOwner") or {})
-            .get("user") or {})
+            ((c.get("tokenOwner") or {}).get("user") or {})
             .get("slug")
         )==me
     )
@@ -536,7 +629,10 @@ def usd_eur():
         rate=float(
             requests.get(
                 "https://api.frankfurter.app/latest",
-                params={"from":"USD","to":"EUR"},
+                params={
+                    "from":"USD",
+                    "to":"EUR"
+                },
                 timeout=10
             ).json()["rates"]["EUR"]
         )
@@ -573,11 +669,16 @@ def price_eur(a):
 
     rate=usd_eur()
 
-    return int(round(x*rate)) if x>0 and rate else None
+    return (
+        int(round(x*rate))
+        if x>0 and rate
+        else None
+    )
 
 
 def live_floor(card):
     p=card.get("anyPlayer") or {}
+
     ps=norm(p.get("slug"))
     rarity=norm(card.get("rarityTyped"))
 
@@ -590,16 +691,22 @@ def live_floor(card):
     d=graphql("""
 query($playerSlug:String,$first:Int){
   tokens{
-    liveSingleSaleOffers(playerSlug:$playerSlug first:$first){
+    liveSingleSaleOffers(
+      playerSlug:$playerSlug
+      first:$first
+    ){
       nodes{
         senderSide{
           anyCards{
             assetId
             rarityTyped
             seasonYear
-            anyPlayer{slug}
+            anyPlayer{
+              slug
+            }
           }
         }
+
         receiverSide{
           amounts{
             eurCents
@@ -626,17 +733,23 @@ query($playerSlug:String,$first:Int){
     prices=[]
 
     for o in offers:
+
         for c in (
             (o.get("senderSide") or {})
             .get("anyCards") or []
         ):
+
             if (
-                norm((c.get("anyPlayer") or {}).get("slug"))==ps
+                norm(
+                    (c.get("anyPlayer") or {})
+                    .get("slug")
+                )==ps
                 and
                 norm(c.get("rarityTyped"))==rarity
                 and
                 int(c.get("seasonYear") or -1)==season
             ):
+
                 x=price_eur(
                     (o.get("receiverSide") or {})
                     .get("amounts") or {}
@@ -667,11 +780,17 @@ def listed_cards(asset_ids):
     d=graphql("""
 query($assetIds:[String!]!){
   tokens{
-    liveSingleSaleOffers(assetIds:$assetIds first:100){
+    liveSingleSaleOffers(
+      assetIds:$assetIds
+      first:100
+    ){
       nodes{
         senderSide{
-          anyCards{assetId}
+          anyCards{
+            assetId
+          }
         }
+
         receiverSide{
           amounts{
             eurCents
@@ -684,7 +803,9 @@ query($assetIds:[String!]!){
     }
   }
 }
-""",{"assetIds":ids})
+""",{
+        "assetIds":ids
+    })
 
     offers=(
         (((d or {}).get("data") or {})
@@ -692,7 +813,11 @@ query($assetIds:[String!]!){
         .get("liveSingleSaleOffers") or {}
     ).get("nodes",[])
 
-    wanted={norm(x) for x in ids}
+    wanted={
+        norm(x)
+        for x in ids
+    }
+
     result=set()
 
     for o in offers:
@@ -700,6 +825,7 @@ query($assetIds:[String!]!){
             (o.get("senderSide") or {})
             .get("anyCards") or []
         ):
+
             if norm(c.get("assetId")) in wanted:
                 result.add(norm(c.get("assetId")))
 
@@ -724,77 +850,139 @@ def is_kulenovic(c):
     )
 
 
-# ============================================================
-# NUOVA VALIDAZIONE AUTOBUY CON MOTIVO DETTAGLIATO
-# ============================================================
+def get_active_competitions(c):
+    player=c.get("anyPlayer") or {}
+    club=player.get("activeClub") or {}
 
-def validate_card(c):
+    competitions=club.get("activeCompetitions") or []
+
+    result=[]
+
+    for comp in competitions:
+        if not isinstance(comp,dict):
+            continue
+
+        slug=norm(comp.get("slug"))
+        name=(
+            comp.get("displayName")
+            or comp.get("name")
+            or slug
+        )
+
+        if slug or name:
+            result.append({
+                "slug":slug,
+                "name":name
+            })
+
+    return result
+
+
+def validate_card(c,log_reason=True):
     label=card_label(c)
-    reasons=[]
 
-    p=c.get("anyPlayer") or {}
+    player=c.get("anyPlayer") or {}
 
-    # ETÀ
-    age=p.get("age")
+    # 1. ETÀ
+    age=player.get("age")
 
     try:
         age=int(age)
 
-        if age>=MAX_AGE:
-            reasons.append(
-                f"età {age} >= {MAX_AGE}"
+    except:
+        if log_reason:
+            print(
+                f"🚫 AUTOBUY NON IDONEA: {label} → età non disponibile",
+                flush=True
             )
 
-    except:
-        reasons.append("età non disponibile")
+        return False
 
-    # RARITÀ
+    if age>=MAX_AGE:
+        if log_reason:
+            print(
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"età {age} >= {MAX_AGE}",
+                flush=True
+            )
+
+        return False
+
+    # 2. RARITÀ
     rarity=norm(c.get("rarityTyped")).upper()
 
     if rarity!="LIMITED":
-        reasons.append(
-            f"rarità {rarity or 'N/D'} != LIMITED"
-        )
+        if log_reason:
+            print(
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"rarità {rarity or 'N/D'} != LIMITED",
+                flush=True
+            )
 
-    # FLOOR
+        return False
+
+    # 3. COMPETIZIONE COPERTA DA SORARE
+    competitions=get_active_competitions(c)
+
+    if not competitions:
+        if log_reason:
+            print(
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"nessuna competizione attiva/copita trovata",
+                flush=True
+            )
+
+        return False
+
+    comp_text=", ".join(
+        f"{x['name']} ({x['slug']})"
+        if x["slug"]
+        else x["name"]
+        for x in competitions
+    )
+
+    print(
+        f"🏟️ COVERAGE: {label} → {comp_text}",
+        flush=True
+    )
+
+    # 4. FLOOR
     floor=live_floor(c)
 
     if floor is None:
-        reasons.append(
-            f"meno di {MIN_LIVE_LISTINGS} inserzioni valide "
-            f"oppure floor non disponibile"
-        )
-
-    else:
-        if floor<MIN_PRICE:
-            reasons.append(
-                f"floor {format_eur(floor)} < minimo {format_eur(MIN_PRICE)}"
-            )
-
-        if floor>MAX_PRICE:
-            reasons.append(
-                f"floor {format_eur(floor)} > massimo {format_eur(MAX_PRICE)}"
-            )
-
-    if reasons:
-        print(
-            f"❌ AUTOBUY NON IDONEA: {label}",
-            flush=True
-        )
-
-        for reason in reasons:
+        if log_reason:
             print(
-                f"   ↳ MOTIVO: {reason}",
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"meno di {MIN_LIVE_LISTINGS} inserzioni live valide",
+                flush=True
+            )
+
+        return False
+
+    if floor<MIN_PRICE:
+        if log_reason:
+            print(
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"floor {format_eur(floor)} < minimo {format_eur(MIN_PRICE)}",
+                flush=True
+            )
+
+        return False
+
+    if floor>MAX_PRICE:
+        if log_reason:
+            print(
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"floor {format_eur(floor)} > massimo {format_eur(MAX_PRICE)}",
                 flush=True
             )
 
         return False
 
     print(
-        f"✅ AUTOBUY IDONEA: {label} "
-        f"| età {age} "
-        f"| LIMITED "
-        f"| floor {format_eur(floor)}",
+        f"✅ AUTOBUY IDONEA: {label} → "
+        f"età {age}, LIMITED, "
+        f"coverage OK, floor {format_eur(floor)}",
         flush=True
     )
 
@@ -817,8 +1005,13 @@ def reject_offer(o):
     d=graphql("""
 mutation($input:rejectOfferInput!){
   rejectOffer(input:$input){
-    tokenOffer{id status}
-    errors{message}
+    tokenOffer{
+      id
+      status
+    }
+    errors{
+      message
+    }
   }
 }
 """,{
@@ -853,7 +1046,10 @@ mutation($input:rejectOfferInput!){
 
 
 def sign_authorizations(auth):
-    node=shutil.which("node") or shutil.which("nodejs")
+    node=(
+        shutil.which("node")
+        or shutil.which("nodejs")
+    )
 
     if not node or not STARK:
         raise RuntimeError(
@@ -862,53 +1058,60 @@ def sign_authorizations(auth):
 
     script=r'''
 const fs=require("fs"),{signAuthorizationRequest}=require("@sorare/crypto");
-const input=JSON.parse(fs.readFileSync(0,"utf8"));
+
+const input=JSON.parse(
+  fs.readFileSync(0,"utf8")
+);
 
 function sign(a){
- const r=a.request;
- if(r.amount!=null)r.amount=BigInt(r.amount);
+  const r=a.request;
 
- const signature=signAuthorizationRequest(
-   input.privateKey,
-   r
- );
+  if(r.amount!=null)
+    r.amount=BigInt(r.amount);
 
- if(r.__typename==="StarkexTransferAuthorizationRequest")
-  return{
-    fingerprint:a.fingerprint,
-    starkexTransferApproval:{
-      nonce:r.nonce,
-      expirationTimestamp:r.expirationTimestamp,
-      signature
-    }
-  };
+  const signature=signAuthorizationRequest(
+    input.privateKey,
+    r
+  );
 
- if(r.__typename==="StarkexLimitOrderAuthorizationRequest")
-  return{
-    fingerprint:a.fingerprint,
-    starkexLimitOrderApproval:{
-      nonce:r.nonce,
-      expirationTimestamp:r.expirationTimestamp,
-      signature
-    }
-  };
+  if(r.__typename==="StarkexTransferAuthorizationRequest")
+    return{
+      fingerprint:a.fingerprint,
+      starkexTransferApproval:{
+        nonce:r.nonce,
+        expirationTimestamp:r.expirationTimestamp,
+        signature
+      }
+    };
 
- if(r.__typename==="MangopayWalletTransferAuthorizationRequest")
-  return{
-    fingerprint:a.fingerprint,
-    mangopayWalletTransferApproval:{
-      nonce:r.nonce,
-      signature
-    }
-  };
+  if(r.__typename==="StarkexLimitOrderAuthorizationRequest")
+    return{
+      fingerprint:a.fingerprint,
+      starkexLimitOrderApproval:{
+        nonce:r.nonce,
+        expirationTimestamp:r.expirationTimestamp,
+        signature
+      }
+    };
 
- throw new Error("Authorization non supportata");
+  if(r.__typename==="MangopayWalletTransferAuthorizationRequest")
+    return{
+      fingerprint:a.fingerprint,
+      mangopayWalletTransferApproval:{
+        nonce:r.nonce,
+        signature
+      }
+    };
+
+  throw new Error(
+    "Authorization non supportata"
+  );
 }
 
 process.stdout.write(
- JSON.stringify(
-   input.authorizations.map(sign)
- )
+  JSON.stringify(
+    input.authorizations.map(sign)
+  )
 );
 '''
 
@@ -987,7 +1190,9 @@ mutation($input:prepareOfferInput!){
       }
     }
 
-    errors{message}
+    errors{
+      message
+    }
   }
 }
 """
@@ -1037,7 +1242,8 @@ mutation($input:prepareOfferInput!){
         )
         return None
 
-    d=graphql("""
+    d=graphql(
+        """
 mutation($input:createDirectOfferInput!){
   createDirectOffer(input:$input){
     tokenOffer{
@@ -1046,23 +1252,27 @@ mutation($input:createDirectOfferInput!){
       status
       type
     }
-    errors{message}
+    errors{
+      message
+    }
   }
 }
-""",{
-        "input":{
-            "receiveAssetIds":receive_ids,
-            "sendAssetIds":send_ids,
-            "sendAmount":{
-                "amount":str(amount),
-                "currency":"EUR"
-            },
-            "receiverSlug":receiver,
-            "clientMutationId":str(uuid.uuid4()),
-            "approvals":approvals,
-            "dealId":str(uuid.uuid4())
+""",
+        {
+            "input":{
+                "receiveAssetIds":receive_ids,
+                "sendAssetIds":send_ids,
+                "sendAmount":{
+                    "amount":str(amount),
+                    "currency":"EUR"
+                },
+                "receiverSlug":receiver,
+                "clientMutationId":str(uuid.uuid4()),
+                "approvals":approvals,
+                "dealId":str(uuid.uuid4())
+            }
         }
-    })
+    )
 
     r=(
         ((d or {}).get("data") or {})
@@ -1089,8 +1299,9 @@ def process_autobuy(o):
         return
 
     wanted=(
-        o.get("receiverSide") or {}
-    ).get("anyCards") or []
+        (o.get("receiverSide") or {})
+        .get("anyCards") or []
+    )
 
     if not any(
         is_kulenovic(c)
@@ -1099,8 +1310,9 @@ def process_autobuy(o):
         return
 
     sender=(
-        o.get("senderSide") or {}
-    ).get("anyCards") or []
+        (o.get("senderSide") or {})
+        .get("anyCards") or []
+    )
 
     ids=[
         c.get("assetId")
@@ -1124,21 +1336,25 @@ def process_autobuy(o):
 
     if len(details)!=len(ids):
         print(
-            f"⚠️ AUTOBUY: recuperate "
-            f"{len(details)}/{len(ids)} carte",
+            f"🚫 AUTOBUY RIFIUTATO: "
+            f"recuperate {len(details)}/{len(ids)} carte",
             flush=True
         )
+
+        if reject_offer(o):
+            mark_done(oid)
+
+        return
 
     valid=[]
 
     for c in details:
-        if validate_card(c):
+        if validate_card(c,log_reason=True):
             valid.append(c)
 
     if not valid:
         print(
-            "🚫 AUTOBUY RIFIUTATO: "
-            "nessuna carta idonea",
+            "🚫 AUTOBUY: nessuna carta idonea",
             flush=True
         )
 
@@ -1359,7 +1575,9 @@ mutation($input:prepareAcceptOfferInput!){
       }
     }
 
-    errors{message}
+    errors{
+      message
+    }
   }
 }
 """,{
@@ -1413,8 +1631,14 @@ def accept_offer(o):
     d=graphql("""
 mutation($input:acceptOfferInput!){
   acceptOffer(input:$input){
-    tokenOffer{id status}
-    errors{message}
+    tokenOffer{
+      id
+      status
+    }
+
+    errors{
+      message
+    }
   }
 }
 """,{
@@ -1458,12 +1682,14 @@ def process_swap(o):
         return
 
     sender=(
-        o.get("senderSide") or {}
-    ).get("anyCards") or []
+        (o.get("senderSide") or {})
+        .get("anyCards") or []
+    )
 
     receiver=(
-        o.get("receiverSide") or {}
-    ).get("anyCards") or []
+        (o.get("receiverSide") or {})
+        .get("anyCards") or []
+    )
 
     if not sender or not receiver:
         return
@@ -1580,7 +1806,7 @@ def process_swap(o):
 
     for c in receive:
 
-        if not validate_card(c):
+        if not validate_card(c,log_reason=True):
             print(
                 f"🚫 SWAP: carta ricevuta non valida "
                 f"→ {card_label(c)}",
@@ -1627,8 +1853,8 @@ def process_swap(o):
     )
 
     print(
-        f"📤 Totale mie carte rimaste nell'offerta: "
-        f"{format_eur(total_given)}",
+        f"📤 Totale mie carte rimaste "
+        f"nell'offerta: {format_eur(total_given)}",
         flush=True
     )
 
@@ -1685,6 +1911,7 @@ def process_swap(o):
                 f"{new_id}",
                 flush=True
             )
+
             mark_done(oid)
 
         else:
@@ -1726,12 +1953,14 @@ def process_swap(o):
 
 def process_offer(o):
     receiver=(
-        o.get("receiverSide") or {}
-    ).get("anyCards") or []
+        (o.get("receiverSide") or {})
+        .get("anyCards") or []
+    )
 
     sender=(
-        o.get("senderSide") or {}
-    ).get("anyCards") or []
+        (o.get("senderSide") or {})
+        .get("anyCards") or []
+    )
 
     if any(
         is_kulenovic(c)
@@ -1827,8 +2056,7 @@ def worker():
     )
 
     print(
-        "🔧 COVERAGE: validazione tramite "
-        "criteri età + LIMITED + floor + inserzioni",
+        "🔧 COVERAGE: activeClub.activeCompetitions",
         flush=True
     )
 
@@ -1924,8 +2152,7 @@ def home():
             "pending_autobuys":len(pending_autobuys),
             "github_state":bool(GITHUB_TOKEN),
 
-            "coverage":
-                "age + LIMITED + floor + live listings"
+            "coverage":"activeClub.activeCompetitions"
         })
 
 
@@ -1941,7 +2168,8 @@ def health():
             "acquired_cards":len(acquired_cards),
             "pending_autobuys":len(pending_autobuys),
             "dry_run":DRY_RUN,
-            "swap_auto_accept":SWAP_AUTO_ACCEPT
+            "swap_auto_accept":SWAP_AUTO_ACCEPT,
+            "coverage":"activeClub.activeCompetitions"
         })
 
 
