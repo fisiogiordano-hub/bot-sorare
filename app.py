@@ -30,7 +30,7 @@ INTERVAL=10
 TIMEOUT=25
 USD_CACHE=300
 COVERAGE_CACHE=3600
-BOT_VERSION="23.6-LIGHT-SWAP-LISTED"
+BOT_VERSION="23.6-LIGHT-SWAP-LISTED-COVERAGE-FIX"
 
 KSLUG="sandro-kulenovic-2025-limited-385"
 KASSET=("0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c713"
@@ -886,8 +886,7 @@ def live_floor(card):
 
 
 # ============================================================
-# NUOVO CONTROLLO:
-# LA CARTA È ATTUALMENTE IN VENDITA?
+# CARTA ATTUALMENTE IN VENDITA
 # ============================================================
 
 def card_is_listed_for_sale(asset_id):
@@ -1026,6 +1025,10 @@ def listed_cards(asset_ids):
 def load_coverage(force=False):
     global coverage_cache,coverage_time
 
+    # ========================================================
+    # CACHE
+    # ========================================================
+
     if (
         not force
         and coverage_cache
@@ -1034,26 +1037,36 @@ def load_coverage(force=False):
     ):
         return set(coverage_cache)
 
+    # ========================================================
+    # METODO PRINCIPALE:
+    # GRAPHQL SORARE
+    #
+    # ATTENZIONE:
+    # leaguesOpenForGameStats è sulla ROOT QUERY.
+    # NON è sotto football{}.
+    # ========================================================
+
     try:
-        r=requests.get(
-            COVERAGE_URL,
-            timeout=TIMEOUT,
-            headers={
-                "User-Agent":
-                    f"Sorare-Bot/{BOT_VERSION}"
-            }
+        d=graphql("""
+        query{
+          leaguesOpenForGameStats{
+            slug
+            name
+            openForGameStats
+          }
+        }
+        """)
+
+        competitions=(
+            ((d or {}).get("data") or {})
+            .get("leaguesOpenForGameStats") or []
         )
 
-        if r.status_code!=200:
-            return set(coverage_cache)
-
         result={
-            norm(x)
-            for x in re.findall(
-                r'/football/leagues/([^"\'?#<>\s]+)',
-                r.text,
-                re.I
-            )
+            norm(x.get("slug"))
+            for x in competitions
+            if isinstance(x,dict)
+            and x.get("slug")
         }
 
         if result:
@@ -1061,15 +1074,107 @@ def load_coverage(force=False):
             coverage_time=time.time()
 
             print(
-                f"🌐 Coverage: "
+                f"🌐 Coverage GraphQL: "
                 f"{len(result)} competizioni",
                 flush=True
             )
 
+            return set(coverage_cache)
+
+        print(
+            "⚠️ Coverage GraphQL: "
+            "nessuna competizione restituita",
+            flush=True
+        )
+
+    except Exception as e:
+        print(
+            f"⚠️ Coverage GraphQL non disponibile: {e}",
+            flush=True
+        )
+
+    # ========================================================
+    # FALLBACK:
+    # PAGINA WEB /coverage
+    # ========================================================
+
+    try:
+        r=requests.get(
+            COVERAGE_URL,
+            timeout=TIMEOUT,
+            headers={
+                "User-Agent":
+                    f"Sorare-Bot/{BOT_VERSION}",
+                "Accept":
+                    "text/html,application/xhtml+xml"
+            }
+        )
+
+        if r.status_code==200:
+
+            result=set()
+
+            # Link classici
+            result.update(
+                norm(x)
+                for x in re.findall(
+                    r'/football/leagues/([^"\'?#<>\s]+)',
+                    r.text,
+                    re.I
+                )
+            )
+
+            # Eventuali slug presenti nei dati JSON
+            # incorporati nella pagina.
+            if not result:
+                patterns=[
+                    r'"slug"\s*:\s*"([^"]+)"',
+                    r'\\"slug\\"\s*:\s*\\"([^"]+)\\"'
+                ]
+
+                for pattern in patterns:
+                    result.update(
+                        norm(x)
+                        for x in re.findall(
+                            pattern,
+                            r.text,
+                            re.I
+                        )
+                    )
+
+            if result:
+                coverage_cache=result
+                coverage_time=time.time()
+
+                print(
+                    f"🌐 Coverage HTML fallback: "
+                    f"{len(result)} competizioni",
+                    flush=True
+                )
+
+                return set(coverage_cache)
+
+    except Exception as e:
+        print(
+            f"⚠️ Coverage HTML fallback: {e}",
+            flush=True
+        )
+
+    # ========================================================
+    # SE ESISTE UNA CACHE PRECEDENTE, NON LA DISTRUGGIAMO
+    # ========================================================
+
+    if coverage_cache:
+        print(
+            f"⚠️ Coverage temporaneamente non leggibile: "
+            f"uso cache precedente "
+            f"({len(coverage_cache)} competizioni)",
+            flush=True
+        )
+
         return set(coverage_cache)
 
-    except:
-        return set(coverage_cache)
+    return set()
 
 
 def is_kulenovic(c):
@@ -1539,9 +1644,6 @@ def process_autobuy(o):
         if validate_card(c)
     ]
 
-    # Se alcune carte non sono idonee,
-    # vengono semplicemente escluse.
-    # Se nessuna è idonea, rifiuta.
     if not valid:
         print(
             "🚫 AUTOBUY: nessuna carta idonea",
@@ -1917,19 +2019,11 @@ def process_swap(o):
     if not sender or not receiver:
         return
 
-    # ========================================================
-    # CARTE CHE TU DAI
-    # ========================================================
-
     give_ids=[
         c.get("assetId")
         for c in receiver
         if c.get("assetId")
     ]
-
-    # ========================================================
-    # CARTE CHE TU RICEVI
-    # ========================================================
 
     receive_ids=[
         c.get("assetId")
@@ -1971,10 +2065,6 @@ def process_swap(o):
         )
         return
 
-    # ========================================================
-    # KULENOVIC MAI CEDIBILE
-    # ========================================================
-
     if any(
         is_kulenovic(c)
         for c in give
@@ -1989,12 +2079,6 @@ def process_swap(o):
             mark_done(oid)
 
         return
-
-    # ========================================================
-    # NUOVA REGOLA:
-    # TRA LE MIE CARTE PRESENTI NELL'OFFERTA
-    # RESTANO SOLO QUELLE ATTUALMENTE IN VENDITA
-    # ========================================================
 
     listed=listed_cards(
         give_ids
@@ -2025,10 +2109,6 @@ def process_swap(o):
                 flush=True
             )
 
-    # ========================================================
-    # NESSUNA CARTA RIMASTA
-    # ========================================================
-
     if not eligible_give:
         print(
             "🚫 SWAP RIFIUTATO: "
@@ -2042,10 +2122,6 @@ def process_swap(o):
             mark_done(oid)
 
         return
-
-    # ========================================================
-    # VALORE DELLE MIE SOLE CARTE RIMASTE
-    # ========================================================
 
     total_given=0
 
@@ -2069,10 +2145,6 @@ def process_swap(o):
             f"{format_eur(floor)}",
             flush=True
         )
-
-    # ========================================================
-    # VALORE CARTE RICEVUTE
-    # ========================================================
 
     total_received=0
 
@@ -2110,24 +2182,12 @@ def process_swap(o):
             flush=True
         )
 
-    # ========================================================
-    # CASH PRESENTE NELL'OFFERTA
-    # ========================================================
-
     cash=price_eur(
         (o.get("senderSide") or {})
         .get("amounts") or {}
     ) or 0
 
     total_received+=cash
-
-    # ========================================================
-    # +20% / +25%
-    #
-    # IMPORTANTISSIMO:
-    # total_given = SOLO le mie carte rimaste
-    # nell'offerta perché risultano in vendita.
-    # ========================================================
 
     minimum=int(
         round(
@@ -2166,11 +2226,6 @@ def process_swap(o):
         flush=True
     )
 
-    # ========================================================
-    # SOTTO +20%
-    # CONTROPROPOSTA
-    # ========================================================
-
     if total_received<minimum:
 
         missing=minimum-total_received
@@ -2187,22 +2242,12 @@ def process_swap(o):
             .get("slug")
         )
 
-        # ====================================================
-        # IMPORTANTISSIMO:
-        # send_ids contiene SOLO le mie carte
-        # rimaste nell'offerta e IN VENDITA.
-        #
-        # Le mie carte non in vendita vengono escluse.
-        # ====================================================
-
         send_ids=[
             c.get("assetId")
             for c in eligible_give
             if c.get("assetId")
         ]
 
-        # Le carte che l'altro ci aveva offerto
-        # restano tutte quelle originali.
         receive_ids=[
             c.get("assetId")
             for c in receive
@@ -2234,10 +2279,6 @@ def process_swap(o):
 
         return
 
-    # ========================================================
-    # SOPRA +25%
-    # ========================================================
-
     if total_received>maximum:
 
         print(
@@ -2249,11 +2290,6 @@ def process_swap(o):
             mark_done(oid)
 
         return
-
-    # ========================================================
-    # +20% / +25%
-    # ACCETTA
-    # ========================================================
 
     if (
         SWAP_AUTO_ACCEPT
@@ -2403,11 +2439,23 @@ def worker():
     load_github_state()
     save_local_state()
 
+    # ========================================================
+    # ACCOUNT PRIMA DELLA COVERAGE
+    # ========================================================
+
+    if not check_account():
+        return
+
+    # ========================================================
+    # COVERAGE
+    # ========================================================
+
     coverage=load_coverage(True)
 
     if not coverage:
         print(
-            "❌ Coverage non disponibile",
+            "❌ Coverage non disponibile "
+            "anche tramite GraphQL",
             flush=True
         )
         return
@@ -2418,8 +2466,9 @@ def worker():
         flush=True
     )
 
-    if not check_account():
-        return
+    # ========================================================
+    # LOOP
+    # ========================================================
 
     while True:
         try:
@@ -2552,7 +2601,9 @@ def health():
             "dry_run":
                 DRY_RUN,
             "swap_auto_accept":
-                SWAP_AUTO_ACCEPT
+                SWAP_AUTO_ACCEPT,
+            "covered_competitions":
+                len(coverage_cache)
         })
 
 
