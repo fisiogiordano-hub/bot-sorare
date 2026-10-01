@@ -25,9 +25,9 @@ lock=threading.RLock()
 started=False
 
 
-# =========================
-# STATE
-# =========================
+# ============================================================
+# UTILS / STATE
+# ============================================================
 
 def norm(x): return str(x or "").strip().lower()
 def aid(c): return str(c.get("assetId") or c.get("asset_id") or "").strip()
@@ -99,6 +99,7 @@ def update(asset,status=None,offer=None,error=None,price=None):
             c["last_error"]=error
             c["updated_at"]=now()
             d["updated_at"]=int(time.time())
+
             return save(d)
 
     return False
@@ -112,17 +113,18 @@ def sellable():
     ]
 
 
-# =========================
+# ============================================================
 # GRAPHQL
-# =========================
+# ============================================================
 
 def headers():
     if not TOKEN:
         raise RuntimeError("SORARE_JWT_TOKEN mancante")
 
     h={
-        "Authorization":TOKEN if TOKEN.lower().startswith("bearer ")
-        else "Bearer "+TOKEN,
+        "Authorization":
+            TOKEN if TOKEN.lower().startswith("bearer ")
+            else "Bearer "+TOKEN,
         "Content-Type":"application/json",
         "Accept":"application/json",
         "User-Agent":"Sorare-AutoSell-15"
@@ -139,7 +141,10 @@ def gql(q,v=None):
             r=requests.post(
                 URL,
                 headers=headers(),
-                json={"query":q,"variables":v or {}},
+                json={
+                    "query":q,
+                    "variables":v or {}
+                },
                 timeout=TIMEOUT
             )
 
@@ -171,9 +176,9 @@ def gql(q,v=None):
     return None
 
 
-# =========================
+# ============================================================
 # ACCOUNT / CARD
-# =========================
+# ============================================================
 
 def account():
     d=gql("""
@@ -188,7 +193,12 @@ def account():
     if not u:
         return False
 
-    print("✅ Sorare:",u.get("nickname") or u.get("slug"),flush=True)
+    print(
+        "✅ Sorare:",
+        u.get("nickname") or u.get("slug"),
+        flush=True
+    )
+
     return True
 
 def details(asset):
@@ -203,13 +213,17 @@ def details(asset):
       }
     }""",{"ids":[asset]})
 
-    x=(((d or {}).get("data") or {}).get("anyCards") or [])
+    x=(
+        ((d or {}).get("data") or {})
+        .get("anyCards") or []
+    )
+
     return x[0] if x else None
 
 
-# =========================
+# ============================================================
 # ACTIVE OFFER
-# =========================
+# ============================================================
 
 def active_offer(asset):
     d=gql("""
@@ -220,7 +234,10 @@ def active_offer(asset):
       }
     }""",{"id":asset})
 
-    x=(((d or {}).get("data") or {}).get("anyCards") or [])
+    x=(
+        ((d or {}).get("data") or {})
+        .get("anyCards") or []
+    )
 
     for c in x:
         if norm(c.get("assetId"))==norm(asset):
@@ -232,9 +249,9 @@ def active_offer(asset):
     return None
 
 
-# =========================
+# ============================================================
 # FLOOR
-# =========================
+# ============================================================
 
 def usd_eur(x):
     try:
@@ -245,12 +262,14 @@ def usd_eur(x):
         ).json()["rates"]["EUR"]
 
         return round(int(x)*float(r))
+
     except:
         return None
 
 def amount(a):
     try:
         x=int(a.get("eurCents") or 0)
+
         if x>0:
             return x
     except:
@@ -258,12 +277,15 @@ def amount(a):
 
     try:
         x=int(a.get("usdCents") or 0)
+
         return usd_eur(x) if x>0 else None
+
     except:
         return None
 
 def floor(c):
     p=c.get("anyPlayer") or {}
+
     slug=norm(p.get("slug"))
     rarity=norm(c.get("rarityTyped"))
 
@@ -286,21 +308,33 @@ def floor(c):
                 anyPlayer{slug}
               }
             }
-            receiverSide{amounts{eurCents usdCents}}
+            receiverSide{
+              amounts{
+                eurCents
+                usdCents
+              }
+            }
           }
         }
       }
-    }""",{"slug":slug,"first":50})
+    }""",{
+        "slug":slug,
+        "first":50
+    })
 
     nodes=(
-        (((d or {}).get("data") or {}).get("tokens") or {})
+        (((d or {}).get("data") or {})
+        .get("tokens") or {})
         .get("liveSingleSaleOffers") or {}
     ).get("nodes") or []
 
     prices=[]
 
     for o in nodes:
-        for x in ((o.get("senderSide") or {}).get("anyCards") or []):
+        for x in (
+            (o.get("senderSide") or {})
+            .get("anyCards") or []
+        ):
             p2=x.get("anyPlayer") or {}
 
             try:
@@ -314,7 +348,8 @@ def floor(c):
                 and norm(x.get("rarityTyped"))==rarity
             ):
                 v=amount(
-                    (o.get("receiverSide") or {}).get("amounts") or {}
+                    (o.get("receiverSide") or {})
+                    .get("amounts") or {}
                 )
 
                 if v is not None:
@@ -322,14 +357,17 @@ def floor(c):
 
                 break
 
-    print(f"📊 Listing: {len(prices)}/{MIN_LISTINGS}",flush=True)
+    print(
+        f"📊 Listing: {len(prices)}/{MIN_LISTINGS}",
+        flush=True
+    )
 
     return min(prices) if len(prices)>=MIN_LISTINGS else None
 
 
-# =========================
+# ============================================================
 # VALIDATION
-# =========================
+# ============================================================
 
 def source_allowed(source):
     return norm(source) in ("autobuy","swap")
@@ -343,7 +381,11 @@ def kul(c):
 def validate(original,detail):
     source=norm(original.get("source"))
 
-    print("🏷️ SOURCE →",source or "(vuota)",flush=True)
+    print(
+        "🏷️ SOURCE →",
+        source or "(vuota)",
+        flush=True
+    )
 
     if not source_allowed(source):
         return False,"SOURCE",None
@@ -364,14 +406,17 @@ def validate(original,detail):
 
     price=max(MIN_PRICE,f)
 
-    print(f"🎯 PREZZO → {eur(price)}",flush=True)
+    print(
+        f"🎯 PREZZO → {eur(price)}",
+        flush=True
+    )
 
     return True,"OK",price
 
 
-# =========================
+# ============================================================
 # PREPARE
-# =========================
+# ============================================================
 
 PREPARE="""
 mutation($input:prepareOfferInput!){
@@ -380,22 +425,56 @@ mutation($input:prepareOfferInput!){
    fingerprint
    request{
     __typename
+
     ... on StarkexTransferAuthorizationRequest{
-     amount condition expirationTimestamp nonce
-     receiverPublicKey receiverVaultId senderVaultId token
-     feeInfoUser{feeLimit sourceVaultId tokenId}
+     amount
+     condition
+     expirationTimestamp
+     nonce
+     receiverPublicKey
+     receiverVaultId
+     senderVaultId
+     token
+     feeInfoUser{
+      feeLimit
+      sourceVaultId
+      tokenId
+     }
     }
+
     ... on StarkexLimitOrderAuthorizationRequest{
-     vaultIdSell vaultIdBuy amountSell amountBuy tokenSell tokenBuy
-     nonce expirationTimestamp
-     feeInfo{feeLimit tokenId sourceVaultId}
+     vaultIdSell
+     vaultIdBuy
+     amountSell
+     amountBuy
+     tokenSell
+     tokenBuy
+     nonce
+     expirationTimestamp
+     feeInfo{
+      feeLimit
+      tokenId
+      sourceVaultId
+     }
     }
+
     ... on MangopayWalletTransferAuthorizationRequest{
-     nonce amount currency operationHash mangopayWalletId
+     nonce
+     amount
+     currency
+     operationHash
+     mangopayWalletId
     }
+
     ... on SolanaTokenTransferAuthorizationRequest{
-     assetId leafIndex merkleTreeAddress originator
-     receiverAddress senderAddress expirationTimestamp nonce
+     assetId
+     leafIndex
+     merkleTreeAddress
+     originator
+     receiverAddress
+     senderAddress
+     expirationTimestamp
+     nonce
      transferProxyProgramAddress
     }
    }
@@ -422,18 +501,25 @@ def prepare(asset,price):
         }
     )
 
-    r=(((d or {}).get("data") or {}).get("prepareOffer"))
+    r=(
+        ((d or {}).get("data") or {})
+        .get("prepareOffer")
+    )
 
     if not r or r.get("errors"):
-        print("❌ prepareOffer",r,flush=True)
+        print(
+            "❌ prepareOffer",
+            r,
+            flush=True
+        )
         return None
 
     return r.get("authorizations") or []
 
 
-# =========================
-# SIGN
-# =========================
+# ============================================================
+# SOLANA / STARK SIGN
+# ============================================================
 
 def sign(auths):
     node=os.getenv("NODE_BIN","node")
@@ -441,185 +527,326 @@ def sign(auths):
     js=r'''
 const fs=require("fs");
 const crypto=require("crypto");
-const {signAuthorizationRequest}=require("@sorare/crypto");
+
 const {
- createKeyPairFromPrivateKeyBytes,
- createSignerFromKeyPair,
- createSignableMessage
+  signAuthorizationRequest
+}=require("@sorare/crypto");
+
+const {
+  createKeyPairFromPrivateKeyBytes,
+  createSignerFromKeyPair,
+  createSignableMessage
 }=require("@solana/kit");
 
-const input=JSON.parse(fs.readFileSync(0,"utf8"));
 const A="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
+const input=JSON.parse(
+  fs.readFileSync(0,"utf8")
+);
+
 function b58d(s){
- let n=0n;
+  s=String(s||"").trim();
 
- for(const c of String(s).trim()){
-  const i=A.indexOf(c);
-  if(i<0)throw Error("Base58");
-  n=n*58n+BigInt(i);
- }
+  let n=0n;
 
- let h=n.toString(16);
- if(h.length%2)h="0"+h;
+  for(const c of s){
+    const i=A.indexOf(c);
 
- let b=n===0n?Buffer.alloc(0):Buffer.from(h,"hex");
- let z=0;
+    if(i<0)
+      throw Error("Base58 non valido");
 
- for(const c of String(s).trim()){
-  if(c!=="1")break;
-  z++;
- }
+    n=n*58n+BigInt(i);
+  }
 
- return new Uint8Array(Buffer.concat([Buffer.alloc(z),b]));
+  let h=n.toString(16);
+
+  if(h.length%2)
+    h="0"+h;
+
+  let b=n===0n
+    ? Buffer.alloc(0)
+    : Buffer.from(h,"hex");
+
+  let z=0;
+
+  for(const c of s){
+    if(c!=="1") break;
+    z++;
+  }
+
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.alloc(z),
+      b
+    ])
+  );
 }
 
-function b58e(data){
- const b=Buffer.from(data);
- let n=0n;
+function parsePrivateKey(v){
+  v=String(v||"").trim();
 
- for(const x of b)n=n*256n+BigInt(x);
+  if(!v)
+    throw Error("SORARE_SOLANA_PRIVATE_KEY vuota");
 
- let r="";
+  /*
+   * JSON array:
+   * [1,2,3,...]
+   */
+  if(v.startsWith("[")){
+    let x;
 
- while(n>0n){
-  r=A[Number(n%58n)]+r;
-  n/=58n;
- }
+    try{
+      x=JSON.parse(v);
+    }catch(e){
+      throw Error("JSON private key non valido");
+    }
 
- let z=0;
+    if(
+      !Array.isArray(x) ||
+      !x.every(n=>Number.isInteger(n)&&n>=0&&n<=255)
+    )
+      throw Error("JSON private key non valido");
 
- for(const x of b){
-  if(x!==0)break;
-  z++;
- }
+    if(x.length!==32 && x.length!==64)
+      throw Error("JSON private key: lunghezza non valida");
 
- return "1".repeat(z)+r;
-}
+    return new Uint8Array(x);
+  }
 
-function key(v){
- v=String(v||"").trim();
+  /*
+   * Hex:
+   * 64 oppure 128 caratteri
+   */
+  let h=v.startsWith("0x")
+    ? v.slice(2)
+    : v;
 
- try{
-  const b=b58d(v);
-  if(b.length===32||b.length===64)return b;
- }catch(e){}
+  if(
+    /^[0-9a-f]+$/i.test(h) &&
+    h.length%2===0
+  ){
+    const b=new Uint8Array(
+      Buffer.from(h,"hex")
+    );
 
- let h=v.startsWith("0x")?v.slice(2):v;
+    if(b.length===32 || b.length===64)
+      return b;
+  }
 
- if(/^[0-9a-f]+$/i.test(h)&&h.length%2===0){
-  const b=new Uint8Array(Buffer.from(h,"hex"));
+  /*
+   * Base58
+   */
+  try{
+    const b=b58d(v);
 
-  if(b.length===32||b.length===64)return b;
- }
+    if(b.length===32 || b.length===64)
+      return b;
+  }catch(e){}
 
- throw Error("Solana private key non valida");
+  throw Error(
+    "Formato SORARE_SOLANA_PRIVATE_KEY non riconosciuto"
+  );
 }
 
 async function solana(a){
- const r=a.request;
- let k=key(input.solanaPrivateKey);
+  const r=a.request;
 
- if(k.length===64)k=k.slice(0,32);
+  let raw=parsePrivateKey(
+    input.solanaPrivateKey
+  );
 
- const kp=await createKeyPairFromPrivateKeyBytes(k);
- const signer=createSignerFromKeyPair(kp);
+  /*
+   * Solana keypair JSON da 64 byte:
+   * primi 32 byte = private seed
+   */
+  if(raw.length===64)
+    raw=raw.slice(0,32);
 
- if(signer.address!==r.senderAddress)
-  throw Error("Solana key != senderAddress");
+  const kp=
+    await createKeyPairFromPrivateKeyBytes(raw);
 
- const msg=[
-  "TRANSFER",
-  r.transferProxyProgramAddress,
-  r.merkleTreeAddress,
-  String(r.leafIndex),
-  r.nonce,
-  String(r.expirationTimestamp),
-  r.receiverAddress,
-  "0x",
-  r.originator
- ].join(":");
+  const signer=
+    createSignerFromKeyPair(kp);
 
- const hash=crypto
-  .createHash("sha256")
-  .update(Buffer.from(msg))
-  .digest();
+  /*
+   * DEBUG SICURO:
+   * vengono stampati solo indirizzi pubblici.
+   */
+  console.error(
+    "🔑 SOLANA SIGNER →",
+    signer.address
+  );
 
- const signable=createSignableMessage(
-  new Uint8Array(hash)
- );
+  console.error(
+    "📨 SORARE SENDER →",
+    r.senderAddress
+  );
 
- const sigs=await signer.signMessages([signable]);
- const sig=sigs[0][signer.address];
-
- return {
-  fingerprint:a.fingerprint,
-  solanaTokenTransferApproval:{
-   signature:b58e(sig),
-   nonce:r.nonce,
-   expirationTimestamp:r.expirationTimestamp
+  if(signer.address!==r.senderAddress){
+    throw Error(
+      "Solana key != senderAddress"
+    );
   }
- };
+
+  const msg=[
+    "TRANSFER",
+    r.transferProxyProgramAddress,
+    r.merkleTreeAddress,
+    String(r.leafIndex),
+    r.nonce,
+    String(r.expirationTimestamp),
+    r.receiverAddress,
+    "0x",
+    r.originator
+  ].join(":");
+
+  const hash=crypto
+    .createHash("sha256")
+    .update(Buffer.from(msg))
+    .digest();
+
+  const signable=
+    createSignableMessage(
+      new Uint8Array(hash)
+    );
+
+  const sigs=
+    await signer.signMessages([
+      signable
+    ]);
+
+  const sig=sigs[0][signer.address];
+
+  return {
+    fingerprint:a.fingerprint,
+
+    solanaTokenTransferApproval:{
+      signature:b58e(sig),
+      nonce:r.nonce,
+      expirationTimestamp:r.expirationTimestamp
+    }
+  };
+}
+
+function b58e(data){
+  const b=Buffer.from(data);
+
+  let n=0n;
+
+  for(const x of b)
+    n=n*256n+BigInt(x);
+
+  let r="";
+
+  while(n>0n){
+    r=A[Number(n%58n)]+r;
+    n/=58n;
+  }
+
+  let z=0;
+
+  for(const x of b){
+    if(x!==0) break;
+    z++;
+  }
+
+  return "1".repeat(z)+r;
 }
 
 function stark(a){
- const r=a.request;
+  const r=a.request;
 
- const signature=signAuthorizationRequest(
-  input.starkPrivateKey,
-  r
- );
+  const signature=
+    signAuthorizationRequest(
+      input.starkPrivateKey,
+      r
+    );
 
- const base={fingerprint:a.fingerprint};
-
- if(r.__typename==="StarkexTransferAuthorizationRequest")
-  return {
-   ...base,
-   starkexTransferApproval:{
-    nonce:r.nonce,
-    expirationTimestamp:r.expirationTimestamp,
-    signature
-   }
+  const base={
+    fingerprint:a.fingerprint
   };
 
- if(r.__typename==="StarkexLimitOrderAuthorizationRequest")
-  return {
-   ...base,
-   starkexLimitOrderApproval:{
-    nonce:r.nonce,
-    expirationTimestamp:r.expirationTimestamp,
-    signature
-   }
-  };
+  if(
+    r.__typename===
+    "StarkexTransferAuthorizationRequest"
+  ){
+    return {
+      ...base,
 
- if(r.__typename==="MangopayWalletTransferAuthorizationRequest")
-  return {
-   ...base,
-   mangopayWalletTransferApproval:{
-    nonce:r.nonce,
-    signature
-   }
-  };
+      starkexTransferApproval:{
+        nonce:r.nonce,
+        expirationTimestamp:
+          r.expirationTimestamp,
+        signature
+      }
+    };
+  }
 
- throw Error("Authorization non supportata");
+  if(
+    r.__typename===
+    "StarkexLimitOrderAuthorizationRequest"
+  ){
+    return {
+      ...base,
+
+      starkexLimitOrderApproval:{
+        nonce:r.nonce,
+        expirationTimestamp:
+          r.expirationTimestamp,
+        signature
+      }
+    };
+  }
+
+  if(
+    r.__typename===
+    "MangopayWalletTransferAuthorizationRequest"
+  ){
+    return {
+      ...base,
+
+      mangopayWalletTransferApproval:{
+        nonce:r.nonce,
+        signature
+      }
+    };
+  }
+
+  throw Error(
+    "Authorization non supportata"
+  );
 }
 
 (async()=>{
- const out=[];
+  const out=[];
 
- for(const a of input.authorizations){
-  const t=(a.request||{}).__typename;
+  for(const a of input.authorizations){
+    const t=(a.request||{}).__typename;
 
-  if(t==="SolanaTokenTransferAuthorizationRequest")
-   out.push(await solana(a));
-  else
-   out.push(stark(a));
- }
+    if(
+      t===
+      "SolanaTokenTransferAuthorizationRequest"
+    ){
+      out.push(
+        await solana(a)
+      );
+    }else{
+      out.push(
+        stark(a)
+      );
+    }
+  }
 
- process.stdout.write(JSON.stringify(out));
+  process.stdout.write(
+    JSON.stringify(out)
+  );
+
 })().catch(e=>{
- console.error(e.stack||e);
- process.exit(1);
+  console.error(
+    e.stack||e
+  );
+
+  process.exit(1);
 });
 '''
 
@@ -636,21 +863,30 @@ function stark(a){
     )
 
     if p.stderr:
-        print(p.stderr.strip(),flush=True)
+        print(
+            p.stderr.strip(),
+            flush=True
+        )
 
     if p.returncode!=0:
-        raise RuntimeError(p.stderr.strip() or "Firma fallita")
+        raise RuntimeError(
+            p.stderr.strip() or
+            "Firma fallita"
+        )
 
     return json.loads(p.stdout)
 
 
-# =========================
+# ============================================================
 # CREATE SALE
-# =========================
+# ============================================================
 
 def create_sale(asset,price):
     if DRY:
-        print(f"🟡 DRY RUN → {eur(price)}",flush=True)
+        print(
+            f"🟡 DRY RUN → {eur(price)}",
+            flush=True
+        )
         return "DRY-RUN"
 
     auth=prepare(asset,price)
@@ -660,14 +896,23 @@ def create_sale(asset,price):
 
     try:
         approvals=sign(auth)
+
     except Exception as e:
-        print("❌ FIRMA:",e,flush=True)
+        print(
+            "❌ FIRMA:",
+            e,
+            flush=True
+        )
         return None
 
     q="""
     mutation($input:createSingleSaleOfferInput!){
       createSingleSaleOffer(input:$input){
-        tokenOffer{id startDate endDate}
+        tokenOffer{
+          id
+          startDate
+          endDate
+        }
         errors{message}
       }
     }"""
@@ -708,9 +953,19 @@ def create_sale(asset,price):
 
         if "active public offer already exists" in norm(text):
             o=active_offer(asset)
-            return o.get("id") if o else "ALREADY-LISTED"
 
-        print("❌ SALE:",text,flush=True)
+            return (
+                o.get("id")
+                if o
+                else "ALREADY-LISTED"
+            )
+
+        print(
+            "❌ SALE:",
+            text,
+            flush=True
+        )
+
         return None
 
     offer=r.get("tokenOffer") or {}
@@ -719,36 +974,66 @@ def create_sale(asset,price):
     if not oid:
         return None
 
-    print("✅ INSERZIONE →",oid,flush=True)
+    print(
+        "✅ INSERZIONE →",
+        oid,
+        flush=True
+    )
+
     return oid
 
 
-# =========================
+# ============================================================
 # PROCESS
-# =========================
+# ============================================================
 
 def process(original):
     asset=aid(original)
 
-    print(f"\n💰 AUTOSELL → {asset}",flush=True)
-    print("🏷️ SOURCE →",original.get("source",""),flush=True)
+    print(
+        f"\n💰 AUTOSELL → {asset}",
+        flush=True
+    )
+
+    print(
+        "🏷️ SOURCE →",
+        original.get("source",""),
+        flush=True
+    )
 
     old=active_offer(asset)
 
     if old:
-        print("🟢 GIÀ IN VENDITA →",old["id"],flush=True)
-        update(asset,"SELLING",old["id"],None)
-        return
-
-    previous=original.get("sale_price_eur_cents")
-
-    if previous:
         print(
-            f"🔄 EXPIRED → SAME PRICE {eur(int(previous))}",
+            "🟢 GIÀ IN VENDITA →",
+            old["id"],
             flush=True
         )
 
-        oid=create_sale(asset,int(previous))
+        update(
+            asset,
+            "SELLING",
+            old["id"],
+            None
+        )
+
+        return
+
+    previous=original.get(
+        "sale_price_eur_cents"
+    )
+
+    if previous:
+        print(
+            f"🔄 EXPIRED → SAME PRICE "
+            f"{eur(int(previous))}",
+            flush=True
+        )
+
+        oid=create_sale(
+            asset,
+            int(previous)
+        )
 
         if oid:
             update(
@@ -770,7 +1055,11 @@ def process(original):
     d=details(asset)
 
     if not d:
-        update(asset,"da_vendere",error="CARD_DETAILS")
+        update(
+            asset,
+            "da_vendere",
+            error="CARD_DETAILS"
+        )
         return
 
     print(
@@ -780,21 +1069,36 @@ def process(original):
         flush=True
     )
 
-    ok,reason,price=validate(original,d)
+    ok,reason,price=validate(
+        original,
+        d
+    )
 
     if not ok:
-        print("🚫 ESCLUSA →",reason,flush=True)
+        print(
+            "🚫 ESCLUSA →",
+            reason,
+            flush=True
+        )
 
         update(
             asset,
-            "BLOCKED" if reason in (
-                "SOURCE","KULENOVIC","RARITY"
-            ) else "da_vendere",
+            "BLOCKED"
+            if reason in (
+                "SOURCE",
+                "KULENOVIC",
+                "RARITY"
+            )
+            else "da_vendere",
             error=reason
         )
+
         return
 
-    print(f"🎯 PREZZO → {eur(price)}",flush=True)
+    print(
+        f"🎯 PREZZO → {eur(price)}",
+        flush=True
+    )
 
     update(
         asset,
@@ -803,7 +1107,10 @@ def process(original):
         price=price
     )
 
-    oid=create_sale(asset,price)
+    oid=create_sale(
+        asset,
+        price
+    )
 
     if not oid:
         update(
@@ -821,25 +1128,32 @@ def process(original):
         price
     )
 
-    print("🟢 STATO → SELLING",flush=True)
+    print(
+        "🟢 STATO → SELLING",
+        flush=True
+    )
 
 
-# =========================
-# RECOVERY
-# =========================
+# ============================================================
+# EXPIRATION / RECOVERY
+# ============================================================
 
 def recovery():
     for c in cards():
+
         if norm(c.get("status"))!="selling":
             continue
 
         asset=aid(c)
+
         old=active_offer(asset)
 
         if old:
             continue
 
-        price=c.get("sale_price_eur_cents")
+        price=c.get(
+            "sale_price_eur_cents"
+        )
 
         if not price:
             update(
@@ -855,7 +1169,10 @@ def recovery():
             flush=True
         )
 
-        oid=create_sale(asset,int(price))
+        oid=create_sale(
+            asset,
+            int(price)
+        )
 
         if oid:
             update(
@@ -873,22 +1190,43 @@ def recovery():
             )
 
 
-# =========================
+# ============================================================
 # WORKER
-# =========================
+# ============================================================
 
 def worker():
-    print("🤖 AUTOSELL AUTOSell-15",flush=True)
-    print("🎯 SOURCE: AUTOBUY + SWAP",flush=True)
-    print("💰 FLOOR MAX: €0.70",flush=True)
-    print("💰 MIN PRICE: €0.30",flush=True)
-    print("🔄 EXPIRED: SAME PREVIOUS PRICE",flush=True)
+    print(
+        "🤖 AUTOSELL AUTOSell-15",
+        flush=True
+    )
+
+    print(
+        "🎯 SOURCE: AUTOBUY + SWAP",
+        flush=True
+    )
+
+    print(
+        "💰 FLOOR MAX: €0.70",
+        flush=True
+    )
+
+    print(
+        "💰 MIN PRICE: €0.30",
+        flush=True
+    )
+
+    print(
+        "🔄 EXPIRED: SAME PREVIOUS PRICE",
+        flush=True
+    )
 
     try:
         headers()
 
         os.makedirs(
-            os.path.dirname(os.path.abspath(STATE)),
+            os.path.dirname(
+                os.path.abspath(STATE)
+            ),
             exist_ok=True
         )
 
@@ -896,7 +1234,11 @@ def worker():
             return
 
     except Exception as e:
-        print("❌ CONFIG:",e,flush=True)
+        print(
+            "❌ CONFIG:",
+            e,
+            flush=True
+        )
         return
 
     while True:
@@ -906,8 +1248,14 @@ def worker():
             for c in sellable():
                 try:
                     process(c)
+
                 except Exception as e:
-                    print("❌ PROCESS:",e,flush=True)
+                    print(
+                        "❌ PROCESS:",
+                        e,
+                        flush=True
+                    )
+
                     update(
                         aid(c),
                         "da_vendere",
@@ -917,13 +1265,18 @@ def worker():
             time.sleep(INTERVAL)
 
         except Exception as e:
-            print("❌ WORKER:",e,flush=True)
+            print(
+                "❌ WORKER:",
+                e,
+                flush=True
+            )
+
             time.sleep(INTERVAL)
 
 
-# =========================
+# ============================================================
 # FLASK
-# =========================
+# ============================================================
 
 @app.get("/")
 def home():
@@ -937,16 +1290,23 @@ def home():
         "min_price":"€0.30",
         "expired":"same_previous_price",
         "cards":len(c),
+
         "da_vendere":sum(
-            norm(x.get("status")) in ("da_vendere","ready")
-            for x in c if isinstance(x,dict)
+            norm(x.get("status"))
+            in ("da_vendere","ready")
+            for x in c
+            if isinstance(x,dict)
         ),
+
         "selling":sum(
             norm(x.get("status"))=="selling"
-            for x in c if isinstance(x,dict)
+            for x in c
+            if isinstance(x,dict)
         ),
+
         "worker":started
     })
+
 
 @app.get("/health")
 def health():
@@ -956,10 +1316,15 @@ def health():
         "dry_run":DRY
     })
 
+
 @app.get("/cards")
 def card_endpoint():
     c=cards()
-    return jsonify({"count":len(c),"cards":c})
+
+    return jsonify({
+        "count":len(c),
+        "cards":c
+    })
 
 
 def start():
@@ -983,6 +1348,11 @@ if __name__=="__main__":
 
     app.run(
         host="0.0.0.0",
-        port=int(os.getenv("PORT","10000")),
+        port=int(
+            os.getenv(
+                "PORT",
+                "10000"
+            )
+        ),
         debug=False
     )
