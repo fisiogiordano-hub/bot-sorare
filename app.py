@@ -1020,161 +1020,161 @@ def listed_cards(asset_ids):
 
 # ============================================================
 # COVERAGE / VALIDAZIONE
+#
+# IMPORTANTE:
+# NON viene usata alcuna query GraphQL per il coverage.
+# Sorare ha rimosso leaguesOpenForGameStats dal proprio schema.
+# Il coverage viene letto direttamente dalla pagina /coverage.
 # ============================================================
 
 def load_coverage(force=False):
     global coverage_cache,coverage_time
 
-    # ========================================================
-    # CACHE
-    # ========================================================
+    with coverage_lock:
 
-    if (
-        not force
-        and coverage_cache
-        and time.time()-coverage_time
-        < COVERAGE_CACHE
-    ):
-        return set(coverage_cache)
+        if (
+            not force
+            and coverage_cache
+            and time.time()-coverage_time
+            < COVERAGE_CACHE
+        ):
+            return set(coverage_cache)
 
-    # ========================================================
-    # METODO PRINCIPALE:
-    # GRAPHQL SORARE
-    #
-    # ATTENZIONE:
-    # leaguesOpenForGameStats è sulla ROOT QUERY.
-    # NON è sotto football{}.
-    # ========================================================
-
-    try:
-        d=graphql("""
-        query{
-          leaguesOpenForGameStats{
-            slug
-            name
-            openForGameStats
-          }
-        }
-        """)
-
-        competitions=(
-            ((d or {}).get("data") or {})
-            .get("leaguesOpenForGameStats") or []
-        )
-
-        result={
-            norm(x.get("slug"))
-            for x in competitions
-            if isinstance(x,dict)
-            and x.get("slug")
-        }
-
-        if result:
-            coverage_cache=result
-            coverage_time=time.time()
+        try:
+            r=requests.get(
+                COVERAGE_URL,
+                timeout=TIMEOUT,
+                headers={
+                    "User-Agent":
+                        f"Sorare-Bot/{BOT_VERSION}",
+                    "Accept":
+                        "text/html,application/xhtml+xml"
+                }
+            )
 
             print(
-                f"🌐 Coverage GraphQL: "
-                f"{len(result)} competizioni",
+                f"🌐 Coverage HTTP {r.status_code}",
                 flush=True
             )
 
-            return set(coverage_cache)
+            if r.status_code!=200:
+                print(
+                    "⚠️ Coverage HTTP non valido: "
+                    f"{r.status_code}",
+                    flush=True
+                )
 
-        print(
-            "⚠️ Coverage GraphQL: "
-            "nessuna competizione restituita",
-            flush=True
-        )
+                if coverage_cache:
+                    print(
+                        f"🟡 Coverage: uso cache "
+                        f"precedente "
+                        f"({len(coverage_cache)} "
+                        f"competizioni)",
+                        flush=True
+                    )
 
-    except Exception as e:
-        print(
-            f"⚠️ Coverage GraphQL non disponibile: {e}",
-            flush=True
-        )
+                return set(coverage_cache)
 
-    # ========================================================
-    # FALLBACK:
-    # PAGINA WEB /coverage
-    # ========================================================
-
-    try:
-        r=requests.get(
-            COVERAGE_URL,
-            timeout=TIMEOUT,
-            headers={
-                "User-Agent":
-                    f"Sorare-Bot/{BOT_VERSION}",
-                "Accept":
-                    "text/html,application/xhtml+xml"
-            }
-        )
-
-        if r.status_code==200:
+            html=r.text or ""
 
             result=set()
 
-            # Link classici
-            result.update(
-                norm(x)
-                for x in re.findall(
-                    r'/football/leagues/([^"\'?#<>\s]+)',
-                    r.text,
-                    re.I
-                )
-            )
+            # ------------------------------------------------
+            # URL relativi:
+            # /football/leagues/slug
+            # ------------------------------------------------
 
-            # Eventuali slug presenti nei dati JSON
-            # incorporati nella pagina.
+            for slug in re.findall(
+                r'/football/leagues/([^"\'?#<>\s]+)',
+                html,
+                re.I
+            ):
+                slug=norm(slug)
+
+                if slug:
+                    result.add(slug)
+
+            # ------------------------------------------------
+            # URL assoluti:
+            # https://sorare.com/football/leagues/slug
+            # ------------------------------------------------
+
+            for slug in re.findall(
+                r'https?://(?:www\.)?sorare\.com/football/leagues/([^"\'?#<>\s]+)',
+                html,
+                re.I
+            ):
+                slug=norm(slug)
+
+                if slug:
+                    result.add(slug)
+
+            # ------------------------------------------------
+            # Fallback per eventuale JSON/script incorporato.
+            # ------------------------------------------------
+
             if not result:
-                patterns=[
-                    r'"slug"\s*:\s*"([^"]+)"',
-                    r'\\"slug\\"\s*:\s*\\"([^"]+)\\"'
-                ]
+                for slug in re.findall(
+                    r'football/leagues/([a-zA-Z0-9_-]+)',
+                    html,
+                    re.I
+                ):
+                    slug=norm(slug)
 
-                for pattern in patterns:
-                    result.update(
-                        norm(x)
-                        for x in re.findall(
-                            pattern,
-                            r.text,
-                            re.I
-                        )
-                    )
+                    if slug:
+                        result.add(slug)
+
+            # ------------------------------------------------
+            # Coverage trovata.
+            # ------------------------------------------------
 
             if result:
                 coverage_cache=result
                 coverage_time=time.time()
 
                 print(
-                    f"🌐 Coverage HTML fallback: "
+                    f"🌐 Coverage: "
                     f"{len(result)} competizioni",
                     flush=True
                 )
 
-                return set(coverage_cache)
+                return set(result)
 
-    except Exception as e:
-        print(
-            f"⚠️ Coverage HTML fallback: {e}",
-            flush=True
-        )
+            # ------------------------------------------------
+            # Nessuna competizione trovata.
+            # ------------------------------------------------
 
-    # ========================================================
-    # SE ESISTE UNA CACHE PRECEDENTE, NON LA DISTRUGGIAMO
-    # ========================================================
+            print(
+                "⚠️ Coverage HTML: "
+                "nessuna competizione trovata",
+                flush=True
+            )
 
-    if coverage_cache:
-        print(
-            f"⚠️ Coverage temporaneamente non leggibile: "
-            f"uso cache precedente "
-            f"({len(coverage_cache)} competizioni)",
-            flush=True
-        )
+            if coverage_cache:
+                print(
+                    f"🟡 Coverage: uso cache precedente "
+                    f"({len(coverage_cache)} "
+                    f"competizioni)",
+                    flush=True
+                )
 
-        return set(coverage_cache)
+            return set(coverage_cache)
 
-    return set()
+        except Exception as e:
+            print(
+                f"⚠️ Coverage: {e}",
+                flush=True
+            )
+
+            if coverage_cache:
+                print(
+                    f"🟡 Coverage: uso cache precedente "
+                    f"({len(coverage_cache)} "
+                    f"competizioni)",
+                    flush=True
+                )
+
+            return set(coverage_cache)
 
 
 def is_kulenovic(c):
@@ -2439,23 +2439,11 @@ def worker():
     load_github_state()
     save_local_state()
 
-    # ========================================================
-    # ACCOUNT PRIMA DELLA COVERAGE
-    # ========================================================
-
-    if not check_account():
-        return
-
-    # ========================================================
-    # COVERAGE
-    # ========================================================
-
     coverage=load_coverage(True)
 
     if not coverage:
         print(
-            "❌ Coverage non disponibile "
-            "anche tramite GraphQL",
+            "❌ Coverage non disponibile",
             flush=True
         )
         return
@@ -2466,9 +2454,8 @@ def worker():
         flush=True
     )
 
-    # ========================================================
-    # LOOP
-    # ========================================================
+    if not check_account():
+        return
 
     while True:
         try:
@@ -2601,9 +2588,7 @@ def health():
             "dry_run":
                 DRY_RUN,
             "swap_auto_accept":
-                SWAP_AUTO_ACCEPT,
-            "covered_competitions":
-                len(coverage_cache)
+                SWAP_AUTO_ACCEPT
         })
 
 
