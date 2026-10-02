@@ -570,6 +570,46 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:e2710d6d-046d-44b1-b7b2-756613b15366"
+    },
+    {
+      "assetId": "0x04003b3b36b6c471d69c0a8bfca753a75e191bca9a827d059cd04354c54c87a7",
+      "slug": "basar-onal-2025-limited-530",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
+    },
+    {
+      "assetId": "0x04004792c5345fae53357eb8c0234fb6ced0a24846f95fc9d2876314e9ca3fc9",
+      "slug": "soumaila-diabate-2025-limited-645",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
+    },
+    {
+      "assetId": "0x04006414412ff4d91104570ab652f01e47fd7a6945970b1a986e87e6deeae61c",
+      "slug": "tim-trummer-2025-limited-384",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
+    },
+    {
+      "assetId": "0x040088ac3ef9544ef828ee64f8bce9f072c4dbf278abe09961c94ce249ae5126",
+      "slug": "deveron-fonville-2025-limited-240",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
+    },
+    {
+      "assetId": "0x0400f77c8d0aed2f7c02bc87d34e5f45de2ebec36ec2220836166ca677e343c3",
+      "slug": "petar-ratkov-2025-limited-415",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
     }
   ],
   "pending_autobuys": [
@@ -636,5 +676,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1790933944
+  "updated_at": 1790933979
 }
