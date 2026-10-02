@@ -30,7 +30,7 @@ INTERVAL=10
 TIMEOUT=25
 USD_CACHE=300
 
-BOT_VERSION="23.8-LIGHT-SWAP-LISTED-COVERAGE"
+BOT_VERSION="23.9-LIGHT-SWAP-GLOBAL-FLOOR"
 
 KSLUG="sandro-kulenovic-2025-limited-385"
 KASSET="0x0400756aff980aff1d36e274f1c38af4ac587bd3d40c7136796b6c0ed10ba0a6"
@@ -552,15 +552,6 @@ def card_details(ids):
     if not ids:
         return []
 
-    # IMPORTANTE:
-    # activeCompetitions appartiene a Club.
-    # La struttura corretta è:
-    #
-    # anyPlayer -> activeClub -> activeCompetitions
-    #
-    # Non:
-    # Query -> activeCompetitions
-
     d=graphql("""
 query($assetIds:[String!]!){
   anyCards(assetIds:$assetIds){
@@ -767,6 +758,141 @@ query($playerSlug:String,$first:Int){
     )
 
 
+def has_low_global_limited(card):
+    """
+    CONTROLLO AUTOBUY CROSS-SEASON.
+
+    Regola:
+    se esiste ALMENO UNA Limited dello stesso giocatore,
+    di QUALSIASI stagione, con prezzo < MIN_PRICE,
+    la carta NON è acquistabile.
+
+    Questo controllo è volutamente separato da live_floor(),
+    perché live_floor() deve continuare a lavorare sulla
+    stagione specifica della carta, soprattutto per gli swap.
+    """
+
+    p=card.get("anyPlayer") or {}
+    ps=norm(p.get("slug"))
+
+    if not ps:
+        print(
+            f"⚠️ GLOBAL FLOOR: player slug mancante per "
+            f"{card_label(card)}",
+            flush=True
+        )
+
+        return True
+
+    d=graphql("""
+query($playerSlug:String,$first:Int){
+  tokens{
+    liveSingleSaleOffers(
+      playerSlug:$playerSlug
+      first:$first
+    ){
+      nodes{
+        senderSide{
+          anyCards{
+            assetId
+            slug
+            rarityTyped
+            seasonYear
+            anyPlayer{
+              slug
+            }
+          }
+        }
+
+        receiverSide{
+          amounts{
+            eurCents
+            usdCents
+            referenceCurrency
+            wei
+          }
+        }
+      }
+    }
+  }
+}
+""",{
+        "playerSlug":ps,
+        "first":100
+    })
+
+    offers=(
+        (((d or {}).get("data") or {})
+        .get("tokens") or {})
+        .get("liveSingleSaleOffers") or {}
+    ).get("nodes",[])
+
+    if not offers:
+        print(
+            f"⚠️ GLOBAL FLOOR: nessuna offerta live "
+            f"recuperata per {card_label(card)}",
+            flush=True
+        )
+
+        # Fail-safe:
+        # se non riusciamo a verificare il mercato,
+        # NON autorizziamo l'AutoBuy.
+        return True
+
+    for o in offers:
+
+        price=price_eur(
+            (o.get("receiverSide") or {})
+            .get("amounts") or {}
+        )
+
+        if price is None:
+            continue
+
+        cards=(
+            (o.get("senderSide") or {})
+            .get("anyCards") or []
+        )
+
+        for c in cards:
+
+            player_slug=norm(
+                (c.get("anyPlayer") or {})
+                .get("slug")
+            )
+
+            rarity=norm(
+                c.get("rarityTyped")
+            ).upper()
+
+            if (
+                player_slug==ps
+                and
+                rarity=="LIMITED"
+                and
+                price<MIN_PRICE
+            ):
+                print(
+                    f"🚫 GLOBAL FLOOR: {card_label(card)} → "
+                    f"trovata Limited "
+                    f"{c.get('seasonYear') or 'N/D'} "
+                    f"a {format_eur(price)} "
+                    f"(< {format_eur(MIN_PRICE)})",
+                    flush=True
+                )
+
+                return True
+
+    print(
+        f"🟢 GLOBAL FLOOR OK: {card_label(card)} → "
+        f"nessuna Limited del giocatore sotto "
+        f"{format_eur(MIN_PRICE)}",
+        flush=True
+    )
+
+    return False
+
+
 def listed_cards(asset_ids):
     ids=[
         str(x).strip()
@@ -892,7 +1018,8 @@ def validate_card(c,log_reason=True):
     except:
         if log_reason:
             print(
-                f"🚫 AUTOBUY NON IDONEA: {label} → età non disponibile",
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"età non disponibile",
                 flush=True
             )
 
@@ -921,7 +1048,24 @@ def validate_card(c,log_reason=True):
 
         return False
 
-    # 3. COMPETIZIONE COPERTA DA SORARE
+    # 3. FLOOR GLOBALE CROSS-SEASON
+    #
+    # REGOLA:
+    # se esiste QUALSIASI Limited dello stesso giocatore,
+    # di QUALSIASI stagione, sotto MIN_PRICE,
+    # l'AutoBuy viene bloccato.
+    if has_low_global_limited(c):
+        if log_reason:
+            print(
+                f"🚫 AUTOBUY NON IDONEA: {label} → "
+                f"esiste una Limited dello stesso giocatore "
+                f"sotto {format_eur(MIN_PRICE)}",
+                flush=True
+            )
+
+        return False
+
+    # 4. COMPETIZIONE COPERTA DA SORARE
     competitions=get_active_competitions(c)
 
     if not competitions:
@@ -946,7 +1090,7 @@ def validate_card(c,log_reason=True):
         flush=True
     )
 
-    # 4. FLOOR
+    # 5. FLOOR SPECIFICO DELLA STAGIONE
     floor=live_floor(c)
 
     if floor is None:
@@ -963,7 +1107,8 @@ def validate_card(c,log_reason=True):
         if log_reason:
             print(
                 f"🚫 AUTOBUY NON IDONEA: {label} → "
-                f"floor {format_eur(floor)} < minimo {format_eur(MIN_PRICE)}",
+                f"floor {format_eur(floor)} < minimo "
+                f"{format_eur(MIN_PRICE)}",
                 flush=True
             )
 
@@ -973,7 +1118,8 @@ def validate_card(c,log_reason=True):
         if log_reason:
             print(
                 f"🚫 AUTOBUY NON IDONEA: {label} → "
-                f"floor {format_eur(floor)} > massimo {format_eur(MAX_PRICE)}",
+                f"floor {format_eur(floor)} > massimo "
+                f"{format_eur(MAX_PRICE)}",
                 flush=True
             )
 
@@ -982,7 +1128,8 @@ def validate_card(c,log_reason=True):
     print(
         f"✅ AUTOBUY IDONEA: {label} → "
         f"età {age}, LIMITED, "
-        f"coverage OK, floor {format_eur(floor)}",
+        f"global floor OK, coverage OK, "
+        f"floor specifico {format_eur(floor)}",
         flush=True
     )
 
@@ -1994,9 +2141,16 @@ def worker():
     )
 
     print(
-        f"📊 AutoBuy floor: "
+        f"📊 AutoBuy floor specifico: "
         f"€{MIN_PRICE/100:.2f} - "
         f"€{MAX_PRICE/100:.2f}",
+        flush=True
+    )
+
+    print(
+        f"🛡️ AutoBuy global floor: "
+        f"NESSUNA Limited del giocatore "
+        f"< €{MIN_PRICE/100:.2f}, qualsiasi stagione",
         flush=True
     )
 
@@ -2006,7 +2160,7 @@ def worker():
     )
 
     print(
-        f"📊 Inserzioni minime: "
+        f"📊 Inserzioni minime floor specifico: "
         f"{MIN_LIVE_LISTINGS}",
         flush=True
     )
@@ -2057,6 +2211,11 @@ def worker():
 
     print(
         "🔧 COVERAGE: activeClub.activeCompetitions",
+        flush=True
+    )
+
+    print(
+        "🛡️ GLOBAL FLOOR: cross-season Limited check",
         flush=True
     )
 
@@ -2135,7 +2294,8 @@ def home():
                 "min_floor_cents":MIN_PRICE,
                 "max_floor_cents":MAX_PRICE,
                 "max_age":MAX_AGE,
-                "min_live_listings":MIN_LIVE_LISTINGS
+                "min_live_listings":MIN_LIVE_LISTINGS,
+                "global_cross_season_floor":True
             },
 
             "swap":{
@@ -2169,7 +2329,8 @@ def health():
             "pending_autobuys":len(pending_autobuys),
             "dry_run":DRY_RUN,
             "swap_auto_accept":SWAP_AUTO_ACCEPT,
-            "coverage":"activeClub.activeCompetitions"
+            "coverage":"activeClub.activeCompetitions",
+            "global_cross_season_floor":True
         })
 
 
