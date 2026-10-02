@@ -567,7 +567,26 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "DirectOffer:e2710d6d-046d-44b1-b7b2-756613b15366",
+      "original_offer_id": "directoffer:0aa68b93-2da0-43ed-8cbe-2aeb50fc5b8a",
+      "created_at": 1790916073,
+      "cards": [
+        {
+          "assetId": "0x04007f29d976d46bed7d5da46b37882769ce2cc96575d6beaa25f6897a627202",
+          "slug": "lasse-rosenboom-2025-limited-186",
+          "name": "Lasse Rosenboom 2025-26 • Limited 186/1000"
+        },
+        {
+          "assetId": "0x0400e62b31fbcaacc2462c3e56265cdd362f97c41a1a3502d795aeb6a20b38ac",
+          "slug": "ricardo-saul-monreal-morales-2024-limited-65",
+          "name": "Ricardo Monreal 2024-25 • Limited 65/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1790915513
+  "updated_at": 1790916073
 }
