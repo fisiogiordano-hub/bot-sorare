@@ -552,6 +552,22 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:0863919c-6403-46ab-9801-2c34bef96c8d"
+    },
+    {
+      "assetId": "0x04007f29d976d46bed7d5da46b37882769ce2cc96575d6beaa25f6897a627202",
+      "slug": "lasse-rosenboom-2025-limited-186",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:e2710d6d-046d-44b1-b7b2-756613b15366"
+    },
+    {
+      "assetId": "0x0400e62b31fbcaacc2462c3e56265cdd362f97c41a1a3502d795aeb6a20b38ac",
+      "slug": "ricardo-saul-monreal-morales-2024-limited-65",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:e2710d6d-046d-44b1-b7b2-756613b15366"
     }
   ],
   "pending_autobuys": [
@@ -589,5 +605,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1790916075
+  "updated_at": 1790916132
 }
