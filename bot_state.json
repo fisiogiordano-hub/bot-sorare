@@ -612,21 +612,6 @@
       "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
     }
   ],
-  "pending_autobuys": [
-    {
-      "offer_id": "SingleBuyOffer:0b0fe3c3-8949-4c5b-94a4-c6ec43270fb7",
-      "original_offer_id": "directoffer:12e4a365-1b3f-480a-af51-01deb5e005e9",
-      "created_at": 1790929048,
-      "cards": [
-        {
-          "assetId": "0x040060f8a62b1434ef3121f2c289220f8c93e31c0446933ae807992b1185b95d",
-          "slug": "thierno-ballo-2024-limited-86",
-          "name": "Thierno Ballo 2024-25 • Limited 86/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    }
-  ],
-  "updated_at": 1790942761
+  "pending_autobuys": [],
+  "updated_at": 1790942763
 }
