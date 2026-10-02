@@ -614,20 +614,6 @@
   ],
   "pending_autobuys": [
     {
-      "offer_id": "SingleBuyOffer:947d8e45-1b83-4208-b0f4-cc75acb19572",
-      "original_offer_id": "directoffer:eb89ee4c-2453-44d5-a8c2-28fb4e211a50",
-      "created_at": 1790915511,
-      "cards": [
-        {
-          "assetId": "0x0400aff61be5deada51fb771c485418ef73c705d273c2a6d82a246245537cf9c",
-          "slug": "marcos-alberto-zambrano-delgado-2026-limited-172",
-          "name": "Marcos Zambrano 2026-27 • Limited 172/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    },
-    {
       "offer_id": "SingleBuyOffer:0b0fe3c3-8949-4c5b-94a4-c6ec43270fb7",
       "original_offer_id": "directoffer:12e4a365-1b3f-480a-af51-01deb5e005e9",
       "created_at": 1790929048,
@@ -642,5 +628,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1790933981
+  "updated_at": 1790942761
 }
