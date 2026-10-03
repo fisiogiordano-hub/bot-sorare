@@ -69,7 +69,7 @@ INTERVAL = 10
 TIMEOUT = 25
 USD_CACHE = 300
 
-BOT_VERSION = "23.9-LIGHT-SWAP-GLOBAL-FLOOR-FIXED"
+BOT_VERSION = "23.9-LIGHT-SWAP-GLOBAL-FLOOR-FIXED-2"
 
 
 # ============================================================
@@ -163,12 +163,12 @@ def graphql(query, variables=None):
     """
     Esegue una richiesta GraphQL.
 
+    Restituisce None solamente se la richiesta fallisce
+    completamente dopo i tentativi disponibili.
+
     IMPORTANTE:
-    restituisce None se la richiesta fallisce completamente.
-    In questo modo le funzioni che devono distinguere:
-    - query riuscita ma nessun risultato
-    - query fallita
-    possono farlo correttamente.
+    Sorare può restituire HTTP 200 con un campo "errors".
+    In quel caso il payload viene comunque restituito.
     """
 
     for attempt in range(3):
@@ -1093,6 +1093,9 @@ def live_floor(card):
 
         return None
 
+    if not ps:
+        return None
+
     d = graphql("""
 query($playerSlug:String,$first:Int){
   tokens{
@@ -1132,23 +1135,56 @@ query($playerSlug:String,$first:Int){
     if d is None:
         return None
 
-    offers = (
-        (((d or {}).get("data") or {})
-        .get("tokens") or {})
-        .get("liveSingleSaleOffers") or {}
-    ).get(
+    data = (
+        d.get("data")
+        if isinstance(d, dict)
+        else None
+    )
+
+    if not isinstance(data, dict):
+        return None
+
+    tokens = data.get("tokens")
+
+    if not isinstance(tokens, dict):
+        return None
+
+    container = tokens.get(
+        "liveSingleSaleOffers"
+    )
+
+    if not isinstance(container, dict):
+        return None
+
+    offers = container.get(
         "nodes",
         []
     )
+
+    if not isinstance(offers, list):
+        return None
 
     prices = []
 
     for o in offers:
 
+        if not isinstance(o, dict):
+            continue
+
         for c in (
             (o.get("senderSide") or {})
             .get("anyCards") or []
         ):
+
+            try:
+                same_season = (
+                    int(
+                        c.get("seasonYear")
+                        or -1
+                    ) == season
+                )
+            except Exception:
+                same_season = False
 
             if (
                 norm(
@@ -1160,9 +1196,7 @@ query($playerSlug:String,$first:Int){
                     c.get("rarityTyped")
                 ) == rarity
                 and
-                int(
-                    c.get("seasonYear") or -1
-                ) == season
+                same_season
             ):
 
                 x = price_eur(
@@ -1192,9 +1226,6 @@ def has_low_global_limited(card):
     NON comprare la carta se esiste almeno una
     Limited dello stesso giocatore, di QUALSIASI stagione,
     con floor/listing sotto €0.32.
-
-    Il controllo NON considera la stagione della carta
-    che stiamo acquistando.
 
     Se Sorare non permette di verificare correttamente
     il mercato, viene applicato fail-safe:
@@ -1267,14 +1298,66 @@ query($playerSlug:String,$first:Int){
 
         return True
 
-    offers = (
-        (((d or {}).get("data") or {})
-        .get("tokens") or {})
-        .get("liveSingleSaleOffers") or {}
-    ).get(
+    data = (
+        d.get("data")
+        if isinstance(d, dict)
+        else None
+    )
+
+    if not isinstance(data, dict):
+
+        print(
+            f"⚠️ GLOBAL FLOOR: "
+            f"risposta senza data "
+            f"per {card_label(card)}",
+            flush=True
+        )
+
+        return True
+
+    tokens = data.get("tokens")
+
+    if not isinstance(tokens, dict):
+
+        print(
+            f"⚠️ GLOBAL FLOOR: "
+            f"campo tokens assente "
+            f"per {card_label(card)}",
+            flush=True
+        )
+
+        return True
+
+    container = tokens.get(
+        "liveSingleSaleOffers"
+    )
+
+    if not isinstance(container, dict):
+
+        print(
+            f"⚠️ GLOBAL FLOOR: "
+            f"liveSingleSaleOffers assente "
+            f"per {card_label(card)}",
+            flush=True
+        )
+
+        return True
+
+    offers = container.get(
         "nodes",
         []
     )
+
+    if not isinstance(offers, list):
+
+        print(
+            f"⚠️ GLOBAL FLOOR: "
+            f"nodes non disponibili "
+            f"per {card_label(card)}",
+            flush=True
+        )
+
+        return True
 
     if not offers:
 
@@ -1284,12 +1367,12 @@ query($playerSlug:String,$first:Int){
             flush=True
         )
 
-        # FAIL-SAFE:
-        # se non possiamo verificare il global floor,
-        # NON acquistiamo.
         return True
 
     for o in offers:
+
+        if not isinstance(o, dict):
+            continue
 
         price = price_eur(
             (o.get("receiverSide") or {})
@@ -1351,6 +1434,23 @@ query($playerSlug:String,$first:Int){
 # ============================================================
 
 def listed_cards(asset_ids):
+    """
+    Verifica quali asset sono attualmente presenti
+    nelle live single sale di Sorare.
+
+    IMPORTANTE:
+    liveSingleSaleOffers NON accetta assetIds
+    nello schema GraphQL che stiamo utilizzando.
+
+    Pertanto:
+      1. recuperiamo le live sale;
+      2. filtriamo localmente gli assetId richiesti.
+
+    Return:
+      set() -> query riuscita, nessun asset trovato
+      set(ids) -> asset trovati
+      None -> impossibile verificare il mercato
+    """
 
     ids = [
         str(x).strip()
@@ -1361,12 +1461,16 @@ def listed_cards(asset_ids):
     if not ids:
         return set()
 
+    wanted = {
+        norm(x)
+        for x in ids
+    }
+
     d = graphql("""
-query($assetIds:[String!]!){
+query($first:Int){
   tokens{
     liveSingleSaleOffers(
-      assetIds:$assetIds
-      first:100
+      first:$first
     ){
       nodes{
         senderSide{
@@ -1388,44 +1492,118 @@ query($assetIds:[String!]!){
   }
 }
 """, {
-        "assetIds": ids
+        "first": 100
     })
 
-    if d is None:
-        return set()
+    # --------------------------------------------------------
+    # Query completamente fallita
+    # --------------------------------------------------------
 
-    offers = (
-        (((d or {}).get("data") or {})
-        .get("tokens") or {})
-        .get("liveSingleSaleOffers") or {}
-    ).get(
-        "nodes",
-        []
+    if d is None:
+
+        print(
+            "⚠️ LISTED CARDS: "
+            "query mercato fallita",
+            flush=True
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # Verifica struttura GraphQL
+    # --------------------------------------------------------
+
+    data = (
+        d.get("data")
+        if isinstance(d, dict)
+        else None
     )
 
-    wanted = {
-        norm(x)
-        for x in ids
-    }
+    if not isinstance(data, dict):
+
+        print(
+            "⚠️ LISTED CARDS: "
+            "risposta GraphQL senza data",
+            flush=True
+        )
+
+        return None
+
+    tokens = data.get("tokens")
+
+    if not isinstance(tokens, dict):
+
+        print(
+            "⚠️ LISTED CARDS: "
+            "campo tokens assente",
+            flush=True
+        )
+
+        return None
+
+    container = tokens.get(
+        "liveSingleSaleOffers"
+    )
+
+    if not isinstance(container, dict):
+
+        print(
+            "⚠️ LISTED CARDS: "
+            "liveSingleSaleOffers assente",
+            flush=True
+        )
+
+        return None
+
+    offers = container.get(
+        "nodes"
+    )
+
+    if not isinstance(offers, list):
+
+        print(
+            "⚠️ LISTED CARDS: "
+            "nodes non disponibile",
+            flush=True
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # FILTRO LOCALE
+    # --------------------------------------------------------
 
     result = set()
 
     for o in offers:
 
-        for c in (
+        if not isinstance(o, dict):
+            continue
+
+        cards = (
             (o.get("senderSide") or {})
             .get("anyCards") or []
-        ):
+        )
 
-            if norm(
+        for c in cards:
+
+            if not isinstance(c, dict):
+                continue
+
+            aid = norm(
                 c.get("assetId")
-            ) in wanted:
+            )
 
-                result.add(
-                    norm(
-                        c.get("assetId")
-                    )
-                )
+            if aid in wanted:
+
+                result.add(aid)
+
+    print(
+        f"🔎 LISTED CARDS: "
+        f"{len(result)}/{len(wanted)} "
+        f"carte richieste trovate in vendita",
+        flush=True
+    )
 
     return result
 
@@ -2252,20 +2430,7 @@ def check_pending_autobuys():
         flush=True
     )
 
-    # --------------------------------------------------------
-    # IMPORTANTE:
-    # facciamo UNA SOLA query per tutti i pending.
-    #
-    # Prima il codice faceva una query per ogni pending.
-    # --------------------------------------------------------
-
     offers = get_pending_sent_offers()
-
-    # --------------------------------------------------------
-    # Se la query fallisce davvero, NON cancelliamo nulla.
-    # Altrimenti un problema temporaneo di Sorare potrebbe
-    # farci perdere lo stato dei pending.
-    # --------------------------------------------------------
 
     if offers is None:
 
@@ -2278,10 +2443,6 @@ def check_pending_autobuys():
         )
 
         return
-
-    # --------------------------------------------------------
-    # Creiamo una mappa ID -> offerta.
-    # --------------------------------------------------------
 
     offer_map = {}
 
@@ -2303,10 +2464,6 @@ def check_pending_autobuys():
                 blockchain_id
             ] = offer
 
-    # --------------------------------------------------------
-    # CONTROLLO OGNI PENDING SALVATO
-    # --------------------------------------------------------
-
     for item in pending:
 
         oid = item.get(
@@ -2321,14 +2478,6 @@ def check_pending_autobuys():
             offer = offer_map.get(
                 norm(oid)
             )
-
-            # ------------------------------------------------
-            # CORREZIONE PRINCIPALE:
-            #
-            # se il pending è nello state ma NON è più
-            # restituito da pendingTokenOffersSent,
-            # non lo teniamo vivo all'infinito.
-            # ------------------------------------------------
 
             if not offer:
 
@@ -2358,10 +2507,6 @@ def check_pending_autobuys():
                 flush=True
             )
 
-            # ------------------------------------------------
-            # STATI TERMINATI
-            # ------------------------------------------------
-
             if status in {
                 "CANCELLED",
                 "REJECTED",
@@ -2376,20 +2521,12 @@ def check_pending_autobuys():
 
                 continue
 
-            # ------------------------------------------------
-            # STATI ACCETTATI / SETTLEMENT
-            # ------------------------------------------------
-
             if status not in {
                 "ACCEPTED",
                 "SETTLEMENT_PUBLISHED"
             }:
 
                 continue
-
-            # ------------------------------------------------
-            # Verifica proprietà delle carte
-            # ------------------------------------------------
 
             ids = [
                 c.get("assetId")
@@ -2425,10 +2562,6 @@ def check_pending_autobuys():
                 )
 
                 continue
-
-            # ------------------------------------------------
-            # Registrazione carte acquistate
-            # ------------------------------------------------
 
             for c in details:
 
@@ -2765,6 +2898,29 @@ def process_swap(o):
     listed = listed_cards(
         give_ids
     )
+
+    # --------------------------------------------------------
+    # IMPORTANTE:
+    #
+    # None = impossibile verificare il mercato.
+    #
+    # NON deve diventare:
+    # "nessuna carta in vendita".
+    #
+    # Lasciamo quindi l'offerta pendente e ritentiamo
+    # al prossimo ciclo.
+    # --------------------------------------------------------
+
+    if listed is None:
+
+        print(
+            "⚠️ SWAP: impossibile verificare "
+            "quali carte sono in vendita. "
+            "Offerta lasciata pendente.",
+            flush=True
+        )
+
+        return
 
     eligible_give = []
 
@@ -3204,6 +3360,13 @@ def worker():
         flush=True
     )
 
+    print(
+        "🔎 MARKET CHECK: "
+        "assetIds filtrati localmente "
+        "dopo liveSingleSaleOffers",
+        flush=True
+    )
+
     # --------------------------------------------------------
     # LOAD STATE
     # --------------------------------------------------------
@@ -3381,7 +3544,10 @@ def home():
                 "activeClub.activeCompetitions",
 
             "pending_cleanup":
-                True
+                True,
+
+            "market_check":
+                "local_asset_filter"
         })
 
 
@@ -3423,7 +3589,10 @@ def health():
                 True,
 
             "pending_cleanup":
-                True
+                True,
+
+            "market_check":
+                "local_asset_filter"
         })
 
 
