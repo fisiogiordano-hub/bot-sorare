@@ -617,26 +617,6 @@
       "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
     }
   ],
-  "pending_autobuys": [
-    {
-      "offer_id": "DirectOffer:83a3df58-ac70-409c-836f-007347d8d80e",
-      "original_offer_id": "directoffer:7e9223af-706a-4858-9af9-bcdd0155cf20",
-      "created_at": 1791111655,
-      "cards": [
-        {
-          "assetId": "0x0400682fbe3a71a094b171a08f82bd3c541575b89d0f95ae0c5d0b10d62d5c17",
-          "slug": "unai-gomez-etxebarria-2024-limited-728",
-          "name": "Unai Gómez 2024-25 • Limited 728/1000"
-        },
-        {
-          "assetId": "0x040074a7afdf9245c42d6933c5206f2e1769da65312ba4fa78aebba7abf0de82",
-          "slug": "valdemar-byskov-andreasen-2025-limited-816",
-          "name": "Valdemar Andreasen 2025-26 • Limited 816/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    }
-  ],
-  "updated_at": 1791111657
+  "pending_autobuys": [],
+  "updated_at": 1791111765
 }
