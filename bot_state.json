@@ -116,7 +116,8 @@
     "directoffer:7e851455-0c4d-4960-ae45-c9dd1d06edae",
     "directoffer:6077e9d7-2fa5-40eb-bec5-90015b63d1a4",
     "directoffer:8fe0370b-1264-4ea6-960a-2563a149e090",
-    "directoffer:34dd3722-bbf0-45ce-9d4c-674f0a6687ee"
+    "directoffer:34dd3722-bbf0-45ce-9d4c-674f0a6687ee",
+    "directoffer:872adcae-6ff1-43e3-aa75-e4b8989f0761"
   ],
   "acquired_cards": [
     {
@@ -633,5 +634,5 @@
     }
   ],
   "pending_autobuys": [],
-  "updated_at": 1791184253
+  "updated_at": 1791203775
 }
