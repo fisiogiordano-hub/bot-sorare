@@ -622,6 +622,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:707cbd01-1533-47f2-971a-3a6f31cca517"
+    },
+    {
+      "assetId": "0x0400069f213c03af4c6364cfa5e66038f3b7b1c7e49a59e2c90e8c9eb0e15ca6",
+      "slug": "sung-hun-kwak-2026-limited-146",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:e0992a0d-6dbe-497c-91c3-cde7e565be98"
     }
   ],
   "pending_autobuys": [
@@ -640,5 +648,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1791184239
+  "updated_at": 1791184251
 }
