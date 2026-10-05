@@ -1495,10 +1495,6 @@ query($first:Int){
         "first": 100
     })
 
-    # --------------------------------------------------------
-    # Query completamente fallita
-    # --------------------------------------------------------
-
     if d is None:
 
         print(
@@ -1508,10 +1504,6 @@ query($first:Int){
         )
 
         return None
-
-    # --------------------------------------------------------
-    # Verifica struttura GraphQL
-    # --------------------------------------------------------
 
     data = (
         d.get("data")
@@ -1568,10 +1560,6 @@ query($first:Int){
         )
 
         return None
-
-    # --------------------------------------------------------
-    # FILTRO LOCALE
-    # --------------------------------------------------------
 
     result = set()
 
@@ -1644,6 +1632,30 @@ def is_kulenovic(c):
 # COVERAGE
 # ============================================================
 
+# IMPORTANTISSIMO:
+#
+# activeClub.activeCompetitions NON equivale alla
+# coverage effettiva di Sorare.
+#
+# Queste competizioni NON devono MAI rendere una
+# carta idonea all'AUTOBUY.
+#
+# Slug verificati dal feed che stai utilizzando:
+#
+#   k-league-2
+#   play-offs-1-2-kr
+#   fa-cup-kr
+#
+# Se una carta appartiene a una di queste competizioni,
+# validate_card() la blocca SEMPRE.
+#
+AUTOBUY_BLOCKED_COMPETITIONS = {
+    "k-league-2",
+    "play-offs-1-2-kr",
+    "fa-cup-kr",
+}
+
+
 def get_active_competitions(c):
 
     player = c.get(
@@ -1685,7 +1697,10 @@ def get_active_competitions(c):
 
             result.append({
                 "slug": slug,
-                "name": name
+                "name": name,
+                "blocked": (
+                    slug in AUTOBUY_BLOCKED_COMPETITIONS
+                )
             })
 
     return result
@@ -1781,7 +1796,7 @@ def validate_card(
         return False
 
     # --------------------------------------------------------
-    # 4. COMPETIZIONE
+    # 4. COMPETIZIONE / COVERAGE SORARE
     # --------------------------------------------------------
 
     competitions = get_active_competitions(c)
@@ -1799,6 +1814,39 @@ def validate_card(
 
         return False
 
+    # --------------------------------------------------------
+    # BLOCCO ESPLICITO COMPETIZIONI NON COPERTE
+    # --------------------------------------------------------
+
+    blocked = [
+        x
+        for x in competitions
+        if x.get("blocked")
+    ]
+
+    if blocked:
+
+        blocked_text = ", ".join(
+            (
+                f"{x['name']} ({x['slug']})"
+                if x["slug"]
+                else x["name"]
+            )
+            for x in blocked
+        )
+
+        if log_reason:
+
+            print(
+                f"🚫 AUTOBUY NON IDONEA: "
+                f"{label} → competizione NON "
+                f"coperta da Sorare: "
+                f"{blocked_text}",
+                flush=True
+            )
+
+        return False
+
     comp_text = ", ".join(
         (
             f"{x['name']} ({x['slug']})"
@@ -1809,7 +1857,7 @@ def validate_card(
     )
 
     print(
-        f"🏟️ COVERAGE: "
+        f"🏟️ COVERAGE SORARE OK: "
         f"{label} → {comp_text}",
         flush=True
     )
@@ -2899,18 +2947,6 @@ def process_swap(o):
         give_ids
     )
 
-    # --------------------------------------------------------
-    # IMPORTANTE:
-    #
-    # None = impossibile verificare il mercato.
-    #
-    # NON deve diventare:
-    # "nessuna carta in vendita".
-    #
-    # Lasciamo quindi l'offerta pendente e ritentiamo
-    # al prossimo ciclo.
-    # --------------------------------------------------------
-
     if listed is None:
 
         print(
@@ -3343,6 +3379,12 @@ def worker():
     print(
         "🔧 COVERAGE: "
         "activeClub.activeCompetitions",
+        flush=True
+    )
+
+    print(
+        "🚫 COVERAGE BLOCCATA: "
+        "K League 2, Play-offs 1/2, Korea Cup",
         flush=True
     )
 
