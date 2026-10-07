@@ -654,7 +654,21 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "SingleBuyOffer:2f4c6e36-5a44-434a-840e-90aeb81374ac",
+      "original_offer_id": "directoffer:f26ef20e-3e41-4c57-a0cc-a93ac2746707",
+      "created_at": 1791376704,
+      "cards": [
+        {
+          "assetId": "0x04004448ae58c5cb3ff1e522464fe7b790e75a6dcc2a1ce2aa92e9e6879ae550",
+          "slug": "borja-sainz-eguskiza-2025-limited-359",
+          "name": "Borja Sainz 2025-26 • Limited 359/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1791376689
+  "updated_at": 1791376704
 }
