@@ -639,6 +639,21 @@
       "offer_id": "SingleBuyOffer:e0992a0d-6dbe-497c-91c3-cde7e565be98"
     }
   ],
-  "pending_autobuys": [],
-  "updated_at": 1791367603
+  "pending_autobuys": [
+    {
+      "offer_id": "SingleBuyOffer:a5766e7b-858c-4fcb-a673-55b295987d2b",
+      "original_offer_id": "directoffer:caa58cf4-3269-4c08-b51b-e5e9cd66ce0b",
+      "created_at": 1791376686,
+      "cards": [
+        {
+          "assetId": "0x0400180b2dc91b1d6bccac534f3b0e66114896002968b1c2a863467f6f681c7a",
+          "slug": "agustin-nahuel-moreira-morales-2026-limited-203",
+          "name": "Agustín Moreira 2026-27 • Limited 203/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
+    }
+  ],
+  "updated_at": 1791376686
 }
