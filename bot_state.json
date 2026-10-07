@@ -647,6 +647,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:a5766e7b-858c-4fcb-a673-55b295987d2b"
+    },
+    {
+      "assetId": "0x04004448ae58c5cb3ff1e522464fe7b790e75a6dcc2a1ce2aa92e9e6879ae550",
+      "slug": "borja-sainz-eguskiza-2025-limited-359",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:2f4c6e36-5a44-434a-840e-90aeb81374ac"
     }
   ],
   "pending_autobuys": [
@@ -665,5 +673,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1791376722
+  "updated_at": 1791376735
 }
