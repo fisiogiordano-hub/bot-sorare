@@ -639,6 +639,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:e0992a0d-6dbe-497c-91c3-cde7e565be98"
+    },
+    {
+      "assetId": "0x0400180b2dc91b1d6bccac534f3b0e66114896002968b1c2a863467f6f681c7a",
+      "slug": "agustin-nahuel-moreira-morales-2026-limited-203",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:a5766e7b-858c-4fcb-a673-55b295987d2b"
     }
   ],
   "pending_autobuys": [
@@ -671,5 +679,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1791376707
+  "updated_at": 1791376720
 }
