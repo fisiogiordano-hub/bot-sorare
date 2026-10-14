@@ -682,7 +682,26 @@
       ],
       "price_per_card": 20,
       "status": "PENDING"
+    },
+    {
+      "offer_id": "DirectOffer:2e5e0a7b-719b-4051-a454-6e62bbb719df",
+      "original_offer_id": "directoffer:4d4f6288-9045-4ae0-877f-a985c2ed946d",
+      "created_at": 1791976392,
+      "cards": [
+        {
+          "assetId": "0x04004d7e095e9861c90acb3a83b8aaf38a6400b67487f948b4e83c1fced9b8a5",
+          "slug": "elias-de-jesus-baez-sotelo-2026-limited-430",
+          "name": "Elías Báez 2026-27 • Limited 430/1000"
+        },
+        {
+          "assetId": "0x0400c2aa4bfb90db4ab7cc83af85ce0470744e6bd1b81a1fa17ecf4299fb4bea",
+          "slug": "emanuel-emegha-2025-limited-572",
+          "name": "Emanuel Emegha 2025-26 • Limited 572/1000"
+        }
+      ],
+      "price_per_card": 20,
+      "status": "PENDING"
     }
   ],
-  "updated_at": 1791976061
+  "updated_at": 1791976392
 }
