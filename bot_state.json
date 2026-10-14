@@ -693,21 +693,6 @@
       "offer_id": "SingleBuyOffer:21ff4b64-fcaa-41f9-8d5f-6ffa3722d274"
     }
   ],
-  "pending_autobuys": [
-    {
-      "offer_id": "SingleBuyOffer:21ff4b64-fcaa-41f9-8d5f-6ffa3722d274",
-      "original_offer_id": "directoffer:9c3a0cb4-3772-46e4-b258-0a9cbb0cb6d3",
-      "created_at": 1791971210,
-      "cards": [
-        {
-          "assetId": "0x04001477bf3c499b5d4c5137e6a87772aea571c8180c391a91e08ce06db4d172",
-          "slug": "louicius-don-deedson-2026-limited-178",
-          "name": "Louicius Deedson 2026-27 • Limited 178/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    }
-  ],
-  "updated_at": 1791976476
+  "pending_autobuys": [],
+  "updated_at": 1791976478
 }
