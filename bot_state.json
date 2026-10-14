@@ -667,6 +667,22 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "SingleBuyOffer:2f4c6e36-5a44-434a-840e-90aeb81374ac"
+    },
+    {
+      "assetId": "0x04004d7e095e9861c90acb3a83b8aaf38a6400b67487f948b4e83c1fced9b8a5",
+      "slug": "elias-de-jesus-baez-sotelo-2026-limited-430",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:2e5e0a7b-719b-4051-a454-6e62bbb719df"
+    },
+    {
+      "assetId": "0x0400c2aa4bfb90db4ab7cc83af85ce0470744e6bd1b81a1fa17ecf4299fb4bea",
+      "slug": "emanuel-emegha-2025-limited-572",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "DirectOffer:2e5e0a7b-719b-4051-a454-6e62bbb719df"
     }
   ],
   "pending_autobuys": [
@@ -704,5 +720,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1791976394
+  "updated_at": 1791976460
 }
