@@ -683,6 +683,14 @@
       "status": "da_vendere",
       "source": "autobuy",
       "offer_id": "DirectOffer:2e5e0a7b-719b-4051-a454-6e62bbb719df"
+    },
+    {
+      "assetId": "0x04001477bf3c499b5d4c5137e6a87772aea571c8180c391a91e08ce06db4d172",
+      "slug": "louicius-don-deedson-2026-limited-178",
+      "purchase_price_cents": 20,
+      "status": "da_vendere",
+      "source": "autobuy",
+      "offer_id": "SingleBuyOffer:21ff4b64-fcaa-41f9-8d5f-6ffa3722d274"
     }
   ],
   "pending_autobuys": [
@@ -701,5 +709,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1791976463
+  "updated_at": 1791976476
 }
