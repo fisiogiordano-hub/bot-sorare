@@ -146,7 +146,8 @@
     "directoffer:6c4a2304-43a6-453b-9f83-b43cbe357733",
     "directoffer:d32da98d-37bf-4872-8bb9-05fb431e8e24",
     "directoffer:aa1a2f59-caf9-4306-9318-dd36066cb90a",
-    "directoffer:369178f1-5296-4df8-b301-1f5478b579fa"
+    "directoffer:369178f1-5296-4df8-b301-1f5478b579fa",
+    "directoffer:68c2e3d7-bfdc-45b8-8373-70030a94e043"
   ],
   "acquired_cards": [
     {
@@ -718,5 +719,5 @@
       "status": "PENDING"
     }
   ],
-  "updated_at": 1792400957
+  "updated_at": 1792400959
 }
