@@ -703,21 +703,6 @@
       "offer_id": "SingleBuyOffer:21ff4b64-fcaa-41f9-8d5f-6ffa3722d274"
     }
   ],
-  "pending_autobuys": [
-    {
-      "offer_id": "SingleBuyOffer:2dbbb535-9381-49eb-96cd-7091e5e2a580",
-      "original_offer_id": "directoffer:68c2e3d7-bfdc-45b8-8373-70030a94e043",
-      "created_at": 1792400957,
-      "cards": [
-        {
-          "assetId": "0x04000fc2f64ecbb7bbef1c3531a906bad8bee3b6e13830f41f9e9d2a6d474c96",
-          "slug": "kenan-jusic-2026-limited-55",
-          "name": "Kenan Jusić 2026-27 • Limited 55/1000"
-        }
-      ],
-      "price_per_card": 20,
-      "status": "PENDING"
-    }
-  ],
-  "updated_at": 1792400959
+  "pending_autobuys": [],
+  "updated_at": 1792401818
 }
