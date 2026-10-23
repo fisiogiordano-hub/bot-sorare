@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -13,15 +14,22 @@ app = Flask(__name__)
 
 
 # ============================================================
-# CONFIG & 2FA LOGIN AUTOMATICO CON DEBUG
+# CONFIG & 2FA LOGIN AUTOMATICO CON SHA-256
 # ============================================================
 
 SORARE_URL = "https://api.sorare.com/graphql"
 STATE_FILE = "bot_state.json"
 
 EMAIL = os.getenv("SORARE_EMAIL", "").strip()
-PASSWORD = os.getenv("SORARE_PASSWORD", "").strip()
+RAW_PASSWORD = os.getenv("SORARE_PASSWORD", "").strip()
 TOTP_SECRET = os.getenv("SORARE_TOTP_SECRET", "").strip()
+
+# Cripta la password in SHA-256 come richiesto dallo schema GraphQL di Sorare
+PASSWORD = (
+    hashlib.sha256(RAW_PASSWORD.encode("utf-8")).hexdigest()
+    if RAW_PASSWORD
+    else ""
+)
 
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 
@@ -136,6 +144,11 @@ def get_fresh_sorare_token():
       return os.getenv("SORARE_JWT_TOKEN", "").strip()
 
     res2 = r2.json()
+    print(
+        f"🔍 Risposta Step 2: {json.dumps(res2, ensure_ascii=False)}",
+        flush=True,
+    )
+
     data_step2 = res2.get("data") or {}
     sign_in_2 = (
         data_step2.get("signIn") if isinstance(data_step2, dict) else {}
