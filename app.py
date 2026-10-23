@@ -13,7 +13,7 @@ app = Flask(__name__)
 
 
 # ============================================================
-# CONFIG & 2FA LOGIN AUTOMATICO SICURO
+# CONFIG & 2FA LOGIN AUTOMATICO CON DEBUG
 # ============================================================
 
 SORARE_URL = "https://api.sorare.com/graphql"
@@ -42,11 +42,17 @@ def get_fresh_sorare_token():
     )
     return os.getenv("SORARE_JWT_TOKEN", "").strip()
 
-  print("🔐 Generazione automatica del token JWT Sorare in corso...", flush=True)
+  print(
+      "🔐 Generazione automatica del token JWT Sorare in corso...",
+      flush=True,
+  )
 
   headers = {
       "Content-Type": "application/json",
-      "User-Agent": "Sorare-Bot/AutoLogin",
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      ),
   }
 
   try:
@@ -67,20 +73,34 @@ def get_fresh_sorare_token():
     r1 = requests.post(
         SORARE_URL, json=payload_step1, headers=headers, timeout=25
     )
+    print(f"📡 Status Step 1: {r1.status_code}", flush=True)
+
     if r1.status_code != 200:
       print(f"❌ Errore HTTP Step 1: {r1.status_code} - {r1.text}", flush=True)
       return os.getenv("SORARE_JWT_TOKEN", "").strip()
 
     res1 = r1.json()
-    if not res1:
-      print("❌ Risposta JSON vuota nello Step 1", flush=True)
+    print(
+        f"🔍 Risposta Step 1: {json.dumps(res1, ensure_ascii=False)}",
+        flush=True,
+    )
+
+    data_step1 = res1.get("data") or {}
+    sign_in_1 = (
+        data_step1.get("signIn") if isinstance(data_step1, dict) else None
+    )
+
+    if not isinstance(sign_in_1, dict):
+      print("❌ Step 1: 'signIn' è None o non è un dizionario.", flush=True)
       return os.getenv("SORARE_JWT_TOKEN", "").strip()
 
-    challenge = (
-        res1.get("data", {}).get("signIn", {}).get("otpSessionChallenge")
-    )
+    challenge = sign_in_1.get("otpSessionChallenge")
     if not challenge:
-      print(f"❌ Impossibile ottenere la sfida 2FA: {res1}", flush=True)
+      print(
+          "❌ Impossibile ottenere la sfida 2FA. Errors:"
+          f" {sign_in_1.get('errors')}",
+          flush=True,
+      )
       return os.getenv("SORARE_JWT_TOKEN", "").strip()
 
     # --- STEP 2: Generare OTP e completare il login ---
@@ -109,23 +129,26 @@ def get_fresh_sorare_token():
     r2 = requests.post(
         SORARE_URL, json=payload_step2, headers=headers, timeout=25
     )
+    print(f"📡 Status Step 2: {r2.status_code}", flush=True)
+
     if r2.status_code != 200:
       print(f"❌ Errore HTTP Step 2: {r2.status_code} - {r2.text}", flush=True)
       return os.getenv("SORARE_JWT_TOKEN", "").strip()
 
     res2 = r2.json()
-    if not res2:
-      print("❌ Risposta JSON vuota nello Step 2", flush=True)
-      return os.getenv("SORARE_JWT_TOKEN", "").strip()
-
-    sign_in_data = res2.get("data", {}).get("signIn", {})
-    errors = sign_in_data.get("errors", [])
+    data_step2 = res2.get("data") or {}
+    sign_in_2 = (
+        data_step2.get("signIn") if isinstance(data_step2, dict) else {}
+    )
+    errors = sign_in_2.get("errors", [])
 
     if errors:
       print(f"❌ Errore Step 2 login Sorare: {errors}", flush=True)
       return os.getenv("SORARE_JWT_TOKEN", "").strip()
 
-    token = sign_in_data.get("jwtToken", {}).get("token")
+    jwt_obj = sign_in_2.get("jwtToken") or {}
+    token = jwt_obj.get("token") if isinstance(jwt_obj, dict) else None
+
     if token:
       print(
           "✅ Nuovo token JWT Sorare generato con successo in automatico!",
@@ -191,24 +214,6 @@ def norm(v):
   return str(v or "").strip().lower()
 
 
-def card_name(c):
-  return c.get("name") or c.get("slug") or "Carta"
-
-
-def card_label(c):
-  n = card_name(c)
-  s = c.get("slug")
-  if s and s != n:
-    return f"{n} [{s}]"
-  return n
-
-
-def format_eur(c):
-  if c is None:
-    return "N/D"
-  return f"€{c / 100:.2f}"
-
-
 def headers():
   if not TOKEN:
     raise RuntimeError("SORARE_JWT_TOKEN non configurato")
@@ -245,7 +250,7 @@ def graphql(query, variables=None):
             flush=True,
         )
       return d
-    except Exception as e:
+    except Exception:
       time.sleep(attempt + 1)
   return None
 
@@ -255,8 +260,7 @@ def load_local_state():
     return
   try:
     with open(STATE_FILE, encoding="utf-8") as f:
-      d = json.load(f)
-      # state load logic
+      json.load(f)
   except Exception:
     pass
 
@@ -295,7 +299,6 @@ def start_worker():
     print("✅ Thread Sorare avviato.", flush=True)
     while True:
       try:
-        # Ciclo principale del bot
         time.sleep(INTERVAL)
       except Exception as e:
         print(f"⚠️ Errore nel worker loop: {e}", flush=True)
