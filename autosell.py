@@ -672,124 +672,52 @@ def auth_headers():
 
     return headers
 
-def gql(
-    query,
-    variables=None
-):
+def gql(query, variables=None):
+    session = requests.Session()
+    session.headers.update(auth_headers())
 
     for attempt in range(3):
-
         try:
-
-            response = requests.post(
-
+            response = session.post(
                 SORARE_URL,
-
-                headers=auth_headers(),
-
                 json={
                     "query": query,
-                    "variables":
-                        variables or {}
+                    "variables": variables or {}
                 },
-
                 timeout=TIMEOUT
             )
 
-            print(
-                f"🌐 Sorare HTTP "
-                f"{response.status_code}",
-                flush=True
-            )
-
-            # ------------------------------------------------
-            # HTTP 429
-            # ------------------------------------------------
+            print(f"🌐 Sorare HTTP {response.status_code}", flush=True)
 
             if response.status_code == 429:
-
-                retry_after = (
-                    response.headers.get(
-                        "Retry-After"
-                    )
-                )
-
+                retry_after = response.headers.get("Retry-After")
                 try:
-                    delay = float(
-                        retry_after
-                    )
+                    delay = float(retry_after)
                 except Exception:
-                    delay = (
-                        2
-                        + attempt * 2
-                    )
+                    delay = 2 + attempt * 2
 
-                delay = max(
-                    1,
-                    min(
-                        delay,
-                        60
-                    )
-                )
-
-                print(
-                    f"⏳ HTTP 429 → "
-                    f"attendo {delay:.1f}s",
-                    flush=True
-                )
-
-                time.sleep(
-                    delay
-                )
-
+                delay = max(1, min(delay, 60))
+                print(f"⏳ HTTP 429 → attendo {delay:.1f}s", flush=True)
+                time.sleep(delay)
                 continue
 
-            # ------------------------------------------------
-            # Altri HTTP error
-            # ------------------------------------------------
-
             if response.status_code != 200:
-
-                print(
-                    f"❌ Sorare: "
-                    f"{response.text[:1500]}",
-                    flush=True
-                )
-
-                time.sleep(
-                    attempt + 1
-                )
-
+                print(f"❌ Sorare: {response.text[:1500]}", flush=True)
+                time.sleep(attempt + 1)
                 continue
 
             data = response.json()
 
             if data.get("errors"):
-
-                print(
-                    "❌ GraphQL:",
-                    json.dumps(
-                        data["errors"],
-                        ensure_ascii=False
-                    )[:3000],
-                    flush=True
-                )
+                print("❌ GraphQL:", json.dumps(data["errors"], ensure_ascii=False)[:3000], flush=True)
 
             return data
 
         except Exception as e:
-
-            print(
-                f"❌ GraphQL: {e}",
-                flush=True
-            )
-
-            time.sleep(
-                attempt + 1
-            )
+            print(f"❌ GraphQL: {e}", flush=True)
+            time.sleep(attempt + 1)
 
     return None
-
 
 # ============================================================
 # ACCOUNT
