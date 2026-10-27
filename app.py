@@ -209,12 +209,11 @@ def headers():
             "SORARE_JWT_TOKEN non configurato"
         )
 
+    # Inviamo il token come cookie di sessione ufficiale di Sorare
+    cookie_value = TOKEN if not TOKEN.lower().startswith("bearer ") else TOKEN.replace("Bearer ", "").strip()
+
     h = {
-        "Authorization": (
-            TOKEN
-            if TOKEN.lower().startswith("bearer ")
-            else "Bearer " + TOKEN
-        ),
+        "Cookie": f"_sorare_session_id={cookie_value}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": f"Sorare-Bot/{BOT_VERSION}"
