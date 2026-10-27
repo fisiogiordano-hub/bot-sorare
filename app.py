@@ -148,33 +148,37 @@ def generate_totp_code(secret):
 def auto_login():
     global TOKEN
     if not EMAIL or not PASSWORD:
+        print("❌ Impossibile eseguire auto_login: EMAIL o PASSWORD mancanti.", flush=True)
         return False
 
-    totp_code = generate_totp_code(TOTP_SECRET)
-    print("🔑 Tentativo di login automatico con credenziali...", flush=True)
-
-    mutation = """
-    mutation SignIn($input: signInInput!) {
-      signIn(input: $input) {
-        currentUser {
-          slug
-        }
-        jwt {
-          token
-        }
-        otpRequired
-      }
-    }
-    """
-    
-    payload = {
-        "email": EMAIL,
-        "password": PASSWORD
-    }
-    if totp_code:
-        payload["otpNumber"] = totp_code
-
     try:
+        totp_code = generate_totp_code(TOTP_SECRET)
+        print("🔑 Tentativo di login automatico con credenziali...", flush=True)
+
+        mutation = """
+        mutation SignIn($input: signInInput!) {
+          signIn(input: $input) {
+            currentUser {
+              slug
+            }
+            jwt {
+              token
+            }
+            otpRequired
+            errors {
+              message
+            }
+          }
+        }
+        """
+        
+        payload = {
+            "email": EMAIL,
+            "password": PASSWORD
+        }
+        if totp_code:
+            payload["otpNumber"] = totp_code
+
         h = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -190,19 +194,33 @@ def auto_login():
             timeout=TIMEOUT
         )
 
+        print(f"🌐 Auto-login HTTP Status: {r.status_code}", flush=True)
+
         if r.status_code == 200:
             res = r.json()
+            if res.get("errors"):
+                print(f"❌ Auto-login GraphQL Errors: {res.get('errors')}", flush=True)
+                return False
+
             data = res.get("data", {}).get("signIn", {})
+            if data.get("errors"):
+                print(f"❌ Auto-login SignIn Errors: {data.get('errors')}", flush=True)
+                return False
+
             new_token = (data.get("jwt") or {}).get("token")
             if new_token:
                 TOKEN = new_token
                 print("✅ Login automatico riuscito! Nuovo JWT Token generato.", flush=True)
                 return True
+            else:
+                print(f"❌ Auto-login fallito, nessun token nella risposta: {res}", flush=True)
+        else:
+            print(f"❌ Auto-login HTTP error text: {r.text[:300]}", flush=True)
+
     except Exception as e:
-        print(f"❌ Errore durante auto_login: {e}", flush=True)
+        print(f"❌ Eccezione catturata in auto_login (nessun crash per Gunicorn): {e}", flush=True)
 
     return False
-
 def headers():
     if not TOKEN:
         if EMAIL and PASSWORD:
