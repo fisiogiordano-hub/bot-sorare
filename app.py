@@ -205,6 +205,10 @@ def auto_login():
 
 def headers():
     if not TOKEN:
+        if EMAIL and PASSWORD:
+            auto_login()
+            
+    if not TOKEN:
         raise RuntimeError(
             "SORARE_JWT_TOKEN non configurato"
         )
@@ -224,7 +228,6 @@ def headers():
         h["JWT-AUD"] = AUD
 
     return h
-
 
 # ============================================================
 # GRAPHQL
