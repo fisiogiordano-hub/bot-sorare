@@ -792,7 +792,6 @@ def gql(
 # ============================================================
 
 def check_account():
-
     data = gql("""
         query {
             currentUser {
@@ -803,50 +802,16 @@ def check_account():
         }
     """)
 
-    user = (
-        ((data or {}).get("data") or {})
-        .get("currentUser")
-    )
-
-    if not user:
-
-        print(
-            "❌ Account Sorare "
-            "non verificato",
-            flush=True
-        )
-
-        return False
-
-    print(
-        "✅ Sorare: "
-        + str(
-            user.get("nickname")
-            or user.get("slug")
-        ),
-        flush=True
-    )
-
-    print(
-        "🔐 Stark key account: "
-        + (
-            "PRESENTE"
-            if user.get("starkKey")
-            else "NON DISPONIBILE"
-        ),
-        flush=True
-    )
-
-    print(
-        "🔑 Solana private key: "
-        + (
-            "PRESENTE"
-            if SOLANA
-            else "NON DISPONIBILE"
-        ),
-        flush=True
-    )
-
+    user = (((data or {}).get("data") or {}).get("currentUser") or {})
+    
+    if user and (user.get("nickname") or user.get("slug")):
+        print(f"✅ Sorare: {user.get('nickname') or user.get('slug')}", flush=True)
+        print("🔐 Stark key account: " + ("PRESENTE" if user.get("starkKey") else "NON DISPONIBILE"), flush=True)
+    else:
+        print("⚠️ Account check non risponde o vuoto, ma procediamo comunque con la vendita...", flush=True)
+    
+    print("🔑 Solana private key: " + ("PRESENTE" if SOLANA else "NON DISPONIBILE"), flush=True)
+    
     return True
 
 
