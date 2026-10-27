@@ -679,7 +679,19 @@ def auth_headers():
     return headers
 def gql(query, variables=None):
     session = requests.Session()
-    session.headers.update(auth_headers())
+    
+    # Otteniamo gli header di base
+    headers = auth_headers()
+    
+    # Estraiamo ed eliminiamo l'header Cookie testuale per metterlo nel cookie jar di requests
+    cookie_str = headers.pop("Cookie", None)
+    if cookie_str and "_sorare_session_id=" in cookie_str:
+        cookie_val = cookie_str.split("_sorare_session_id=")[-1].split(";")[0].strip()
+        # Iniettiamo il cookie nel dominio corretto di Sorare
+        session.cookies.set("_sorare_session_id", cookie_val, domain="sorare.com", path="/")
+        session.cookies.set("_sorare_session_id", cookie_val, domain=".sorare.com", path="/")
+
+    session.headers.update(headers)
 
     for attempt in range(3):
         try:
