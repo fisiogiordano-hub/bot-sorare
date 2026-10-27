@@ -651,32 +651,36 @@ def is_technical_price_error(
 API_KEY = os.getenv("SORARE_API_KEY", "").strip()
 
 def auth_headers():
-    if not TOKEN:
-        raise RuntimeError("SORARE_JWT_TOKEN mancante")
-
-    # Pulizia nel caso in cui l'utente abbia incollato tutto il blocco o il prefisso
-    cookie_value = TOKEN.strip()
-    if cookie_value.lower().startswith("bearer "):
-        cookie_value = cookie_value[7:].strip()
-    
-    # Se per errore è stato incollato l'intero nome del cookie, ripuliamo
-    if "_sorare_session_id=" in cookie_value:
-        cookie_value = cookie_value.split("_sorare_session_id=")[-1].split(";")[0].strip()
-
     headers = {
-        "Cookie": f"_sorare_session_id={cookie_value}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": f"Sorare-AutoSell/{VERSION}"
     }
 
+    # Token o stringa di sessione/servizio
+    if TOKEN:
+        token_clean = TOKEN.strip()
+        if token_clean.lower().startswith("bearer "):
+            token_clean = token_clean[7:].strip()
+        
+        # Se è un cookie o un token di sessione
+        if "_sorare_session_id=" in token_clean:
+            headers["Cookie"] = token_clean
+        elif token_clean.startswith("eyJ"):
+            headers["Authorization"] = f"Bearer {token_clean}"
+        else:
+            # Fallback per stringhe di servizio personalizzate (es. "autosell")
+            headers["Authorization"] = f"Bearer {token_clean}"
+
     if AUD:
         headers["JWT-AUD"] = AUD
         
+    # INIEZIONE FONDAMENTALE DELL'API KEY PER EVITARE IL LIMITE DI COMPLESSITÀ
     if API_KEY:
-        headers["APIKEY"] = API_KEY
+        headers["APIKEY"] = API_KEY.strip()
 
     return headers
+    
 def gql(query, variables=None):
     session = requests.Session()
     
