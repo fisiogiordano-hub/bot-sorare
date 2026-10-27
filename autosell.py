@@ -654,7 +654,14 @@ def auth_headers():
     if not TOKEN:
         raise RuntimeError("SORARE_JWT_TOKEN mancante")
 
-    cookie_value = TOKEN if not TOKEN.lower().startswith("bearer ") else TOKEN.replace("Bearer ", "").strip()
+    # Pulizia nel caso in cui l'utente abbia incollato tutto il blocco o il prefisso
+    cookie_value = TOKEN.strip()
+    if cookie_value.lower().startswith("bearer "):
+        cookie_value = cookie_value[7:].strip()
+    
+    # Se per errore è stato incollato l'intero nome del cookie, ripuliamo
+    if "_sorare_session_id=" in cookie_value:
+        cookie_value = cookie_value.split("_sorare_session_id=")[-1].split(";")[0].strip()
 
     headers = {
         "Cookie": f"_sorare_session_id={cookie_value}",
@@ -666,12 +673,10 @@ def auth_headers():
     if AUD:
         headers["JWT-AUD"] = AUD
         
-    # Passa la chiave API ufficiale nell'intestazione richiesta da Sorare
     if API_KEY:
         headers["APIKEY"] = API_KEY
 
     return headers
-
 def gql(query, variables=None):
     session = requests.Session()
     session.headers.update(auth_headers())
