@@ -648,40 +648,25 @@ def is_technical_price_error(
 # ============================================================
 
 def auth_headers():
-
     if not TOKEN:
-
         raise RuntimeError(
             "SORARE_JWT_TOKEN mancante"
         )
 
+    # Inviamo il token come cookie di sessione ufficiale di Sorare (_sorare_session_id)
+    cookie_value = TOKEN if not TOKEN.lower().startswith("bearer ") else TOKEN.replace("Bearer ", "").strip()
+
     headers = {
-
-        "Authorization": (
-            TOKEN
-            if TOKEN.lower().startswith(
-                "bearer "
-            )
-            else f"Bearer {TOKEN}"
-        ),
-
-        "Content-Type":
-            "application/json",
-
-        "Accept":
-            "application/json",
-
-        "User-Agent":
-            f"Sorare-AutoSell/{VERSION}"
+        "Cookie": f"_sorare_session_id={cookie_value}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": f"Sorare-AutoSell/{VERSION}"
     }
 
     if AUD:
-        headers[
-            "JWT-AUD"
-        ] = AUD
+        headers["JWT-AUD"] = AUD
 
     return headers
-
 
 def gql(
     query,
