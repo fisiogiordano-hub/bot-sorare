@@ -647,13 +647,13 @@ def is_technical_price_error(
 # SORARE GRAPHQL
 # ============================================================
 
+# Aggiungi questa lettura all'inizio del file insieme a TOKEN e AUD se non c'è già:
+API_KEY = os.getenv("SORARE_API_KEY", "").strip()
+
 def auth_headers():
     if not TOKEN:
-        raise RuntimeError(
-            "SORARE_JWT_TOKEN mancante"
-        )
+        raise RuntimeError("SORARE_JWT_TOKEN mancante")
 
-    # Inviamo il token come cookie di sessione ufficiale di Sorare (_sorare_session_id)
     cookie_value = TOKEN if not TOKEN.lower().startswith("bearer ") else TOKEN.replace("Bearer ", "").strip()
 
     headers = {
@@ -665,6 +665,10 @@ def auth_headers():
 
     if AUD:
         headers["JWT-AUD"] = AUD
+        
+    # Passa la chiave API ufficiale nell'intestazione richiesta da Sorare
+    if API_KEY:
+        headers["APIKEY"] = API_KEY
 
     return headers
 
