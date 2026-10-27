@@ -657,25 +657,25 @@ def auth_headers():
         "User-Agent": f"Sorare-AutoSell/{VERSION}"
     }
 
-    # Token o stringa di sessione/servizio
+    # Gestione del token / stringa di sessione senza blocchi sui segmenti
     if TOKEN:
         token_clean = TOKEN.strip()
         if token_clean.lower().startswith("bearer "):
             token_clean = token_clean[7:].strip()
         
-        # Se è un cookie o un token di sessione
-        if "_sorare_session_id=" in token_clean:
-            headers["Cookie"] = token_clean
-        elif token_clean.startswith("eyJ"):
+        # Se è un JWT standard (3 parti), usalo come Bearer o Cookie a seconda dei casi
+        if token_clean.count(".") == 2:
             headers["Authorization"] = f"Bearer {token_clean}"
+        elif "_sorare_session_id=" in token_clean:
+            headers["Cookie"] = token_clean
         else:
-            # Fallback per stringhe di servizio personalizzate (es. "autosell")
+            # Fallback sicuro per stringhe di servizio personalizzate (es. "autosell")
             headers["Authorization"] = f"Bearer {token_clean}"
 
     if AUD:
         headers["JWT-AUD"] = AUD
         
-    # INIEZIONE FONDAMENTALE DELL'API KEY PER EVITARE IL LIMITE DI COMPLESSITÀ
+    # Invio obbligatorio dell'API Key per aggirare il limite di complessità (500 -> 30000)
     if API_KEY:
         headers["APIKEY"] = API_KEY.strip()
 
