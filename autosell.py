@@ -654,28 +654,25 @@ def auth_headers():
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": f"Sorare-AutoSell/{VERSION}"
+        "User-Agent": f"Sorare-AutoSell/{VERSION}",
+        "x-csrf-token": "9oh0JCZVFPzE2Cg3-lqgK23OTjJvFk2oyWDozdKxlir04_WR-amwjik0W0jwmLwZY9FkGLOhNtOkPFy5EGVR-g" # <-- Aggiungi questo
     }
 
-    # Gestione del token / stringa di sessione senza blocchi sui segmenti
     if TOKEN:
         token_clean = TOKEN.strip()
         if token_clean.lower().startswith("bearer "):
             token_clean = token_clean[7:].strip()
         
-        # Se è un JWT standard (3 parti), usalo come Bearer o Cookie a seconda dei casi
         if token_clean.count(".") == 2:
             headers["Authorization"] = f"Bearer {token_clean}"
         elif "_sorare_session_id=" in token_clean:
             headers["Cookie"] = token_clean
         else:
-            # Fallback sicuro per stringhe di servizio personalizzate (es. "autosell")
             headers["Authorization"] = f"Bearer {token_clean}"
 
     if AUD:
         headers["JWT-AUD"] = AUD
         
-    # Invio obbligatorio dell'API Key per aggirare il limite di complessità (500 -> 30000)
     if API_KEY:
         headers["APIKEY"] = API_KEY.strip()
 
@@ -694,7 +691,9 @@ def gql(query, variables=None):
         # Iniettiamo il cookie nel dominio corretto di Sorare
         session.cookies.set("_sorare_session_id", cookie_val, domain="sorare.com", path="/")
         session.cookies.set("_sorare_session_id", cookie_val, domain=".sorare.com", path="/")
-
+    # Aggiungiamo anche il csrftoken preso dagli headers del browser
+        session.cookies.set("csrftoken", "9oh0JCZVFPzE2Cg3-lqgK23OTjJvFk2oyWDozdKxlir04_WR-amwjik0W0jwmLwZY9FkGLOhNtOkPFy5EGVR-g", domain="sorare.com", path="/")
+        session.cookies.set("csrftoken", "9oh0JCZVFPzE2Cg3-lqgK23OTjJvFk2oyWDozdKxlir04_WR-amwjik0W0jwmLwZY9FkGLOhNtOkPFy5EGVR-g", domain=".sorare.com", path="/")
     session.headers.update(headers)
 
     for attempt in range(3):
