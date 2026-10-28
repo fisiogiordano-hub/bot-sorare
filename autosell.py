@@ -1363,56 +1363,45 @@ def get_floor(card):
 # ETH / EUR
 # ============================================================
 
+import time
+
+_cached_eth_rate = None
+_cache_timestamp = 0
+
 def get_eth_eur_rate():
+    global _cached_eth_rate, _cache_timestamp
+    now = time.time()
+    
+    # Se abbiamo un tasso salvato meno di 15 minuti fa, usiamolo per evitare il 429 di CoinGecko
+    if _cached_eth_rate and (now - _cache_timestamp) < 900:
+        return _cached_eth_rate
 
     try:
-
         response = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
-
             params={
                 "ids": "ethereum",
                 "vs_currencies": "eur"
             },
-
             timeout=10
         )
-
         response.raise_for_status()
-
         data = response.json()
+        rate = float(data["ethereum"]["eur"])
 
-        rate = float(
-            data[
-                "ethereum"
-            ][
-                "eur"
-            ]
-        )
-
-        if rate <= 0:
-
-            raise ValueError(
-                "Cambio ETH/EUR non valido"
-            )
-
-        print(
-            f"💱 ETH/EUR → "
-            f"€{rate:.2f}",
-            flush=True
-        )
-
-        return rate
-
+        if rate > 0:
+            _cached_eth_rate = rate
+            _cache_timestamp = now
+            print(f"💱 ETH/EUR aggiornato in live → €{rate:.2f}", flush=True)
+            return rate
     except Exception as e:
+        print(f"⚠️ CoinGecko limitato (429/Errore), uso cache o fallback: {e}", flush=True)
 
-        print(
-            f"❌ Impossibile ottenere "
-            f"ETH/EUR: {e}",
-            flush=True
-        )
-
-        return None
+    # Fallback di emergenza se la richiesta fallisce
+    if _cached_eth_rate:
+        return _cached_eth_rate
+        
+    return 2500.0  # Valore di riserva stimato
 
 
 def eth_to_eur_cents(
