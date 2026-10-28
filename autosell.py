@@ -2704,210 +2704,84 @@ def create_sale(
         return None, None, None
 
     # --------------------------------------------------------
-    # TENTATIVO PREZZO
+    # TENTATIVI TECNICI DINAMICI BASATI SULL'ERRORE DI SORARE
     # --------------------------------------------------------
 
-    print(
-        f"🎯 TENTATIVO → "
-        f"{eur(price)}",
-        flush=True
-    )
+    import re
 
-    offer_id, error, end_date = (
-        create_sale_once(
-            card,
-            price
-        )
-    )
+    max_attempts = 5
+    current_test_price = price
 
-    if offer_id:
-
-        return (
-            offer_id,
-            price,
-            end_date
-        )
-
-    # --------------------------------------------------------
-    # NOT OWNED
-    # --------------------------------------------------------
-
-    if error == "NOT_OWNED":
-
-        return (
-            None,
-            None,
-            "NOT_OWNED"
-        )
-
-    # --------------------------------------------------------
-    # SE NON DOBBIAMO CAMBIARE PREZZO
-    # --------------------------------------------------------
-
-    if not allow_technical_retry:
+    for attempt in range(max_attempts):
 
         print(
-            "⚠️ RINNOVO → "
-            "nessun cambio prezzo consentito",
-            flush=True
-        )
-
-        return (
-            None,
-            None,
-            error
-        )
-
-    # --------------------------------------------------------
-    # SE NON È ERRORE TECNICO
-    # --------------------------------------------------------
-
-    if not is_technical_price_error(
-        error or ""
-    ):
-
-        print(
-            "❌ Vendita fallita "
-            "per errore non legato "
-            "al minimo tecnico.",
-            flush=True
-        )
-
-        return (
-            None,
-            None,
-            error
-        )
-
-    print(
-        "⚠️ PREZZO SOTTO IL MINIMO "
-        "TECNICO SORARE",
-        flush=True
-    )
-
-    # --------------------------------------------------------
-    # CAMBIO ETH/EUR
-    # --------------------------------------------------------
-
-    eth_eur_rate = (
-        get_eth_eur_rate()
-    )
-
-    if eth_eur_rate is None:
-
-        return (
-            None,
-            None,
-            "ETH_EUR_UNAVAILABLE"
-        )
-
-    # --------------------------------------------------------
-    # TENTATIVI TECNICI
-    # --------------------------------------------------------
-
-    technical_eth = (
-        TECHNICAL_START_ETH
-    )
-
-    max_attempts = 1000
-
-    for attempt in range(
-        max_attempts
-    ):
-
-        technical_price = (
-            eth_to_eur_cents(
-                technical_eth,
-                eth_eur_rate
-            )
-        )
-
-        if technical_price is None:
-
-            return (
-                None,
-                None,
-                "ETH_EUR_CONVERSION"
-            )
-
-        # ----------------------------------------------------
-        # IL MINIMO CONFIGURATO DI €0.30
-        # RESTA SEMPRE RISPETTATO
-        # ----------------------------------------------------
-
-        technical_price = max(
-            technical_price,
-            MIN_SELL_PRICE_CENTS
-        )
-
-        print(
-            f"🔁 TENTATIVO MINIMO "
-            f"TECNICO → "
-            f"{technical_eth:.4f} ETH ≈ "
-            f"{eur(technical_price)}",
+            f"🎯 TENTATIVO → "
+            f"{eur(current_test_price)}",
             flush=True
         )
 
         offer_id, error, end_date = (
             create_sale_once(
                 card,
-                technical_price
+                current_test_price
             )
         )
 
         if offer_id:
-
-            print(
-                f"✅ MINIMO TECNICO "
-                f"TROVATO → "
-                f"{technical_eth:.4f} ETH ≈ "
-                f"{eur(technical_price)}",
-                flush=True
-            )
-
             return (
                 offer_id,
-                technical_price,
+                current_test_price,
                 end_date
             )
 
         if error == "NOT_OWNED":
-
             return (
                 None,
                 None,
                 "NOT_OWNED"
             )
 
-        if not is_technical_price_error(
-            error or ""
-        ):
-
+        if not allow_technical_retry:
             print(
-                "❌ Tentativo tecnico "
-                "fallito per errore "
-                "non legato al prezzo.",
+                "⚠️ RINNOVO → "
+                "nessun cambio prezzo consentito",
                 flush=True
             )
-
             return (
                 None,
                 None,
                 error
             )
 
-        technical_eth += (
-            TECHNICAL_STEP_ETH
-        )
+        if not error:
+            return None, None, "UNKNOWN_ERROR"
 
-        technical_eth = round(
-            technical_eth,
-            4
-        )
+        # Cerchiamo nell'errore di Sorare se specifica il prezzo minimo (es. "price must be greater than €0.42")
+        error_string = str(error)
+        match = re.search(r"€\s*([0-9]+\.[0-9]+)", error_string)
+        
+        if match:
+            min_required_eur = float(match.group(1))
+            min_required_cents = round(min_required_eur * 100)
+            
+            print(
+                f"⚠️ Sorare richiede un minimo live di: €{min_required_eur}",
+                flush=True
+            )
+            
+            if current_test_price < min_required_cents:
+                current_test_price = min_required_cents
+            else:
+                current_test_price += 1
+        else:
+            print(
+                "❌ Vendita fallita per errore non legato al minimo tecnico.",
+                flush=True
+            )
+            return None, None, error_string
 
     print(
-        "❌ Raggiunto limite massimo "
-        "dei tentativi tecnici.",
+        "❌ Raggiunto limite massimo dei tentativi tecnici dinamici.",
         flush=True
     )
 
