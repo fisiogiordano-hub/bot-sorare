@@ -1454,7 +1454,7 @@ def is_kulenovic(card):
 
 
 def is_sealed(card):
-    # 1. Controlliamo i campi base se già presenti nel dizionario
+    # 1. Controlliamo i campi locali se già presenti
     rarity = norm(card.get("rarityTyped"))
     name = norm(card.get("name"))
     slug = norm(card.get("slug"))
@@ -1462,7 +1462,7 @@ def is_sealed(card):
     if rarity == "sealed" or "sealed" in name or "sealed" in slug:
         return True
 
-    # 2. Controllo di sicurezza tramite assetId se il dizionario è parziale
+    # 2. Controllo di sicurezza: interroghiamo i dettagli completi tramite assetId
     asset = asset_id(card)
     if asset:
         details = card_details(asset)
@@ -1474,7 +1474,6 @@ def is_sealed(card):
                 return True
 
     return False
-
 def validate(card):
 
     if is_kulenovic(card):
