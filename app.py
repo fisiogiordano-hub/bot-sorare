@@ -204,12 +204,13 @@ def auto_login():
     return False
 
 def headers():
+    global TOKEN
+    # Se il token in memoria è vuoto, proviamo a fare subito l'auto-login
     if not TOKEN:
-        raise RuntimeError(
-            "SORARE_JWT_TOKEN non configurato"
-        )
+        print("⚠️ Token JWT non presente in memoria. Avvio auto-login...", flush=True)
+        if not auto_login():
+            raise RuntimeError("Impossibile autenticarsi: auto-login fallito.")
 
-    # Inviamo il token come cookie di sessione ufficiale di Sorare
     cookie_value = TOKEN if not TOKEN.lower().startswith("bearer ") else TOKEN.replace("Bearer ", "").strip()
 
     h = {
