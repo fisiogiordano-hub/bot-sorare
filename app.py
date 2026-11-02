@@ -3483,6 +3483,16 @@ def worker():
         flush=True
     )
 
+    # ========================================================
+    # AUTO-LOGIN INIZIALE OBBLIGATORIO
+    # ========================================================
+    global TOKEN
+    if not TOKEN:
+        print("🔑 Token JWT non presente. Eseguo l'auto-login iniziale...", flush=True)
+        if not auto_login():
+            print("❌ ERRORE CRITICO: Auto-login fallito all'avvio. Controlla email, password e 2FA.", flush=True)
+            return
+            
     # --------------------------------------------------------
     # LOAD STATE
     # --------------------------------------------------------
