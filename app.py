@@ -171,6 +171,7 @@ def auto_login():
     }
     """
     
+    # In alcune versioni recenti delle API, le credenziali vanno sotto 'credentials' o con campi specifici
     payload = {
         "email": EMAIL,
         "password": PASSWORD
@@ -214,6 +215,7 @@ def auto_login():
         print(f"❌ Errore durante auto_login: {e}", flush=True)
 
     return False
+    
 def headers():
     global TOKEN
     # Se il token in memoria è vuoto, proviamo a fare subito l'auto-login
