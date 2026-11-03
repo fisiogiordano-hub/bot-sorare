@@ -159,10 +159,14 @@ def auto_login():
         currentUser {
           slug
         }
-        jwt {
+        jwtToken(aud: "") {
           token
+          expiredAt
         }
-        otpRequired
+        errors {
+          message
+          code
+        }
       }
     }
     """
@@ -172,7 +176,7 @@ def auto_login():
         "password": PASSWORD
     }
     if totp_code:
-        payload["otpNumber"] = totp_code
+        payload["otpAttempt"] = str(totp_code)
 
     try:
         h = {
@@ -190,10 +194,18 @@ def auto_login():
             timeout=TIMEOUT
         )
 
+        print(f"🌐 Risposta HTTP Login: {r.status_code} - {r.text[:500]}", flush=True)
+
         if r.status_code == 200:
             res = r.json()
             data = res.get("data", {}).get("signIn", {})
-            new_token = (data.get("jwt") or {}).get("token")
+            
+            errors = data.get("errors")
+            if errors:
+                print(f"❌ Errore GraphQL durante il login: {errors}", flush=True)
+                return False
+
+            new_token = (data.get("jwtToken") or {}).get("token")
             if new_token:
                 TOKEN = new_token
                 print("✅ Login automatico riuscito! Nuovo JWT Token generato.", flush=True)
@@ -202,7 +214,6 @@ def auto_login():
         print(f"❌ Errore durante auto_login: {e}", flush=True)
 
     return False
-
 def headers():
     global TOKEN
     # Se il token in memoria è vuoto, proviamo a fare subito l'auto-login
