@@ -3737,11 +3737,8 @@ def health():
 # MAIN
 # ============================================================
 
-
-
-# ============================================================
-# MAIN (per eventuale esecuzione locale)
-# ============================================================
+# Avvia automaticamente il worker in background all'avvio dell'app su Render
+start_worker()
 
 if __name__ == "__main__":
     app.run(
