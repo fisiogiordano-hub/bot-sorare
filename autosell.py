@@ -1,5 +1,6 @@
 import os
 import json
+import urllib.parse
 import time
 import uuid
 import shutil
@@ -2305,19 +2306,23 @@ def prepare_sale(
         flush=True
     )
 
-    # Costruiamo gli header di autenticazione autenticati specifici per le mutazioni
+    # Costruiamo gli header di base
     headers = auth_headers()
     
-    # Assicuriamo la presenza del Cookie di sessione
-    jwt_token = os.getenv("SORARE_JWT_TOKEN", "").strip()
+    # Leggiamo il token e decodifichiamo i caratteri %2B in + reali grazie a urllib.parse.unquote
+    raw_token = os.getenv("SORARE_JWT_TOKEN", "").strip()
+    jwt_token = urllib.parse.unquote(raw_token)
+    
     if jwt_token:
         if not jwt_token.startswith("_sorare_session_id="):
             cookie_val = f"_sorare_session_id={jwt_token}"
         else:
             cookie_val = jwt_token
         headers["Cookie"] = cookie_val
+    else:
+        print("❌ ATTENZIONE: SORARE_JWT_TOKEN è vuoto su Render!", flush=True)
 
-    # Eseguiamo la chiamata fornendo gli header completi di Cookie di sessione
+    # Eseguiamo la chiamata POST a Sorare con il cookie pulito
     try:
         response = requests.post(
             "https://api.sorare.com/graphql",
@@ -2388,10 +2393,11 @@ def prepare_sale(
     print(
         f"✅ Authorization ricevute: "
         f"{len(authorizations)}",
-        flush=True
+        flush=Thread if 'Thread' in globals() else 1
     )
 
     return authorizations
+    
 # ============================================================
 # CREATE SINGLE SALE
 # ============================================================
