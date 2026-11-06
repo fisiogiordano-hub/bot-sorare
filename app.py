@@ -21,12 +21,10 @@ app = Flask(__name__)
 SORARE_URL = "https://api.sorare.com/graphql"
 STATE_FILE = "bot_state.json"
 
-TOKEN = os.getenv("SORARE_JWT_TOKEN", "").strip()
+API_KEY = os.getenv("SORARE_API_KEY", "").strip()
 AUD = os.getenv("SORARE_JWT_AUD", "").strip()
 STARK = os.getenv("SORARE_STARK_PRIVATE_KEY", "").strip()
 EMAIL = os.getenv("SORARE_EMAIL", "").strip()
-PASSWORD = os.getenv("SORARE_PASSWORD", "").strip()
-TOTP_SECRET = os.getenv("SORARE_TOTP_SECRET", "").strip()
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_REPO = os.getenv(
     "GITHUB_REPO",
@@ -133,114 +131,16 @@ def format_eur(c):
 
     return f"€{c / 100:.2f}"
 
-    
-def generate_totp_code(secret):
-    if not secret:
-        return None
-    try:
-        import pyotp
-        totp = pyotp.TOTP(secret.replace(" ", ""))
-        return totp.now()
-    except Exception:
-        return None
 
-
-import pyotp
-
-def auto_login():
-    global TOKEN
-    if not EMAIL or not PASSWORD:
-        print("❌ Email o Password non configurate.", flush=True)
-        return False
-
-    # Genera automaticamente il codice 2FA corrente usando il TOTP_SECRET
-    totp_code = None
-    if TOTP_SECRET:
-        try:
-            totp = pyotp.TOTP(TOTP_SECRET)
-            totp_code = totp.now()
-            print("🔑 Codice 2FA generato automaticamente.", flush=True)
-        except Exception as e:
-            print(f"❌ Errore nella generazione del codice TOTP: {e}", flush=True)
-
-    print("🔑 Tentativo di login automatico con hash protetto, deviceFingerprint e 2FA...", flush=True)
-
-    mutation = """
-    mutation SignIn($input: signInInput!) {
-      signIn(input: $input) {
-        currentUser {
-          slug
-        }
-        jwtToken(aud: "") {
-          token
-          expiredAt
-        }
-        errors {
-          message
-          code
-        }
-      }
-    }
-    """
-    
-    payload = {
-        "email": EMAIL,
-        "password": PASSWORD  # L'hash bcrypt
-    }
-    if totp_code:
-        payload["otpAttempt"] = str(totp_code)
-
-    try:
-        h = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": f"Sorare-Bot/{BOT_VERSION}"
-        }
-        if AUD:
-            h["JWT-AUD"] = AUD
-
-        r = requests.post(
-            SORARE_URL,
-            json={"query": mutation, "variables": {"input": payload}},
-            headers=h,
-            timeout=TIMEOUT
-        )
-
-        print(f"🌐 Risposta HTTP Login: {r.status_code} - {r.text[:500]}", flush=True)
-
-        if r.status_code == 200:
-            res = r.json()
-            data = res.get("data", {}).get("signIn", {})
-            
-            errors = data.get("errors")
-            if errors:
-                print(f"❌ Errore GraphQL durante il login: {errors}", flush=True)
-                return False
-
-            new_token = (data.get("jwtToken") or {}).get("token")
-            if new_token:
-                TOKEN = new_token
-                print("✅ Login automatico riuscito! Nuovo JWT Token generato.", flush=True)
-                return True
-    except Exception as e:
-        print(f"❌ Errore durante auto_login: {e}", flush=True)
-
-    return False
-    
 def headers():
-    global TOKEN
-    # Se il token in memoria è vuoto, proviamo a fare subito l'auto-login
-    if not TOKEN:
-        print("⚠️ Token JWT non presente in memoria. Avvio auto-login...", flush=True)
-        if not auto_login():
-            raise RuntimeError("Impossibile autenticarsi: auto-login fallito.")
-
-    cookie_value = TOKEN if not TOKEN.lower().startswith("bearer ") else TOKEN.replace("Bearer ", "").strip()
+    if not API_KEY:
+        print("❌ ERRORE CRITICO: SORARE_API_KEY non configurata nelle variabili d'ambiente!", flush=True)
+        raise RuntimeError("Impossibile autenticarsi: API Key mancante.")
 
     h = {
-        "Cookie": f"_sorare_session_id={cookie_value}",
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "APIKEY": API_KEY,  # <--- Autenticazione basata su API Key ufficiale[cite: 1]
         "User-Agent": f"Sorare-Bot/{BOT_VERSION}"
     }
 
@@ -335,12 +235,6 @@ def graphql(query, variables=None):
                     err_msg[:5000],
                     flush=True
                 )
-
-                if "UNAUTHORIZED" in err_msg or "revoked token" in err_msg:
-                    if EMAIL and PASSWORD and attempt == 0:
-                        print("🔄 Token revocato. Tento il rinnovo automatico con credenziali...", flush=True)
-                        if auto_login():
-                            continue
 
             return d
 
