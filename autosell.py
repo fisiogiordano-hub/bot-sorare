@@ -643,14 +643,30 @@ def is_technical_price_error(
 # ============================================================
 
 def auth_headers():
+    api_key = os.getenv("SORARE_API_KEY", "").strip()
+    jwt_token = os.getenv("SORARE_JWT_TOKEN", "").strip()
+    jwt_aud = os.getenv("SORARE_JWT_AUD", "autosell").strip()
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": f"Sorare-AutoSell/{VERSION}"
     }
 
-    if API_KEY:
-        headers["APIKEY"] = API_KEY.strip()
+    # Inserisce l'API Key per le letture e query ad alta complessità
+    if api_key:
+        headers["APIKEY"] = api_key
+
+    # Inserisce il cookie di sessione e l'audience per le scritture (prepareOffer)
+    if jwt_token:
+        if not jwt_token.startswith("_sorare_session_id="):
+            cookie_val = f"_sorare_session_id={jwt_token}"
+        else:
+            cookie_val = jwt_token
+            
+        headers["Cookie"] = cookie_val
+        if jwt_aud:
+            headers["JWT-AUD"] = jwt_aud
 
     return headers
     
