@@ -145,13 +145,25 @@ def generate_totp_code(secret):
         return None
 
 
+import pyotp
+
 def auto_login():
     global TOKEN
     if not EMAIL or not PASSWORD:
+        print("❌ Email o Password non configurate.", flush=True)
         return False
 
-    totp_code = generate_totp_code(TOTP_SECRET)
-    print("🔑 Tentativo di login automatico con credenziali...", flush=True)
+    # Genera automaticamente il codice 2FA corrente usando il TOTP_SECRET
+    totp_code = None
+    if TOTP_SECRET:
+        try:
+            totp = pyotp.TOTP(TOTP_SECRET)
+            totp_code = totp.now()
+            print("🔑 Codice 2FA generato automaticamente.", flush=True)
+        except Exception as e:
+            print(f"❌ Errore nella generazione del codice TOTP: {e}", flush=True)
+
+    print("🔑 Tentativo di login automatico con hash protetto, deviceFingerprint e 2FA...", flush=True)
 
     mutation = """
     mutation SignIn($input: signInInput!) {
@@ -171,10 +183,10 @@ def auto_login():
     }
     """
     
-    # In alcune versioni recenti delle API, le credenziali vanno sotto 'credentials' o con campi specifici
     payload = {
         "email": EMAIL,
-        "password": PASSWORD
+        "password": PASSWORD,  # L'hash bcrypt estratto ($2a$11$...)
+        "deviceFingerprint": "d5d24e7efa2b0035af619b48b5ed9da8,4c025752ad094529341ad483531d967b"
     }
     if totp_code:
         payload["otpAttempt"] = str(totp_code)
