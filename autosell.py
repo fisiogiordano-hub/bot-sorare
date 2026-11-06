@@ -2305,13 +2305,33 @@ def prepare_sale(
         flush=True
     )
 
-    data = gql(
-        PREPARE_QUERY,
-        {
-            "input":
-                input_data
-        }
-    )
+    # Costruiamo gli header di autenticazione autenticati specifici per le mutazioni
+    headers = auth_headers()
+    
+    # Assicuriamo la presenza del Cookie di sessione
+    jwt_token = os.getenv("SORARE_JWT_TOKEN", "").strip()
+    if jwt_token:
+        if not jwt_token.startswith("_sorare_session_id="):
+            cookie_val = f"_sorare_session_id={jwt_token}"
+        else:
+            cookie_val = jwt_token
+        headers["Cookie"] = cookie_val
+
+    # Eseguiamo la chiamata fornendo gli header completi di Cookie di sessione
+    try:
+        response = requests.post(
+            "https://api.sorare.com/graphql",
+            json={"query": PREPARE_QUERY, "variables": {"input": input_data}},
+            headers=headers
+        )
+        data = response.json()
+    except Exception as e:
+        print(f"❌ Errore HTTP prepareOffer: {e}", flush=True)
+        return None
+
+    # Gestione eventuali errori GraphQL restituiti
+    if "errors" in data and data["errors"]:
+        print(f"❌ GraphQL: {json.dumps(data['errors'], ensure_ascii=False)}", flush=True)
 
     result = (
         ((data or {}).get("data") or {})
@@ -2372,8 +2392,6 @@ def prepare_sale(
     )
 
     return authorizations
-
-
 # ============================================================
 # CREATE SINGLE SALE
 # ============================================================
