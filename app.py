@@ -185,8 +185,7 @@ def auto_login():
     
     payload = {
         "email": EMAIL,
-        "password": PASSWORD,  # L'hash bcrypt estratto ($2a$11$...)
-        "deviceFingerprint": "d5d24e7efa2b0035af619b48b5ed9da8,4c025752ad094529341ad483531d967b"
+        "password": PASSWORD  # L'hash bcrypt
     }
     if totp_code:
         payload["otpAttempt"] = str(totp_code)
