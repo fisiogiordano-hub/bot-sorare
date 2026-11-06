@@ -16,13 +16,8 @@ app = Flask(__name__)
 
 SORARE_URL = "https://api.sorare.com/graphql"
 
-TOKEN = os.getenv(
-    "SORARE_JWT_TOKEN",
-    ""
-).strip()
-
-AUD = os.getenv(
-    "SORARE_JWT_AUD",
+API_KEY = os.getenv(
+    "SORARE_API_KEY",
     ""
 ).strip()
 
@@ -647,32 +642,13 @@ def is_technical_price_error(
 # SORARE GRAPHQL
 # ============================================================
 
-# Aggiungi questa lettura all'inizio del file insieme a TOKEN e AUD se non c'è già:
-API_KEY = os.getenv("SORARE_API_KEY", "").strip()
-
 def auth_headers():
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": f"Sorare-AutoSell/{VERSION}",
-        "x-csrf-token": "9oh0JCZVFPzE2Cg3-lqgK23OTjJvFk2oyWDozdKxlir04_WR-amwjik0W0jwmLwZY9FkGLOhNtOkPFy5EGVR-g" # <-- Aggiungi questo
+        "User-Agent": f"Sorare-AutoSell/{VERSION}"
     }
 
-    if TOKEN:
-        token_clean = TOKEN.strip()
-        if token_clean.lower().startswith("bearer "):
-            token_clean = token_clean[7:].strip()
-        
-        if token_clean.count(".") == 2:
-            headers["Authorization"] = f"Bearer {token_clean}"
-        elif "_sorare_session_id=" in token_clean:
-            headers["Cookie"] = token_clean
-        else:
-            headers["Authorization"] = f"Bearer {token_clean}"
-
-    if AUD:
-        headers["JWT-AUD"] = AUD
-        
     if API_KEY:
         headers["APIKEY"] = API_KEY.strip()
 
@@ -681,19 +657,7 @@ def auth_headers():
 def gql(query, variables=None):
     session = requests.Session()
     
-    # Otteniamo gli header di base
     headers = auth_headers()
-    
-    # Estraiamo ed eliminiamo l'header Cookie testuale per metterlo nel cookie jar di requests
-    cookie_str = headers.pop("Cookie", None)
-    if cookie_str and "_sorare_session_id=" in cookie_str:
-        cookie_val = cookie_str.split("_sorare_session_id=")[-1].split(";")[0].strip()
-        # Iniettiamo il cookie nel dominio corretto di Sorare
-        session.cookies.set("_sorare_session_id", cookie_val, domain="sorare.com", path="/")
-        session.cookies.set("_sorare_session_id", cookie_val, domain=".sorare.com", path="/")
-    # Aggiungiamo anche il csrftoken preso dagli headers del browser
-        session.cookies.set("csrftoken", "9oh0JCZVFPzE2Cg3-lqgK23OTjJvFk2oyWDozdKxlir04_WR-amwjik0W0jwmLwZY9FkGLOhNtOkPFy5EGVR-g", domain="sorare.com", path="/")
-        session.cookies.set("csrftoken", "9oh0JCZVFPzE2Cg3-lqgK23OTjJvFk2oyWDozdKxlir04_WR-amwjik0W0jwmLwZY9FkGLOhNtOkPFy5EGVR-g", domain=".sorare.com", path="/")
     session.headers.update(headers)
 
     for attempt in range(3):
