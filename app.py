@@ -2306,6 +2306,22 @@ mutation($input:createDirectOfferInput!){
 # AUTOBUY
 # ============================================================
 
+# ============================================================
+# PROCESS OFFER ROUTER
+# ============================================================
+
+def process_offer(o):
+    # Controlla se è un'offerta di AutoBuy (richiede Kulenovic)
+    wanted = (
+        (o.get("receiverSide") or {})
+        .get("anyCards") or []
+    )
+    
+    if any(is_kulenovic(c) for c in wanted):
+        process_autobuy(o)
+    else:
+        process_swap(o)
+
 def process_autobuy(o):
 
     oid = norm(
